@@ -1,0 +1,75 @@
+# wist-gateway-stack — 网关控制台 + 数据平台(WarpParse) + 观测 一站式编排
+#
+# 端口约定（宿主:容器）：
+#   gateway          3000          控制面后端（HTTPS，wist-gateway-web 的 /api 目标）
+#   web              8443:80       前端入口（静态托管 + /api 反代）
+#   victoria-metrics 18429:8428    指标（与 wist-gateway 默认 victoria_metrics_url 对齐）
+#   wparse           无对外端口    数据面（ELT，接 source/sink）
+
+services:
+  # ── 观测：指标 ──
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.133.0
+    restart: unless-stopped
+    ports:
+      - "18429:8428"
+    volumes:
+      - metrics_data:/storage
+    command:
+      - --envflag.enable
+      - --envflag.prefix=VM_
+      - --loggerFormat=json
+      - --retentionPeriod=${RETENTION_PERIOD:-6}
+      - --storageDataPath=/storage
+      - --search.latencyOffset=0s
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── 数据平台：WarpParse（ELT 引擎）──
+  wparse:
+    image: ghcr.io/wp-labs/warp-parse:latest
+    restart: unless-stopped
+    command: ["daemon", "--work-root", "/wparse"]
+    environment:
+      WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
+    volumes:
+      - ./sysrun/data-plane:/wparse
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+
+  # ── 控制面后端 ──
+  gateway:
+    # 发布态用镜像（release 流水线产出并推送）；本地零配置联调可改用 bootstrap 镜像
+    image: ghcr.io/dayu-sec/wist-gateway:latest
+    restart: unless-stopped
+    environment:
+      WIST_GATEWAY_CONFIG: /config/wist-gateway.toml
+    volumes:
+      - ./configs/gateway:/config
+    ports:
+      - "3000:3000"
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+
+  # ── 前端 ──
+  web:
+    image: ghcr.io/dayu-sec/wist-gateway-web:latest
+    restart: unless-stopped
+    volumes:
+      - ./configs/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8443:80"
+    depends_on:
+      - gateway
+
+volumes:
+  metrics_data:
+    driver: local

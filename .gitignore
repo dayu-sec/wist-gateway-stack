@@ -1,0 +1,14 @@
+# 运行时状态 / 本地数据
+.run/
+
+# 数据面（wparse 工程 + 运行时数据，体量大）
+sysrun/data-plane/
+
+# 本地二进制
+sysrun/bin/
+
+# 网关运行时配置/密钥（由 init-gateway.sh 生成，含 admin token / TLS 密钥 / 签名密钥 / store）
+configs/gateway/
+
+# macOS
+.DS_Store

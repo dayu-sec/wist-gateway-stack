@@ -11,8 +11,10 @@ mod main   : ver_adm {
   flow _entry : ver.use {
   }
 
+/*
 #[auto_load(exit)]
-  flow _set_ver | ver.syn_file {
+flow _set_ver | ver.syn_file {
     SYN_FILE= "${ENV_ROOT}/.github/workflows/release.yml";
   }
+  */
 }

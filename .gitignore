@@ -13,3 +13,4 @@ configs/gateway/
 
 # macOS
 .DS_Store
+.report

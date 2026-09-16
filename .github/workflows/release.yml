@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # 打包：以 docker-compose.yml 为核心的部署包（含 sysrun/ 开发态脚本与数据面配置）。
+  # 用 git archive 出包，只收 git 跟踪的内容 —— sysrun/bin/（约 92M 本地二进制）与
+  # sysrun/data-plane/{data,.run}/（体量巨大）在 .gitignore 里，天然不入包。
+  package:
+    name: Package deployment bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build tarball
+        run: |
+          set -eu
+          bundle="wist-gateway-stack-${GITHUB_REF_NAME}"
+          git archive \
+            --format=tar \
+            --prefix="${bundle}/" \
+            HEAD docker-compose.yml sysrun > "${bundle}.tar"
+          gzip -9 "${bundle}.tar"
+          echo "包内文件数：$(tar -tzf "${bundle}.tar.gz" | wc -l)"
+          ls -lh "${bundle}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wist-gateway-stack
+          path: wist-gateway-stack-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # 发布到 GitHub Release，供中心作为版本制品下载。
+  release:
+    needs: [package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: wist-gateway-stack
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*.tar.gz

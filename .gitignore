@@ -2,7 +2,8 @@
 .run/
 
 # 数据面（wparse 工程 + 运行时数据，体量大）
-sysrun/data-plane/
+sysrun/data-plane/.run
+sysrun/data-plane/data
 
 # 本地二进制
 sysrun/bin/

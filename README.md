@@ -15,10 +15,12 @@
 
 | 服务 | 作用 | 端口（宿主:容器） | 镜像来源 |
 |---|---|---|---|
-| `gateway` | 控制面后端（HTTPS API，rustls） | `3000:3000` | `ghcr.io/dayu-sec/wist-gateway` |
-| `web` | 前端入口（nginx，静态 + `/api` 反代） | `8443:80` | `ghcr.io/dayu-sec/wist-gateway-web` |
+| `gateway` | 控制面后端（HTTPS API，rustls） | `3000:3000` | `dy-sec.tencentcloudcr.com/cloud/wist-gateway` |
+| `web` | 前端入口（nginx，静态 + `/api` 反代） | `8443:80` | `dy-sec.tencentcloudcr.com/cloud/wist-gateway-web` |
 | `wparse` | 数据平台 ELT 引擎 | 无对外端口 | `ghcr.io/wp-labs/warp-parse` |
 | `victoria-metrics` | 指标存储 | `18429:8428` | `victoriametrics/victoria-metrics` |
+
+> **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 默认用 TCR；境外部署把 `image:` 换回 ghcr 那套即可。
 
 只接 `victoria-metrics`，不接 `victoria-logs`、`wp-monitor`。
 

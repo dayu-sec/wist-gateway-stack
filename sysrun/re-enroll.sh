@@ -52,7 +52,7 @@ fi
 echo "== 1. 签发新 enrollment token =="
 ENROLL_TOKEN="$(curl -sk -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   "${GW_URL%/}/api/v1/agent/install-code" \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin)["install_code"]["bootstrap_enrollment_token"])')"
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["bootstrap_enrollment_token"])')"
 if [[ -z "${ENROLL_TOKEN}" ]]; then
   echo "签发 enrollment token 失败（检查 gateway 是否在跑、admin token 是否正确）" >&2
   exit 1

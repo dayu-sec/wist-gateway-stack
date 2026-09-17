@@ -164,7 +164,7 @@ SKIP_WEB=1 ./sysrun/start.sh     # 只要后端
 ```bash
 wist-gateway-stack-<tag>.tar.gz
   docker-compose.yml          # tar 内容平铺（不带顶层目录）
-  sys/ + sys-prj.yml          # gops 系统定义（系统变量、sys_model）
+  sys/ + sys-prj.yml          # gops 系统定义（sys_model、setting/vars.yml、resolved_vars.yml）
   sysrun/                     # 脚本 + data-plane 工程（conf/connectors/models/topology）
   _gal/                       # gx 工作流
   version.txt
@@ -172,8 +172,10 @@ wist-gateway-stack-<tag>.tar.gz
 ```
 
 > 包内**不要加顶层目录前缀**：`gops` 解包时会自建同名目录（`~/ds-package/<包名>/`），包内再套一层会导致 `prj import` 找不到 `sys/sys_model.yml`。
+>
+> 包里的变量解析产物（`prj import` 缺了会报“系统变量未解析”）：新版是 `sys/merged_vars.yml` —— gops 文档标注它**需入库**，所以它随仓库进包；**改了 `sys/setting/vars.yml` 后要本地跑一次 `gops sys update` 并提交它**，否则包里带的是旧值。旧名 `sys/resolved_vars.yml` 是生成物，workflow 会拉 galaxy-ops 的 gops（公开 release，pin 在 `v1.2.0-alpha`）跑 `gops sys update`，存在就兜底追加进包。
 
-用 `git archive` 出包，只收 git 跟踪的内容 —— `sysrun/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`sys/resolved_vars.yml`、`values/`）都没入 git，天然不入包。
+用 `git archive` 出包，只收 git 跟踪的内容 —— `sysrun/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 
 包里**不含 `configs/`**：`configs/gateway/` 要在目标机现场生成（见「发布态 A/B」），`configs/web/nginx.conf` 也要自己准备。也就是说下载解压后还差这一步初始化。
 

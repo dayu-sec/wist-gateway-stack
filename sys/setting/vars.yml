@@ -16,9 +16,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: latest
+    value: v0.1.1-alpha.1
   - name: WEB_TAG
-    value: latest
+    value: v0.1.4-alpha
   - name: VM_TAG
     value: v1.133.0
   - name: WPARSE_TAG

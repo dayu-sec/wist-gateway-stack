@@ -1,0 +1,27 @@
+system:
+- name: IMAGE_SPC
+  value: ghcr.io/dayu-sec
+- name: GATEWAY_TAG
+  value: v0.1.1-alpha.1
+- name: WEB_TAG
+  value: v0.1.4-alpha
+- name: VM_TAG
+  value: v1.133.0
+- name: WPARSE_TAG
+  value: latest
+- name: GATEWAY_PORT
+  value: 3000
+- name: WEB_PORT
+  value: 8443
+- name: VM_PORT
+  value: 18429
+- name: RETENTION_PERIOD
+  value: 6
+- name: TZ
+  value: Asia/Shanghai
+- name: GATEWAY_CONFIG_DIR
+  value: ./configs/gateway
+- name: WEB_NGINX_CONF
+  value: ./configs/web/nginx.conf
+- name: WPARSE_WORK_DIR
+  value: ./sysrun/data-plane

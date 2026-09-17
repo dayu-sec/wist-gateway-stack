@@ -163,14 +163,15 @@ SKIP_WEB=1 ./sysrun/start.sh     # 只要后端
 
 ```bash
 wist-gateway-stack-<tag>.tar.gz
-wist-gateway-stack-<tag>/
-  ├── docker-compose.yml
-  ├── sys/ + sys-prj.yml      # gops 系统定义（系统变量、sys_model）
-  ├── sysrun/                 # 脚本 + data-plane 工程（conf/connectors/models/topology）
-  ├── _gal/                   # gx 工作流
-  ├── version.txt
-  └── README.md / .gitignore
+  docker-compose.yml          # tar 内容平铺（不带顶层目录）
+  sys/ + sys-prj.yml          # gops 系统定义（系统变量、sys_model）
+  sysrun/                     # 脚本 + data-plane 工程（conf/connectors/models/topology）
+  _gal/                       # gx 工作流
+  version.txt
+  README.md / .gitignore
 ```
+
+> 包内**不要加顶层目录前缀**：`gops` 解包时会自建同名目录（`~/ds-package/<包名>/`），包内再套一层会导致 `prj import` 找不到 `sys/sys_model.yml`。
 
 用 `git archive` 出包，只收 git 跟踪的内容 —— `sysrun/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`sys/resolved_vars.yml`、`values/`）都没入 git，天然不入包。
 

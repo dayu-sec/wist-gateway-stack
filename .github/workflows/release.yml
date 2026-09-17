@@ -22,9 +22,10 @@ jobs:
         run: |
           set -eu
           bundle="wist-gateway-stack-${GITHUB_REF_NAME}"
+          # 注意：**不要**加 --prefix —— gops 解包时会自建同名目录（~/ds-package/<包名>/），
+          # 包内再套一层会导致 prj import 找不到 sys/sys_model.yml。
           git archive \
             --format=tar \
-            --prefix="${bundle}/" \
             HEAD -- . ':(exclude).github' > "${bundle}.tar"
           gzip -9 "${bundle}.tar"
           echo "包内文件数：$(tar -tzf "${bundle}.tar.gz" | wc -l)"

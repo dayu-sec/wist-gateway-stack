@@ -1,0 +1,47 @@
+# 系统级变量定义（system 段，仅非密钥配置）
+#
+# 这里的变量随环境/客户变化；`gops sys update` 解析出 sys/resolved_vars.yml，
+# `gops sys localize` 再合并 values/value.yml（客户覆盖）导出为同目录 `.env`，
+# 供 docker-compose.yml 里的 `${VAR}` 消费。
+#
+# 说明：
+#   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
+#   - 密钥不要写在这里：compose 里用 ${SEC_xxx} 占位，运行时由 `gops sys start`
+#     从 ~/.galaxy/sec_value.yml 注入，不落盘（本栈当前无密钥）；
+#   - 容器内端口/路径/服务名是应用契约，直接写在 docker-compose.yml 里。
+system:
+  # 镜像源前缀：国内走腾讯云 TCR，境外改成 ghcr.io/dayu-sec
+  - name: IMAGE_SPC
+    value: ghcr.io/dayu-sec
+
+  # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
+  - name: GATEWAY_TAG
+    value: latest
+  - name: WEB_TAG
+    value: latest
+  - name: VM_TAG
+    value: v1.133.0
+  - name: WPARSE_TAG
+    value: latest
+
+  # 宿主端口（容器内端口是应用契约，写在 compose 里）
+  - name: GATEWAY_PORT
+    value: 3000
+  - name: WEB_PORT
+    value: 8443
+  - name: VM_PORT
+    value: 18429
+
+  # 指标保留期（月）与时区
+  - name: RETENTION_PERIOD
+    value: 6
+  - name: TZ
+    value: Asia/Shanghai
+
+  # 挂载源路径（按部署环境摆放）
+  - name: GATEWAY_CONFIG_DIR
+    value: ./configs/gateway
+  - name: WEB_NGINX_CONF
+    value: ./configs/web/nginx.conf
+  - name: WPARSE_WORK_DIR
+    value: ./sysrun/data-plane

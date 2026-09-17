@@ -1,29 +1,37 @@
 # wist-gateway-stack — 网关控制台 + 数据平台(WarpParse) + 观测 一站式编排
 #
-# 端口约定（宿主:容器）：
-#   gateway          3000          控制面后端（HTTPS，wist-gateway-web 的 /api 目标）
+# 端口约定（宿主:容器；宿主端口的值见 sys/setting/vars.yml）：
+#   gateway          3000:3000     控制面后端（HTTPS，wist-gateway-web 的 /api 目标）
 #   web              8443:80       前端入口（静态托管 + /api 反代）
 #   victoria-metrics 18429:8428    指标（与 wist-gateway 默认 victoria_metrics_url 对齐）
 #   wparse           无对外端口    数据面（ELT，接 source/sink）
+#
+# 值来源（gops 系统约定）：
+#   - 随环境/客户变化的量（镜像源与 tag、宿主端口、保留期、时区、挂载路径）统一用
+#     Compose 原生 `${VAR}` 占位，定义在 sys/setting/vars.yml；
+#     `gops sys update` → sys/resolved_vars.yml，`gops sys localize` → 同目录 .env。
+#     客户覆盖写 values/value.yml（该文件版本化），不要改生成物。
+#   - 容器内端口/路径/服务名是应用契约，直接写在这里。
+#   - 本栈当前无密钥；如需，用 ${SEC_xxx} 占位，由 `gops sys start` 注入、不落盘。
 
 services:
   # ── 观测：指标 ──
   victoria-metrics:
-    image: victoriametrics/victoria-metrics:v1.133.0
+    image: victoriametrics/victoria-metrics:${VM_TAG}
     restart: unless-stopped
     ports:
-      - "18429:8428"
+      - "${VM_PORT}:8428"
     volumes:
       - metrics_data:/storage
     command:
       - --envflag.enable
       - --envflag.prefix=VM_
       - --loggerFormat=json
-      - --retentionPeriod=${RETENTION_PERIOD:-6}
+      - --retentionPeriod=${RETENTION_PERIOD}
       - --storageDataPath=/storage
       - --search.latencyOffset=0s
     environment:
-      - TZ=Asia/Shanghai
+      - TZ=${TZ}
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8428/health"]
       interval: 30s
@@ -33,42 +41,40 @@ services:
 
   # ── 数据平台：WarpParse（ELT 引擎）──
   wparse:
-    image: ghcr.io/wp-labs/warp-parse:latest
+    image: ghcr.io/wp-labs/warp-parse:${WPARSE_TAG}
     restart: unless-stopped
     command: ["daemon", "--work-root", "/wparse"]
     environment:
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
     volumes:
-      - ./sysrun/data-plane:/wparse
+      - ${WPARSE_WORK_DIR}:/wparse
     depends_on:
       victoria-metrics:
         condition: service_healthy
 
   # ── 控制面后端 ──
   gateway:
-    # 发布态用镜像（release 流水线双推 ghcr + 腾讯云 TCR）；本地零配置联调可改用 bootstrap 镜像。
-    # 国内部署用 TCR（默认）；境外部署换回 ghcr.io/dayu-sec/wist-gateway:latest。
-    image: dy-sec.tencentcloudcr.com/cloud/wist-gateway:latest
+    # 本地零配置联调可换成 bootstrap 镜像（image 改成 wist-gateway:bootstrap）
+    image: ${IMAGE_SPC}/wist-gateway:${GATEWAY_TAG}
     restart: unless-stopped
     environment:
       WIST_GATEWAY_CONFIG: /config/wist-gateway.toml
     volumes:
-      - ./configs/gateway:/config
+      - ${GATEWAY_CONFIG_DIR}:/config
     ports:
-      - "3000:3000"
+      - "${GATEWAY_PORT}:3000"
     depends_on:
       victoria-metrics:
         condition: service_healthy
 
   # ── 前端 ──
   web:
-    # 同上：国内默认 TCR，境外可换回 ghcr.io/dayu-sec/wist-gateway-web:latest
-    image: dy-sec.tencentcloudcr.com/cloud/wist-gateway-web:latest
+    image: ${IMAGE_SPC}/wist-gateway-web:${WEB_TAG}
     restart: unless-stopped
     volumes:
-      - ./configs/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${WEB_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "8443:80"
+      - "${WEB_PORT}:80"
     depends_on:
       - gateway
 

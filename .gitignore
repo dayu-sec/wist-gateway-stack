@@ -11,6 +11,15 @@ sysrun/bin/
 # 网关运行时配置/密钥（由 init-gateway.sh 生成，含 admin token / TLS 密钥 / 签名密钥 / store）
 configs/gateway/
 
+# ===== gops 生成物 =====
+# 变量解析结果（gops sys update / package 生成）
+sys/resolved_vars.yml
+# 值文件：忽略派生的值文件，保留客户覆盖 values/value.yml（版本化）
+values/*
+!values/value.yml
+# .env 由 gops sys localize 生成（非密钥配置；密钥走 ${SEC_xxx} 不落盘）
+.env
+
 # macOS
 .DS_Store
 .report

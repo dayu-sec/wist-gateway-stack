@@ -173,7 +173,7 @@ wist-gateway-stack-<tag>.tar.gz
 
 > 包内**不要加顶层目录前缀**：`gops` 解包时会自建同名目录（`~/ds-package/<包名>/`），包内再套一层会导致 `prj import` 找不到 `sys/sys_model.yml`。
 >
-> 包里的变量解析产物（`prj import` 缺了会报“系统变量未解析”）：新版是 `sys/merged_vars.yml` —— gops 文档标注它**需入库**，所以它随仓库进包；**改了 `sys/setting/vars.yml` 后要本地跑一次 `gops sys update` 并提交它**，否则包里带的是旧值。旧名 `sys/resolved_vars.yml` 是生成物，workflow 会拉 galaxy-ops 的 gops（公开 release，pin 在 `v1.2.0-alpha`）跑 `gops sys update`，存在就兜底追加进包。
+> 包里的变量解析产物 `sys/merged_vars.yml`（`prj import` 缺了会报“系统变量未解析”）：gops 文档标注它**需入库**，所以它随仓库一起进包 —— **改了 `sys/setting/vars.yml` 后要本地跑一次 `gops sys update` 并提交它**，否则包里带的是旧值。CI 里不跑 gops，包内容完全由 `git archive` 决定。
 
 用 `git archive` 出包，只收 git 跟踪的内容 —— `sysrun/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 

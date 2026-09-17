@@ -8,9 +8,10 @@ permissions:
   contents: read
 
 jobs:
-  # 打包：以 docker-compose.yml 为核心的部署包（含 sysrun/ 开发态脚本与数据面配置）。
-  # 用 git archive 出包，只收 git 跟踪的内容 —— sysrun/bin/（约 92M 本地二进制）与
-  # sysrun/data-plane/{data,.run}/（体量巨大）在 .gitignore 里，天然不入包。
+  # 打包：整仓内容（除 CI 自身的 .github）打成部署包。
+  # 用 git archive 出包，只收 git 跟踪的内容 —— sysrun/bin/（约 92M 本地二进制）、
+  # sysrun/data-plane/{data,.run}/、configs/、.env、sys/resolved_vars.yml、values/、
+  # _gal/.report 等都未入 git，天然不入包。
   package:
     name: Package deployment bundle
     runs-on: ubuntu-24.04
@@ -24,7 +25,7 @@ jobs:
           git archive \
             --format=tar \
             --prefix="${bundle}/" \
-            HEAD docker-compose.yml sysrun > "${bundle}.tar"
+            HEAD -- . ':(exclude).github' > "${bundle}.tar"
           gzip -9 "${bundle}.tar"
           echo "包内文件数：$(tar -tzf "${bundle}.tar.gz" | wc -l)"
           ls -lh "${bundle}.tar.gz"

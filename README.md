@@ -159,16 +159,20 @@ SKIP_WEB=1 ./sysrun/start.sh     # 只要后端
 
 ## 制品包（发布）
 
-`.github/workflows/release.yml` 在 `v*.*.*` 标签上打包并发布：
+`.github/workflows/release.yml` 在 `v*.*.*` 标签上打包并发布：**整仓内容（除 CI 自身的 `.github/`）**。
 
 ```bash
 wist-gateway-stack-<tag>.tar.gz
 wist-gateway-stack-<tag>/
   ├── docker-compose.yml
-  └── sysrun/            # 脚本 + data-plane 工程（conf/connectors/models/topology）
+  ├── sys/ + sys-prj.yml      # gops 系统定义（系统变量、sys_model）
+  ├── sysrun/                 # 脚本 + data-plane 工程（conf/connectors/models/topology）
+  ├── _gal/                   # gx 工作流
+  ├── version.txt
+  └── README.md / .gitignore
 ```
 
-用 `git archive` 出包，只收 git 跟踪的内容，所以 `sysrun/bin/`（约 92M 二进制）和 `data-plane/{data,.run}/`（运行数据）天然不入包。
+用 `git archive` 出包，只收 git 跟踪的内容 —— `sysrun/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`sys/resolved_vars.yml`、`values/`）都没入 git，天然不入包。
 
 包里**不含 `configs/`**：`configs/gateway/` 要在目标机现场生成（见「发布态 A/B」），`configs/web/nginx.conf` 也要自己准备。也就是说下载解压后还差这一步初始化。
 

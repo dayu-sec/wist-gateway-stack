@@ -27,6 +27,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 GW_CRATE="${ROOT_DIR}/wist-gateway"
 AGENTD_CRATE="${ROOT_DIR}/wist-agentd"
+# 模型仓（创作源）。策展数据（内容目录等）都从这里拷到网关配置目录，
+# 而不是把运行期配置直接指向模型仓（详见 ensure_content_files）。
+WIST_DESIGN_DIR="${WIST_DESIGN_DIR:-${ROOT_DIR}/../wist-design}"
 
 # 网关持久数据（配置 + state）落在这里；可用 WIST_GATEWAY_HOME 覆盖。
 GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
@@ -126,6 +129,57 @@ generate_gateway_config() {
   echo "  wist-gateway.toml 已生成：${GW_HOME}/wist-gateway.toml"
 }
 
+# 把模型仓的采集内容（catalog/packs/templates）拷到**配置目录下**，并把相对路径写进配置。
+#
+# 为什么不把配置直接指向模型仓：那三个文件是**创作源**，而且在配置里写的是**相对配置文件**
+# 的路径（配置在 ${GW_HOME}），`../../wist-design/...` 根本落不到模型仓。
+# 部署约定是「拷过来、就近引用」—— 与 [purpose]/[discovery] 一致。
+# 找不到模型仓（未带仓部署）就跳过：内容留空，网关照常起（只是不提供模板展开）。
+ensure_content_files() {
+  local src="${WIST_DESIGN_DIR}/jumo/model/content"
+  if [[ ! -d "${src}" ]]; then
+    echo "  未找到模型仓内容目录，跳过内容装载：${src}"
+    return
+  fi
+  local dst="${GW_HOME}/content"
+  mkdir -p "${dst}"
+  local name
+  for name in catalog.toml packs.toml templates.toml; do
+    cp -f "${src}/${name}" "${dst}/${name}"
+  done
+  # 把 [content] 段重写成指向刚拷过来的三份文件（先移除旧段再追加，保证幂等）。
+  python3 - "${GW_HOME}/wist-gateway.toml" <<'PY'
+import sys
+
+path = sys.argv[1]
+with open(path) as handle:
+    lines = handle.readlines()
+
+kept = []
+skipping = False
+for line in lines:
+    if line.strip() == "[content]":
+        skipping = True
+        continue
+    if skipping and line.startswith("["):
+        skipping = False
+    if not skipping:
+        kept.append(line)
+
+if kept and not kept[-1].endswith("\n"):
+    kept[-1] += "\n"
+kept.append(
+    "\n[content]\n"
+    'catalog_file = "content/catalog.toml"\n'
+    'packs_file = "content/packs.toml"\n'
+    'templates_file = "content/templates.toml"\n'
+)
+with open(path, "w") as handle:
+    handle.writelines(kept)
+PY
+  echo "  content 已就绪：${dst}"
+}
+
 start_gateway() {
   echo "== 3. 启动 wist-gateway（https://127.0.0.1:3000）=="
   require_cmd lsof
@@ -183,7 +237,7 @@ if [[ -f "${GW_HOME}/wist-gateway.toml" ]]; then
 else
   generate_gateway_config
 fi
-# 记录本脚本 pid：stop-svc.sh 靠它精确停掉前台包装（杀本脚本即触发 trap 停 gateway）。
+ensure_content_files
 echo $$ >"${GATEWAY_PIDFILE}"
 start_gateway
 

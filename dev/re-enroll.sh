@@ -4,11 +4,11 @@
 # 只修 agentd 侧：清掉失效凭据 → 签发新 enrollment token → 写回配置 → 重启 agentd。
 # 网关本身无需重启（store 空是正常的，本来就没有 agent 注册）。
 #
-# 前置：gateway 已通过 ./sysrun/start.sh 启动（https://127.0.0.1:3000）。
+# 前置：gateway 已通过 ./dev/start-gateway.sh（或 start-svc.sh）启动（https://127.0.0.1:3000）。
 #
 # 用法：
-#   ./sysrun/re-enroll.sh              # 后台重启 agentd
-#   ./sysrun/re-enroll.sh --foreground # 前台跑 agentd（联调看日志）
+#   ./dev/re-enroll.sh              # 后台重启 agentd
+#   ./dev/re-enroll.sh --foreground # 前台跑 agentd（联调看日志）
 #
 # 可覆盖 env：
 #   WIST_GATEWAY_HOME      网关数据 home（默认 ~/.wist-gateway）
@@ -39,7 +39,7 @@ require_cmd python3
 CONFIG_FILE="${GW_HOME}/wist-gateway.toml"
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "网关配置不存在：${CONFIG_FILE}" >&2
-  echo "请先启动 gateway（wist-gateway-stack/sysrun/start.sh）生成配置。" >&2
+  echo "请先启动 gateway（wist-gateway-stack/dev/start-gateway.sh）生成配置。" >&2
   exit 1
 fi
 

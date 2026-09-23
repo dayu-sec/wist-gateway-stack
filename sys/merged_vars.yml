@@ -7,8 +7,10 @@ system:
   value: v0.1.4-alpha
 - name: VM_TAG
   value: v1.133.0
+- name: WPARSE_IMAGE
+  value: ghcr.io/wp-labs/warp-parse
 - name: WPARSE_TAG
-  value: latest
+  value: 0.26.0-beta
 - name: GATEWAY_PORT
   value: 3000
 - name: WEB_PORT
@@ -24,4 +26,6 @@ system:
 - name: WEB_NGINX_CONF
   value: ./configs/web/nginx.conf
 - name: WPARSE_WORK_DIR
-  value: ./sysrun/data-plane
+  value: ./data-plane
+- name: WPARSE_RUN_DIR
+  value: ./data-plane-run

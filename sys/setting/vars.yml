@@ -21,8 +21,15 @@ system:
     value: v0.1.4-alpha
   - name: VM_TAG
     value: v1.133.0
+  # wparse 镜像仓库与 tag：来自上游（无 TCR 镜像），内网/客户环境拉不到 ghcr.io 时
+  # 把 WPARSE_IMAGE 指向内网镜像仓库（同步同版本镜像过去），tag 不变。
+  - name: WPARSE_IMAGE
+    value: ghcr.io/wp-labs/warp-parse
+  # wparse 版本与 data-plane 工程强耦合（conf/connectors/models/topology 随引擎版本变），
+  # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
+  # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: latest
+    value: 0.26.0-beta
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT
@@ -43,5 +50,11 @@ system:
     value: ./configs/gateway
   - name: WEB_NGINX_CONF
     value: ./configs/web/nginx.conf
+  # wparse 工程：配置的**唯一源**（conf/connectors/models/topology），开发态与发布态共用
   - name: WPARSE_WORK_DIR
-    value: ./sysrun/data-plane
+    value: ./data-plane
+  # wparse 运行态根（data/{logs,out_dat,in_dat,rescue} + .run/），挂在容器的 /data。
+  # 与开发态的 data-plane/{data,.run} 分开，避免两个引擎同写一份运行态。
+  # 注意：Linux 上要保证这个目录对容器用户（uid 999 = wparse）可写。
+  - name: WPARSE_RUN_DIR
+    value: ./data-plane-run

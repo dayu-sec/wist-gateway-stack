@@ -40,14 +40,34 @@ services:
       start_period: 30s
 
   # ── 数据平台：WarpParse（ELT 引擎）──
+  # WPARSE_IMAGE 来自上游镜像仓库，客户可用 values/value.yml 覆盖成内网镜像仓库。
+  # 挂载约定（镜像里 /data 属非 root 用户 wparse，运行态就落在这个根下）：
+  #   - 配置（conf/connectors/models/topology）从 data-plane/ 只读共用，它是唯一源；
+  #   - 运行态（data/{logs,out_dat,in_dat,rescue} + .run/）落 WPARSE_RUN_DIR，与开发态各用各的。
+  # 两个别踩：父挂载不能 :ro（Docker 建不了子挂载点）；运行态只能挂 /data 这一个根，
+  # 不能拆成 /data/data、/data/.run 子卷（镜像里没这两个路径 → 卷属 root，uid 999 写不了）。
+  #
+  # 单实例保障：引擎自身**没有**单实例保护（同名 work root 起两个会互写 .run/ 与输出），
+  # 所以 entrypoint 先用 flock 独占 <run-root>/.wparse.lock 再把引擎交给 PID 1：
+  #   -F（不 fork）→ wparse 自己就是 PID 1，docker stop 的 SIGTERM 直达引擎、能优雅退出；
+  #   -n → 拿不到锁立即失败（不排队），避免“默默等锁”看不出配错了；
+  #   --verbose + -E 75 → 失败时日志打 `flock: failed to get lock`、容器以 75 退出。
+  # 开发态脚本（dev/start-wparse.sh）用同一把锁，所以容器与宿主也不会同时跑。
+  # 这层包装是绕过：引擎自身应当持锁 —— 已提上游 wp-labs/warp-parse#365，
+  # 上游实现后这里的 entrypoint 可以直接去掉。
   wparse:
-    image: ghcr.io/wp-labs/warp-parse:${WPARSE_TAG}
+    image: ${WPARSE_IMAGE}:${WPARSE_TAG}
     restart: unless-stopped
-    command: ["daemon", "--work-root", "/wparse"]
+    entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.wparse.lock", "/usr/local/bin/wparse"]
+    command: ["daemon", "--work-root", "/data"]
     environment:
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
     volumes:
-      - ${WPARSE_WORK_DIR}:/wparse
+      - ${WPARSE_RUN_DIR}:/data
+      - ${WPARSE_WORK_DIR}/conf:/data/conf:ro
+      - ${WPARSE_WORK_DIR}/connectors:/data/connectors:ro
+      - ${WPARSE_WORK_DIR}/models:/data/models:ro
+      - ${WPARSE_WORK_DIR}/topology:/data/topology:ro
     depends_on:
       victoria-metrics:
         condition: service_healthy

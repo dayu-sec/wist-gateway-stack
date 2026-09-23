@@ -3,7 +3,7 @@
 # 端口与发布态 compose 对齐：宿主 18429 -> 容器 8428。
 #
 # 用法：
-#   ./sysrun/start-vm.sh
+#   ./dev/start-vm.sh
 #
 # 仅拉起 victoria-metrics 一个服务，不影响 gateway / web / wparse。
 set -euo pipefail

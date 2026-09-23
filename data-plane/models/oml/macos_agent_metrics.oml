@@ -1,5 +1,5 @@
 name : macos_agent_metrics
-rule : macos_agent/mac_agent_metrics
+rule : agent_uplink/metrics_frame
 ---
 metric = object {
     __name__ = read(metric_name);

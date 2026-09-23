@@ -1,0 +1,74 @@
+// wist-agentd 上送帧（数据平面 TCP）——**本包与平台无关**：信封与帧标记对所有平台一致，
+// 平台差异只体现在 LOGRAW 的正文里（由 mac/* 等正文规则分类）。
+//   日志帧   {schema, agent, ts, seq} LOGRAW: <原文>
+//   指标帧   {schema, agent, ts, seq} METRICS: <VM JSON line>
+//   事实帧   {schema, agent, ts, seq} OBSFACT: <JSON>
+//            body 是契约对象原样透传：摘要 = ReportAgentFactSummary；原文快照 = ReportDiscoverySnapshot（待做）。
+//            事实帧**不走控制面 HTTP**，与日志/指标同一类接入路径（见 runtime/topology.mju 的事实分发视图）。
+// 信封字段（短名）信号无关：schema / agent / ts / seq；信号类型靠帧标记区分。
+// 约定：**tag 只标“哪一类信号”，不标平台**（信封本身就是平台无关的）；
+// 平台/内容归类由正文规则（mac/*、linux/* 等）细化。log_type 会经 OML 进记录的 category。
+// 注意：新帧不再携带 input_id / source_path / 偏移等来源细节，日志来源归类需由原文内容解析（mac/*）。
+package agent_uplink {
+
+  // 日志帧：信封 + ` LOGRAW:` 标记 + 原文。
+  // 注意 `chars:raw\0` 的终止符不能省：`chars` 需要显式终止符才会一直读到报文末尾，
+  // 省略时只会匹配到极短片段，其余字节变成 residue 落进 miss 分支。
+  // 对照 models/mac-drafts/launchd-service/parse.wpl 的 `chars:msg\0`。
+  #[tag(log_desc: "Agent 日志-原文", log_type: "agent.log")]
+  rule log_frame {
+    (
+      json(
+        chars@schema,
+        chars@agent,
+        chars@ts,
+        digit@seq,
+      ),
+      symbol(LOGRAW:),
+      chars:raw\0
+    )
+  }
+
+  // 指标帧：信封 + ` METRICS:` 标记 + VM JSON line（一个 sample 一行）。
+  //   body = {"metric":{"__name__":"<name>","agent":..,"kind":..,"target_ref":..,"resource_ref":..,"unit":..},"values":[<float>],"timestamps":[<ms>]}
+  #[tag(log_desc: "Agent 指标", log_type: "agent.metrics")]
+  rule metrics_frame {
+    (
+      json(
+        chars@schema,
+        chars@agent,
+        chars@ts,
+        digit@seq,
+      ),
+      symbol(METRICS:),
+      json(
+        chars@metric/__name__:metric_name,
+        chars@metric/agent:metric_agent,
+        chars@metric/kind:metric_kind,
+        chars@metric/target_ref:metric_target_ref,
+        opt(chars)@metric/resource_ref:metric_resource_ref,
+        chars@metric/unit:metric_unit,
+        array@values:metric_values,
+        array@timestamps:metric_timestamps,
+      )
+    )
+  }
+
+  // 事实帧：信封 + ` OBSFACT:` 标记 + 整块 JSON 正文。
+  // **不做字段建模**（正文原样透传）：它是契约对象（摘要 / 原文快照），字段会随契约演进，
+  // 在这里拆字段等于契约一改就动两份（WPL + OML）；交给订阅端按契约解析更稳。
+  // `chars:body\0` 的终止符与 log_frame 同理，不能省。
+  #[tag(log_desc: "Agent 事实", log_type: "agent.fact")]
+  rule obs_fact {
+    (
+      json(
+        chars@schema,
+        chars@agent,
+        chars@ts,
+        digit@seq,
+      ),
+      symbol(OBSFACT:),
+      chars:body\0
+    )
+  }
+}

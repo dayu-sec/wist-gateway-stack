@@ -1,0 +1,13 @@
+name : agent_obs_fact
+rule : agent_uplink/obs_fact
+---
+// 事实帧（摘要/原文快照）**原样透传**：正文是契约对象（ReportAgentFactSummary /
+// ReportDiscoverySnapshot），这里只拆信封，不拆正文 —— 拆了就契约一改要动两处。
+// 订阅端（网关/中心）按 wist-contracts 解析 `body`。
+schema = read(schema) ;
+agent_id = read(agent) ;
+observed_at = read(ts) ;
+seq = read(seq) ;
+category = read(log_type) ;
+log_desc = read(log_desc) ;
+body = read(body) ;

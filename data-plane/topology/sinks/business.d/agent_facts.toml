@@ -1,0 +1,34 @@
+# Agent 事实（wist-agentd ` OBSFACT:` 帧）独立 sink 分组 —— 「统一走数据面」的那条通道。
+#
+# 与 business.d/demo.toml（oml=["*"]）并存：本分组的 OML 名精确命中，其余记录仍走 demo。
+# 信封字段（schema/agent/observed_at/seq）与正文 `body` 原样落盘：正文是契约对象
+# （ReportAgentFactSummary / ReportDiscoverySnapshot），订阅端按 wist-contracts 解析。
+#
+# file sink 保留用于肉眼验证「帧真的进来了、内容是契约对象」；同时在同分组挂一个
+# gateway sink，把同一批记录 POST 到网关内部接入端点（明文，127.0.0.1:3001）。
+# 数据面接入的身份校验方案仍待定档（见 doc/design/center/agent-work-delivery-plan.md
+# §4.1 与 §9 风险行），故 batch_size 先设 1、只跑通链路，不做批量。
+[sink_group]
+name = "agent-facts"
+oml = ["agent_obs_fact"]
+tags = ["biz:agent-fact"]
+batch_size = 1
+batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+file = "agent-facts.jsonl"
+
+# 网关订阅：同一批 OML 记录 POST 到网关内部端点。
+[[sink_group.sinks]]
+name = "gateway"
+connect = "gateway_facts_sink"
+tags = ["sink:gateway"]
+
+[sink_group.sinks.params]
+endpoint = "${WPARSE_GATEWAY_ENDPOINT}/api/v1/ingest/agent-facts"
+batch_size = 1

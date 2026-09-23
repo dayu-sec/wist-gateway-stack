@@ -1,5 +1,5 @@
 name : macos_agent_record
-rule : macos_agent/mac_agent_log
+rule : agent_uplink/log_frame
 ---
 schema = read(schema) ;
 agent_id = read(agent) ;

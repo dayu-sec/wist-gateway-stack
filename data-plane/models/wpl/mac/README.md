@@ -10,7 +10,7 @@
 > ⚠️ **不要把开发期 `parse.wpl`/OML 草稿放在本目录**：数据面引擎会**递归加载 `models/wpl/` 下所有规则**，
 > `mac/` 里的草稿一旦放进来就会在运行时生效，匹配真实日志产生错误分类与 `default`/`residue` 杂音（已实测）。
 > 约定：`mac/<类>/` 只保留 `sample.dat` 素材；规则草稿统一放 [`models/mac-drafts/<类>/`](../../mac-drafts/)，
-> 联调接入时再合入正式规则目录（上送帧规则在 `models/wpl/macos_agent/parse.wpl`）。
+> 联调接入时再合入正式规则目录（上送帧规则在 `models/wpl/agent_uplink/parse.wpl`）。
 
 ## 目录 → 类别/来源映射
 
@@ -71,8 +71,8 @@ head -n 1 /Library/Logs/DiagnosticReports/*.ips > crash-panic/sample.dat
 1. 在 `models/mac-drafts/<类>/` 内新建 `parse.wpl`（语法校验：`wpadm rule parse --wpl <dir>` 或 `wpadm check`）；
 2. 用本目录的 `sample.dat` 做样例回放：`wpgen sample --wpl <dir>`；
 3. 命中并核对字段/分类后，把规则合入正式数据面规则目录并配 sink 组：
-   - wist-agentd 上送帧（macos P0 采集）→ 合并进 `models/wpl/macos_agent/parse.wpl`（sink：`macos-agent`）；
+   - wist-agentd 上送帧（macos P0 采集）→ 合并进 `models/wpl/agent_uplink/parse.wpl`（sink：`macos-agent`）；
    - 未来新增独立来源类 → 新建 `models/wpl/<pkg>/parse.wpl` 包目录 + 对应 OML 与 `topology/sinks` 分组；
 4. 重启数据面（`stop-wparse.sh` / `start-wparse.sh`）后核对 `data/out_dat/` 与 `data/rescue/`。
 
-> `models/wpl/parse.wpl`（示例 nginx 规则）与 `models/wpl/macos_agent/`（生产上送规则）不受本目录影响。
+> `models/wpl/parse.wpl`（示例 nginx 规则）与 `models/wpl/agent_uplink/`（生产上送规则）不受本目录影响。

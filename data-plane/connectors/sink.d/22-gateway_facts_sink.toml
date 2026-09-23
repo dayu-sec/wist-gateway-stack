@@ -1,0 +1,18 @@
+# 网关内部接入端点 sink：把 agent-facts 分组的 OML 记录 POST 到网关内部明文端点。
+# 派生自通用 http_sink 模板（12-http_sink.toml）。wparse 的 http 连接器没有 TLS 参数，
+# 端点必须是明文 http://（网关侧另开只绑 127.0.0.1:3001 的内部监听）。
+[[connectors]]
+allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
+id = "gateway_facts_sink"
+type = "http"
+
+[connectors.params]
+endpoint = "http://127.0.0.1:3001/api/v1/ingest/agent-facts"
+method = "POST"
+fmt = "json"
+batch_size = 1
+timeout_secs = 5
+compression = "none"
+
+[connectors.params.headers]
+Content-Type = "application/json"

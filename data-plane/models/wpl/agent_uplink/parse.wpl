@@ -15,6 +15,10 @@ package agent_uplink {
   // 注意 `chars:raw\0` 的终止符不能省：`chars` 需要显式终止符才会一直读到报文末尾，
   // 省略时只会匹配到极短片段，其余字节变成 residue 落进 miss 分支。
   // 对照 models/mac-drafts/launchd-service/parse.wpl 的 `chars:msg\0`。
+  //
+  // `family`/`unit`（**可选**）：这条来自哪个采集面与哪条目录单元，由 agentd 从工作授权带出来。
+  // 用 `opt(...)` 而不是 `chars`：本机手工配置的输入、以及旧版 agentd 发的帧都**没有**
+  // 这两个字段，当必填会让那些帧整体掉进 miss。
   #[tag(log_desc: "Agent 日志-原文", log_type: "agent.log")]
   rule log_frame {
     (
@@ -23,6 +27,8 @@ package agent_uplink {
         chars@agent,
         chars@ts,
         digit@seq,
+        opt(chars)@family,
+        opt(chars)@unit,
       ),
       symbol(LOGRAW:),
       chars:raw\0

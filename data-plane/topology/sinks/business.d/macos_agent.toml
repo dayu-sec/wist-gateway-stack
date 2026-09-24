@@ -15,3 +15,15 @@ tags = ["sink:json"]
 
 [sink_group.sinks.params]
 file = "macos-agent.json"
+
+# 网关订阅：同一批 OML 记录 POST 到网关内部端点（日志的**终点**）。
+# 本地 json sink 保留用于肉眼验证「帧真的进来了」；权威副本在网关本地 NDJSON 里。
+# 逐条发（batch_size = 1）：一条多行记录本身可达 1 MiB，批量会把网关那侧的 body 上限顶爆。
+[[sink_group.sinks]]
+name = "gateway"
+connect = "gateway_logs_sink"
+tags = ["sink:gateway"]
+
+[sink_group.sinks.params]
+endpoint = "${WPARSE_GATEWAY_ENDPOINT}/api/v1/ingest/agent-logs"
+batch_size = 1

@@ -5,6 +5,11 @@ schema = read(schema) ;
 agent_id = read(agent) ;
 observed_at = read(ts) ;
 seq = read(seq) ;
+// 来源身份（可选）：哪个采集面、哪条目录单元。
+// 正文规则未就绪时 category 恒为泛化的 agent.log，只有它能回答“这条来自哪个面”。
+// 空 = 本机手工配置的输入（不是平台派活来的）。
+family = read(family) ;
+unit = read(unit) ;
 category = read(log_type) ;
 log_desc = read(log_desc) ;
 raw = read(raw) ;

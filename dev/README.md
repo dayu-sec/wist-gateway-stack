@@ -55,7 +55,7 @@ x-topology/wist/                  <- $WIST
 | `stop-vm.sh` | 停 VictoriaMetrics | — | — |
 | `start-wparse.sh` | wparse 数据面（工程在 `../data-plane`） | 后台常驻（`--foreground` 可前台） | `stop-wparse.sh` |
 | `stop-wparse.sh` | 停 wparse | — | — |
-| `re-enroll.sh` | 把本机 wist-agentd 重新注册到网关 | 后台重启 agentd（`--foreground` 可前台） | `wist-agentd/sysrun/stop.sh` |
+| `re-enroll.sh` | 把本机 wist-agentd 重新注册到网关 | 后台重启 agentd（`--foreground` 可前台） | `wist-agentd/dev/stop.sh` |
 
 **没有 `stop-gateway.sh`**：gateway 的设计是前台运行、`Ctrl+C` 停。要停后台跑的 gateway，用
 `stop-svc.sh`，或自己 `kill "$(lsof -ti tcp:3000)"`。
@@ -79,7 +79,7 @@ x-topology/wist/                  <- $WIST
 | 组件 | 二进制 / 入口 | 可覆盖 env |
 |---|---|---|
 | gateway | `$WIST/wist-gateway/target/debug/wist-gateway` | — |
-| wist-agentd | `$WIST/wist-agentd/target/debug/wist-agentd` | `WIST_AGENTD_BIN`（仅 `wist-agentd/sysrun/start.sh`） |
+| wist-agentd | `$WIST/wist-agentd/target/debug/wist-agentd` | `WIST_AGENTD_BIN`（仅 `wist-agentd/dev/start.sh`） |
 | wparse | `dev/bin/wparse` | `WPARSE_BIN` |
 | web | **不是二进制**：`npm run dev`（实际跑 `node_modules/.bin/vite`），工作目录 `$WIST/wist-gateway-web` | `WEB_DIR` |
 | VictoriaMetrics | **无本地二进制**：Docker 镜像 `victoriametrics/victoria-metrics:${VM_TAG}` | `VM_TAG` 等（见 `sys/setting/vars.yml`） |

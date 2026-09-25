@@ -21,7 +21,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
 GW_URL="${WIST_GATEWAY_URL:-https://127.0.0.1:3000}"
-AGENTD_SCRIPT_DIR="${ROOT_DIR}/wist-agentd/sysrun"
+AGENTD_SCRIPT_DIR="${ROOT_DIR}/wist-agentd/dev"
 AGENTD_HOME="${WIST_AGENTD_HOME:-${HOME}/.wist-agentd}"
 
 FOREGROUND="${1:-}"

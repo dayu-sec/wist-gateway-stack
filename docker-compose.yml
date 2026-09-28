@@ -41,14 +41,16 @@ services:
 
   # ── 数据平台：WarpParse（ELT 引擎）──
   # WPARSE_IMAGE 来自上游镜像仓库，客户可用 values/value.yml 覆盖成内网镜像仓库。
-  # 挂载约定（镜像里 /data 属非 root 用户 wparse，运行态就落在这个根下）：
+  # 挂载约定（镜像里 /data 属非 root 用户 wparse(uid 999)）：
   #   - 配置（conf/connectors/models/topology）从 data-plane/ 只读共用，它是唯一源；
-  #   - 运行态（data/{logs,out_dat,in_dat,rescue} + .run/）落 WPARSE_RUN_DIR，与开发态各用各的。
-  # 两个别踩：父挂载不能 :ro（Docker 建不了子挂载点）；运行态只能挂 /data 这一个根，
-  # 不能拆成 /data/data、/data/.run 子卷（镜像里没这两个路径 → 卷属 root，uid 999 写不了）。
+  #   - 运行态直接挂到 /data 下的两个子路径：/data/data（输出）与 /data/.run（引擎状态）。
+  # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker
+  # 在宿主运行目录里建出一堆空白挂载点目录；改成直接挂 /data/data 与 /data/.run 后，所有
+  # 挂载点都建在容器层里，宿主运行目录保持干净。
+  # 运行态用**宿主目录 bind 挂载**（不是命名卷）：Linux 上要保证这两个目录对 uid 999 可写。
   #
   # 单实例保障：引擎自身**没有**单实例保护（同名 work root 起两个会互写 .run/ 与输出），
-  # 所以 entrypoint 先用 flock 独占 <run-root>/.wparse.lock 再把引擎交给 PID 1：
+  # 所以 entrypoint 先用 flock 独占 /data/.run/.wparse.lock（落在宿主 WPARSE_RUN_STATE 内）再把引擎交给 PID 1：
   #   -F（不 fork）→ wparse 自己就是 PID 1，docker stop 的 SIGTERM 直达引擎、能优雅退出；
   #   -n → 拿不到锁立即失败（不排队），避免“默默等锁”看不出配错了；
   #   --verbose + -E 75 → 失败时日志打 `flock: failed to get lock`、容器以 75 退出。
@@ -58,16 +60,22 @@ services:
   wparse:
     image: ${WPARSE_IMAGE}:${WPARSE_TAG}
     restart: unless-stopped
-    entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.wparse.lock", "/usr/local/bin/wparse"]
+    entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.run/.wparse.lock", "/usr/local/bin/wparse"]
     command: ["daemon", "--work-root", "/data"]
     environment:
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
+      # 数据面 sink（agent-facts / agent-logs）用的网关内部接入端点；
+      # 与网关配置的 [ingest].listen_addr 对应（明文 HTTP，只走 compose 内网）。
+      WPARSE_GATEWAY_ENDPOINT: http://gateway:3001
     volumes:
-      - ${WPARSE_RUN_DIR}:/data
+      # 配置源（唯一源，只读共用）
       - ${WPARSE_WORK_DIR}/conf:/data/conf:ro
       - ${WPARSE_WORK_DIR}/connectors:/data/connectors:ro
       - ${WPARSE_WORK_DIR}/models:/data/models:ro
       - ${WPARSE_WORK_DIR}/topology:/data/topology:ro
+      # 运行态：宿主目录直接挂到 /data 的子路径（不挂父 /data）
+      - ${WPARSE_RUN_DATA}:/data/data
+      - ${WPARSE_RUN_STATE}:/data/.run
     depends_on:
       victoria-metrics:
         condition: service_healthy

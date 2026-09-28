@@ -16,9 +16,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.1-alpha.1
+    value: v0.1.2-alpha
   - name: WEB_TAG
-    value: v0.1.4-alpha
+    value: v0.1.5-alpha
   - name: VM_TAG
     value: v1.133.0
   # wparse 镜像仓库与 tag：来自上游（无 TCR 镜像），内网/客户环境拉不到 ghcr.io 时
@@ -53,8 +53,14 @@ system:
   # wparse 工程：配置的**唯一源**（conf/connectors/models/topology），开发态与发布态共用
   - name: WPARSE_WORK_DIR
     value: ./data-plane
-  # wparse 运行态根（data/{logs,out_dat,in_dat,rescue} + .run/），挂在容器的 /data。
+  # wparse 运行态：拆成两个子目录，分别挂到容器的 /data/data 与 /data/.run。
+  #   为什么不挂 /data 这一整根：父挂载 + 配置子挂载会让 Docker 在宿主运行目录里
+  #   建出一堆空白挂载点目录；直接挂到 /data 下的两个子路径就没有这个问题。
+  #   data/：输出（logs / out_dat / in_dat / rescue）
+  #   .run/：引擎状态（pid / authority.sqlite / rule_mapping.dat）
   # 与开发态的 data-plane/{data,.run} 分开，避免两个引擎同写一份运行态。
-  # 注意：Linux 上要保证这个目录对容器用户（uid 999 = wparse）可写。
-  - name: WPARSE_RUN_DIR
-    value: ./data-plane-run
+  # 注意：Linux 上要保证这两个目录对容器用户（uid 999 = wparse）可写。
+  - name: WPARSE_RUN_DATA
+    value: ./data-plane-run/data
+  - name: WPARSE_RUN_STATE
+    value: ./data-plane-run/.run

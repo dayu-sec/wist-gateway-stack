@@ -4,10 +4,9 @@
 # 数据面（wparse 工程 + 运行时数据，体量大）
 data-plane/.run
 data-plane/data
-# 引擎**单实例锁**：引擎自身没有单实例保护，开发态脚本与发布态 entrypoint 靠这把锁互斥
-#（同一 work root 只能起一份）。它是运行态产物，不入库。
-data-plane/.wparse.lock
-# 发布态 wparse 运行态根（WPARSE_RUN_DIR）；开发态的运行态在上面两个
+# 引擎**单实例锁**（<work-root>/.run/.wparse.lock，已在上面 data-plane/.run 内）：
+# 引擎自身没有单实例保护，开发态脚本与发布态 entrypoint 靠这把锁互斥（同一 work root 只能起一份）。
+# 发布态 wparse 运行态根（WPARSE_RUN_DATA / WPARSE_RUN_STATE）；开发态的运行态在上面两个
 data-plane-run/
 
 # 本地二进制

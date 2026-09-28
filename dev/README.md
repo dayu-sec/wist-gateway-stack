@@ -6,7 +6,7 @@
 目录内只有启停脚本与本地二进制；wparse 业务工程在**栈根的 `../data-plane/`**，与 `dev/` 平级 ——
 因为开发态与发布态**共享同一份** wparse 配置（发布态 compose 将它按目录只读挂进容器：
 `${WPARSE_WORK_DIR}/conf → /data/conf` 等），所以它不属于开发态，单独放在栈根。
-运行态不共享：开发态写 `data-plane/{data,.run}`，发布态写 `../data-plane-run/`（`WPARSE_RUN_DIR`）。
+运行态不共享：开发态写 `data-plane/{data,.run}`，发布态写 `../data-plane-run/{data,.run}`（`WPARSE_RUN_DATA` / `WPARSE_RUN_STATE`）。
 
 ```
 wist-gateway-stack/
@@ -185,10 +185,10 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 6. **`../data-plane/` 是 wparse 配置的唯一源**，开发态与发布态共用，且由发布态 compose 按目录只读挂载
    （`${WPARSE_WORK_DIR}/conf → /data/conf` 等）。改它等于同时改两条运行路径；改动后如果影响到变量，
    要重跑 `gops sys update && gops sys localize`。**运行态不共享**：开发态写 `data-plane/{data,.run}`，
-   发布态写 `../data-plane-run/`（`WPARSE_RUN_DIR`）。
+   发布态写 `../data-plane-run/{data,.run}`（`WPARSE_RUN_DATA` / `WPARSE_RUN_STATE`）。
 7. **同一 work root 只能跑一个 wparse 引擎**（引擎自身没有单实例保护，实测两个实例会互写
    `.run/authority.sqlite` 与输出，你的 46G `out_dat` 就是这么长出来的）。两道保障：
-   - `start-wparse.sh` 先拿**与容器同一把锁** `<work-root>/.wparse.lock`（macOS 没有 `flock(1)`，用 python3
+   - `start-wparse.sh` 先拿**与容器同一位置**的锁 `<work-root>/.run/.wparse.lock`（macOS 没有 `flock(1)`，用 python3
      的 `fcntl`，锁 fd 设成可继承才能跨 `exec` 存活）——锁拿不到立刻退出（75）；
    - 另用 `docker ps --filter volume=<work-root>` 探测有没有容器挂着同一个 work root。
   已知边界：macOS 上容器与宿主**不共享** flock（work root 是 virtiofs，guest 内的锁不落到宿主内核），

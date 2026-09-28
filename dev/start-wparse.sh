@@ -26,9 +26,10 @@ export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001
 
 CONF_FILE="${WORK_ROOT}/conf/wparse.toml"
 LOG_DIR="${WORK_ROOT}/data/logs"
-LOCK="${WORK_ROOT}/.wparse.lock"
+LOCK="${WORK_ROOT}/.run/.wparse.lock"
+mkdir -p "$(dirname "${LOCK}")"
 
-# 单实例保障：与发布态容器**共用同一把锁**（<work-root>/.wparse.lock）。
+# 单实例保障：锁在运行态的 .run/ 下（<work-root>/.run/.wparse.lock）。
 # 引擎自身没有单实例保护（同名 work root 起两个会互写 .run/ 与输出），发布态由容器
 # entrypoint 的 flock 持锁（见 docker-compose.yml），这里用 python3 的 fcntl 拿同一把。
 # 锁 fd 设为可继承：Python 默认 O_CLOEXEC，不设的话 exec 后锁就没了。

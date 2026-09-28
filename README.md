@@ -10,7 +10,7 @@
 - **开发态**：不依赖 Docker，用本地编译的二进制直接跑（`dev/`）。
 
 两者共享**同一份 wparse 业务配置**（`data-plane/{conf,connectors,models,topology}`，在栈根；发布态只读挂载），环境差异（VictoriaMetrics 地址）通过 `WPARSE_VM_ENDPOINT` 注入，不产生两份配置漂移。
-**运行态各自独立**：发布态落 `data-plane-run/`（`WPARSE_RUN_DIR`，含 `data/{logs,out_dat,in_dat,rescue}` + `.run/`），开发态落 `data-plane/{data,.run}` —— 两个引擎可以同时跑，不会互踩。
+**运行态各自独立**：发布态落 `data-plane-run/data`（`WPARSE_RUN_DATA`）与 `data-plane-run/.run`（`WPARSE_RUN_STATE`），开发态落 `data-plane/{data,.run}` —— 两个引擎可以同时跑，不会互踩。
 
 ## 组件
 
@@ -25,12 +25,12 @@
 >
 > **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.26.0-beta`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `data-plane/` 一起升**。
 >
-> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)，运行态就落在这个根下）：配置从 `data-plane/` 按目录只读挂到 `/data/<name>`，运行态落 `WPARSE_RUN_DIR`。两个坑：父挂载不能加 `:ro`（Docker 建不了子挂载点）；运行态不能拆成 `/data/data`、`/data/.run` 子卷（镜像里没这两个路径 → 卷属 root，uid 999 写不了）。**Linux 部署要保证 `WPARSE_RUN_DIR` 对 uid 999 可写**（`chown -R 999:999 data-plane-run`；OrbStack 会自动放行，Linux 不会）。
+> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：配置从 `data-plane/` 按目录**只读**挂到 `/data/<name>`（`WPARSE_WORK_DIR`）；运行态**直接挂到 `/data` 的两个子路径**——`${WPARSE_RUN_DATA} → /data/data`、`${WPARSE_RUN_STATE} → /data/.run`。**不挂 `/data` 这一整根**：把运行目录挂成 `/data`、再把配置嵌进去，会让 Docker 在宿主运行目录里建出一堆空白挂载点目录；直接挂两个子路径后，挂载点都建在容器层，宿主目录保持干净。**Linux 部署要保证这两个目录对 uid 999 可写**（`chown -R 999:999 data-plane-run`；OrbStack 会自动放行，Linux 不会）。
 >
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
-> `flock --verbose -n -E 75 -F /data/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
+> `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
 > `docker stop` 的 SIGTERM 直达引擎、能优雅退出；拿不到锁时日志 `flock: failed to get lock`、容器 `Exited (75)`）。
-> 开发态 `dev/start-wparse.sh` 用**同一把锁**（`<work-root>/.wparse.lock`）并额外用
+> 开发态 `dev/start-wparse.sh` 用**同一位置**的锁（`<work-root>/.run/.wparse.lock`）并额外用
 > `docker ps --filter volume=<work-root>` 探测容器。已知边界：macOS 上容器与宿主**不共享** flock
 > （work root 是 virtiofs），因此只做到“宿主能发现容器”；反方向靠**运行态目录隔离**（两者默认就不在同一处），
 > Linux 上同一内核同一 inode，flock 天然共享。
@@ -60,7 +60,7 @@ wist-gateway-stack/
     resolved_vars.yml       # 生成：gops sys update
   data-plane/               # wparse 工程：配置的唯一源（conf/connectors/models/topology；开发态与发布态共用）
     conf/ connectors/ topology/ models/
-  data-plane-run/           # 发布态 wparse 运行态（WPARSE_RUN_DIR；不入 git）
+  data-plane-run/           # 发布态 wparse 运行态根（data/ + .run/ 分别挂到容器 /data/data、/data/.run；不入 git）
   dev/                      # 开发态：本地二进制 + 启停脚本
     start-svc.sh / stop-svc.sh      # 开发态一站式：起/停 VM + wparse + web + gateway
     start-gateway.sh        # 仅启控制面后端 gateway（前台）
@@ -108,10 +108,10 @@ gops sys localize    # 合并默认值与 values/value.yml → .env（compose �
 
 ### 前置：挂载文件
 
-compose 还挂这两个路径，缺任何一个都起不来：
+compose 还挂这两个路径：
 
-1. `configs/gateway/` —— 网关配置与密钥，用初始化脚本生成（A 或 B，见下）。
-2. `configs/web/nginx.conf` —— 前端站点配置。它需要做到：托管前端静态产物、SPA 深链回退到 `index.html`、把 `/api` 反代到 `gateway:3000`。注意网关那侧是**自签 HTTPS**，反代过去要么关掉证书校验、要么把这个自签证书配成可信，否则 502。
+1. `configs/gateway/` —— 网关配置与密钥。**仓库不含**，要在目标机现场生成（A 或 B，见下）。
+2. `configs/web/nginx.conf` —— 前端站点配置。**仓库已自带，直接用**：托管前端静态产物、SPA 深链回退到 `index.html`、把 `/api` 反代到 `gateway:3000`（网关那侧是**自签 HTTPS**，已关掉证书校验）。
 
 ### A. 宿主机显式初始化（推荐生产）
 
@@ -205,6 +205,7 @@ wist-gateway-stack-<tag>.tar.gz
   sys/ + sys-prj.yml          # gops 系统定义（sys_model、setting/vars.yml、resolved_vars.yml）
   data-plane/                 # wparse 工程（conf/connectors/models/topology）
   dev/                        # 开发态启停脚本（bin/ 不入 git）
+  configs/web/nginx.conf      # 前端站点配置（随仓自带）
   _gal/                       # gx 工作流
   version.txt
   README.md / .gitignore
@@ -216,7 +217,7 @@ wist-gateway-stack-<tag>.tar.gz
 
 用 `git archive` 出包，只收 git 跟踪的内容 —— `dev/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 
-包里**不含 `configs/`**：`configs/gateway/` 要在目标机现场生成（见「发布态 A/B」），`configs/web/nginx.conf` 也要自己准备。也就是说下载解压后还差这一步初始化。
+包里**含 `configs/web/nginx.conf`**（前端站点配置随仓走，直接用）**但不含 `configs/gateway/`**：后者要在目标机现场生成（见「发布态 A/B」）。下载解压后还差「生成网关配置」这一步。
 
 ## 环境接线
 

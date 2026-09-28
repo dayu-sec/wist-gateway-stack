@@ -2,9 +2,9 @@ system:
 - name: IMAGE_SPC
   value: ghcr.io/dayu-sec
 - name: GATEWAY_TAG
-  value: v0.1.1-alpha.1
+  value: v0.1.2-alpha
 - name: WEB_TAG
-  value: v0.1.4-alpha
+  value: v0.1.5-alpha
 - name: VM_TAG
   value: v1.133.0
 - name: WPARSE_IMAGE
@@ -27,5 +27,7 @@ system:
   value: ./configs/web/nginx.conf
 - name: WPARSE_WORK_DIR
   value: ./data-plane
-- name: WPARSE_RUN_DIR
-  value: ./data-plane-run
+- name: WPARSE_RUN_DATA
+  value: ./data-plane-run/data
+- name: WPARSE_RUN_STATE
+  value: ./data-plane-run/.run

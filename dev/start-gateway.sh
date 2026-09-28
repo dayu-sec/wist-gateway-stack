@@ -180,15 +180,51 @@ PY
   echo "  content 已就绪：${dst}"
 }
 
+# 网关监听端口：从配置里读（`[server]` 段，不是 `[ingest]` 段），读不到就兜底 3000。
+# 为什么要读而不是写死：`dev/setup-domain.sh` 会把监听改成 0.0.0.0:443，
+# 写死的话残留清理会盯错端口、重启时会把两个实例都留在网上。
+gateway_listen_port() {
+  python3 - "${GW_HOME}/wist-gateway.toml" <<'PY'
+import re, sys
+try:
+    text = open(sys.argv[1]).read()
+except OSError:
+    print("3000")
+    raise SystemExit
+section = ""
+for line in text.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        section = stripped
+        continue
+    if section == "[server]" and re.match(r"^listen_addr\s*=", line):
+        match = re.search(r'"([^"]+)"', line)
+        if match and ":" in match.group(1):
+            print(match.group(1).rsplit(":", 1)[1])
+            raise SystemExit
+        break
+print("3000")
+PY
+}
+
 start_gateway() {
-  echo "== 3. 启动 wist-gateway（https://127.0.0.1:3000）=="
+  local listen_port
+  listen_port="$(gateway_listen_port)"
+  echo "== 3. 启动 wist-gateway（配置里的监听端口：${listen_port}）=="
   require_cmd lsof
-  # 独占 3000：清掉端口上的残留 wist-gateway，避免前端打到旧实例。
-  local stale_gw
-  stale_gw="$(lsof -ti tcp:3000 2>/dev/null || true)"
-  if [[ -n "${stale_gw}" ]]; then
-    echo "  清理 3000 端口残留进程：${stale_gw}"
-    kill ${stale_gw} 2>/dev/null || true
+  # 清掉端口上**残留的 wist-gateway**，避免前端打到旧实例。
+  # 只 kill 确认是 wist-gateway 的进程：监听端口换到 443 之后，端口上完全可能是别人的服务。
+  local stale_pids stale_pid
+  stale_pids="$(lsof -nP -ti "tcp:${listen_port}" 2>/dev/null || true)"
+  for stale_pid in ${stale_pids}; do
+    if lsof -p "${stale_pid}" 2>/dev/null | grep -q "wist-gateway"; then
+      echo "  清理 ${listen_port} 端口残留的 wist-gateway：${stale_pid}"
+      kill "${stale_pid}" 2>/dev/null || true
+    else
+      echo "  注意：${listen_port} 端口被别的进程占着（pid=${stale_pid}），没动它" >&2
+    fi
+  done
+  if [[ -n "${stale_pids}" ]]; then
     sleep 0.5
   fi
   local gw_bin="${GW_CRATE}/target/debug/wist-gateway"
@@ -197,13 +233,15 @@ start_gateway() {
   ensure_admin_tls_cert "${state_dir}"
   # wist-gateway 启动校验 agent.package_file 存在；指向仓库 agentd 二进制。
   sed -i '' "s|^package_file = .*|package_file = \"${AGENTD_CRATE}/target/debug/wist-agentd\"|" "${GW_HOME}/wist-gateway.toml"
-  # agent 安装期通过脚本内嵌 trust_bundle（--cacert）校验网关 TLS；
-  # dev 用自签证书，直接把该证书本身嵌为信任锚（install.sh 内嵌 CA PEM 不能是占位符）。
-  python3 - "${state_dir}/admin-tls.crt.pem" "${GW_HOME}/wist-gateway.toml" <<'PY'
-import re, sys
+  # 信任锚：**优先用 `dev-ca.crt.pem`**（`dev/setup-domain.sh` 建的那张小 CA），没有才用叶证书本身。
+  # 不这样写的话，每次重启都把锚退回叶证书，而已经装好的 agent 认的是 CA —— 新发出的安装命令
+  # 就与现网不一致了（agent 会拒収新证书，或新装的 agent 拿不到正确的锚）。
+  python3 - "${state_dir}/admin-tls.crt.pem" "${state_dir}/dev-ca.crt.pem" "${GW_HOME}/wist-gateway.toml" <<'PY'
+import os, re, sys
 nl = chr(10)
-cert = open(sys.argv[1]).read().strip()
-path = sys.argv[2]
+leaf, ca, path = sys.argv[1:4]
+anchor = ca if os.path.exists(ca) else leaf
+cert = open(anchor).read().strip()
 text = open(path).read()
 block = 'trust_bundle = """' + nl + cert + nl + '"""'
 text = re.sub(
@@ -225,7 +263,7 @@ PY
 require_cmd python3
 
 echo "启动 wist-gateway 控制面后端（开发态）"
-echo "  gateway: https://127.0.0.1:3000"
+echo "  监听/对外地址以 ${GW_HOME}/wist-gateway.toml 为准"
 echo "  前端：./dev/start-web.sh；两件套一起：./dev/start-svc.sh"
 echo "  前置：VictoriaMetrics（./dev/start-vm.sh）、数据面（./dev/start-wparse.sh）"
 echo
@@ -243,7 +281,7 @@ start_gateway
 
 echo
 echo "网关已启动，按 Ctrl+C 停止。"
-echo "  gateway ：https://127.0.0.1:3000"
+echo "  监听    ：见配置的 [server] listen_addr"
 echo "  日志    ：/tmp/wist-gateway-server.log"
 echo "  pid     ：${GATEWAY_PIDFILE}"
 echo

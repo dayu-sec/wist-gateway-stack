@@ -14,7 +14,9 @@
 #   WEB_URL                          前端监听地址（默认 http://127.0.0.1:5174）
 #   WEB_DIR                          wist-gateway-web 目录（默认 ../wist-gateway-web）
 #   WEB_LOG / WEB_PIDFILE            日志与 pid 文件（默认 /tmp 下）
-#   WARP_INSIGHT_WEB_PROXY_TARGET    /api 反代目标（vite.config.ts 读取，默认 https://localhost:3000）
+#   WARP_INSIGHT_WEB_PROXY_TARGET    /api 反代目标（vite.config.ts 读取）。不给则**从网关配置推**：
+#                                    https://127.0.0.1:<[server] listen_addr 的端口>；
+#                                    配置读不到才回落 https://localhost:3000。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +28,38 @@ WEB_DIR="${WEB_DIR:-${ROOT_DIR}/wist-gateway-web}"
 WEB_URL="${WEB_URL:-http://127.0.0.1:5174}"
 WEB_LOG="${WEB_LOG:-/tmp/wist-gateway-web.log}"
 WEB_PIDFILE="${WEB_PIDFILE:-/tmp/wist-gateway-web.pid}"
+GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
+
+# /api 反代目标：给就听你的；不给就从网关配置推 —— 端口取配置里的监听端口，
+# 主机固定 127.0.0.1（配置里写的是 0.0.0.0，那不是个能连的地址；域名还要靠 DNS）。
+# 不推的话就是用 vite.config.ts 的默认值 https://localhost:3000，网关切到 443 之后
+# 那个默认值是死的：症状是前端每个 /api 都收到**代理造出来的 500 空 body**，
+# 看着像网关挂了，其实请求根本没到网关（网关日志一行错误都不会有）。
+if [[ -z "${WARP_INSIGHT_WEB_PROXY_TARGET:-}" ]]; then
+  WARP_INSIGHT_WEB_PROXY_TARGET="$(python3 - "${GW_HOME}/wist-gateway.toml" <<'PY'
+import re, sys
+try:
+    text = open(sys.argv[1]).read()
+except OSError:
+    print("https://localhost:3000")
+    raise SystemExit
+section = ""
+for line in text.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        section = stripped
+        continue
+    if section == "[server]" and re.match(r"^listen_addr\s*=", line):
+        match = re.search(r'"([^"]+)"', line)
+        if match and ":" in match.group(1):
+            print("https://127.0.0.1:" + match.group(1).rsplit(":", 1)[1])
+            raise SystemExit
+        break
+print("https://localhost:3000")
+PY
+)"
+fi
+export WARP_INSIGHT_WEB_PROXY_TARGET
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -99,6 +133,8 @@ fi
 # 这里刻意不写 pidfile —— 不是本脚本启动的进程，交给 stop-web.sh 的端口兜底处理。
 if [[ "$(web_status)" == "200" ]]; then
   echo "wist-gateway-web 已在运行（${WEB_URL}），复用。"
+  echo "  注意：已在运行的实例用的是它自己启动时的 /api 反代目标（${WARP_INSIGHT_WEB_PROXY_TARGET}）——"
+  echo "        网关换了端口/域名后要 ./dev/stop-web.sh 再起，否则前端依旧打旧的。"
   exit 0
 fi
 
@@ -113,6 +149,7 @@ echo $! >"${WEB_PIDFILE}"
 echo "wist-gateway-web started pid=$(cat "${WEB_PIDFILE}")"
 echo "  dir  : ${WEB_DIR}"
 echo "  url  : ${WEB_URL}"
+echo "  /api 反代 → ${WARP_INSIGHT_WEB_PROXY_TARGET}"
 echo "  log  : ${WEB_LOG}"
 echo "  stop : ${SCRIPT_DIR}/stop-web.sh"
 

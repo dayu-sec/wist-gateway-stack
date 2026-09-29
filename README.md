@@ -265,6 +265,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ./scripts/backup-gateway.sh --from configs/gateway          # → ./wist-gateway-identity-<时间戳>.tar.gz
 ./scripts/backup-gateway.sh check --from configs/gateway    # 先看会备份哪些件（不写文件）
 ./scripts/backup-gateway.sh --with-store                   # 要保留管理面状态（派活/安装包录入记录/用途与上送绑定）才加
+./scripts/backup-gateway.sh list                            # 列已备份的归档；list <归档文件> 看它里面有哪些件
 
 # 恢复（独立脚本；默认目标目录 configs/gateway，默认不覆盖已有文件，加 --force 才覆盖）
 ./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--force] [--restart]

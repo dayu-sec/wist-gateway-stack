@@ -11,6 +11,7 @@
 # 用法：
 #   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-store]
 #   scripts/backup-gateway.sh check [--from <源目录>]
+#   scripts/backup-gateway.sh list  [备份文件|目录]     # 列已备份的归档；给了归档文件则列其内容
 #
 # 参数：
 #   --from <目录>   备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
@@ -39,7 +40,7 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
@@ -100,10 +101,35 @@ do_check() {
   [[ "${any}" == "1" ]] || echo "  （无）"
 }
 
+# 列“已备份的文件”：给了归档文件就列它里面有哪些件；否则在目录里找 wist-gateway-identity-*.tar.gz。
+do_list() {
+  local arg="${1:-}"
+  if [[ -n "${arg}" && -f "${arg}" ]]; then
+    echo "备份归档：$(abspath "${arg}")（$(ls -lh "${arg}" | awk '{print $5}')）"
+    echo "  内容："
+    tar -tzf "${arg}" | sed 's/^/    /'
+    return 0
+  fi
+  local dir="${arg:-.}"
+  [[ -d "${dir}" ]] || die "不是文件也不是目录：${arg}"
+  echo "已备份的归档（${dir}）："
+  local found=0 f
+  for f in "${dir}"/wist-gateway-identity-*.tar.gz; do
+    [[ -e "${f}" ]] || continue
+    found=1
+    printf '  %-58s %8s  %s\n' "$(basename "${f}")" "$(ls -lh "${f}" | awk '{print $5}')" "$(date -r "${f}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '')"
+  done
+  if [[ "${found}" == "0" ]]; then
+    echo "  （无。先跑：./scripts/backup-gateway.sh --from configs/gateway）"
+  else
+    echo "  （看某个归档里的件：$0 list <备份文件>）"
+  fi
+}
+
 # ── 解析参数 ──
 # 子命令可省：首参不是 backup/check/restore（而是 flag 或位置参数）时就当 backup。
 case "${1:-}" in
-  backup | check | restore)
+  backup | check | restore | list)
     CMD="$1"
     shift
     ;;
@@ -156,11 +182,14 @@ case "${CMD}" in
     CONFIG_DIR="${FROM:-${positional[0]:-${DEFAULT_CONFIG_DIR}}}"
     do_check "${CONFIG_DIR}"
     ;;
+  list)
+    do_list "${positional[0]:-${FROM:-}}"
+    ;;
   -h | --help)
     usage
     ;;
   *)
     usage >&2
-    die "未知子命令：${CMD}（可用：backup | check）"
+    die "未知子命令：${CMD}（可用：backup | check | list）"
     ;;
 esac

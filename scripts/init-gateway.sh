@@ -2,10 +2,14 @@
 # 生成/复用网关运行所需的 **CA / 密钥 / 证书 / 渲染值**（纯宿主 openssl，不依赖 wist-gateway 二进制或镜像）。
 #
 # 身份模型（重要）：
-#   本脚本建立一张**网关 CA**，网关的**叶证书由它签发**，agent 的信任锚 = **CA 根**
-#   （configs/gateway/wist-gateway.toml 的 agent.trust_bundle_file → state/gateway-ca.crt.pem）。
-#   于是：换域名 / 续期 / 换 SAN 只**重签叶证书**，锚不变、**agent 无感**。
-#   CA 私钥不可再生 —— 丢了 = 换锚 = 全队 agent 重装，务必备份。
+#   本脚本建立**两把 CA**：
+#     - **网关 CA**：网关的**叶证书由它签发**，agent 的信任锚 = 它
+#       （wist-gateway.toml 的 agent.trust_bundle_file → state/gateway-ca.crt.pem）。
+#     - **agent CA**（state/agent-ca.*）：专门签发 **agent 的客户端证书**（mTLS）。有了它，注册时
+#       网关才会用 agent 交的 CSR 签一张客户端证书，agent 也就能在**换库/丢库后自动重建身份**。
+#   两把分开：网关 CA 管「agent 信不信网关」，agent CA 管「网关信不信 agent」。
+#   CA 私钥不可再生 —— 丢了：网关 CA = 换锚 = 全队 agent 重装；agent CA = agent 不能自动重建，
+#   只能逐个重新注册。两把都要备份。
 #
 # 幂等：CA 一旦建立绝不重生成；叶证书仅在「缺失 / 与当前 CA 不对应 / SAN 不含域名」时重签。
 #
@@ -14,6 +18,7 @@
 #
 # 生成物：
 #   <dir>/state/gateway-ca.key.pem / gateway-ca.crt.pem     # 网关 CA（锚；私钥务必备份）
+#   <dir>/state/agent-ca.key.pem / agent-ca.crt.pem         # agent CA（签 agent 客户端证书；同样务必备份）
 #   <dir>/state/admin-tls.key.pem / admin-tls.crt.pem       # 网关叶证书（CA 签；可轮换）
 #   <dir>/state/install-script-signing-ed25519.pkcs8.pem    # 安装脚本签名私钥（Ed25519 PKCS#8；可重生）
 #   <dir>/wist-gateway.value.json                           # 渲染模板用的值（token / url）
@@ -27,6 +32,8 @@
 #   CERT_DAYS           叶证书有效期天数（默认 397）
 #   CA_DAYS             CA 有效期天数（默认 3650）
 #   GATEWAY_CA_CRT / GATEWAY_CA_KEY   复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
+#   AGENT_CA_CRT / AGENT_CA_KEY      复用**外部 agent CA**（同上，两者都提供才生效）
+#   AGENT_CA_DAYS        agent CA 有效期天数（默认 3650）
 set -euo pipefail
 
 DIR="${1:-configs/gateway}"
@@ -78,6 +85,29 @@ else
     -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
   chmod 600 "$CA_KEY"
   note "已建网关 CA（信任锚，私钥务必备份）：${CA_CRT}"
+fi
+
+# ①b agent CA（签发 **agent 客户端证书** 的专用 CA；与网关 CA **分开两把**）
+#     存在它，注册时网关才会用 agent 交的 CSR 签客户端证书（mTLS）；也是「换库/丢库后 agent 能
+#     **自动重建**」的前提（网关按证书重建登记）。幂等：只建一次，绝不重生成。
+AGENT_CA_KEY_FILE="$STATE/agent-ca.key.pem"
+AGENT_CA_CRT_FILE="$STATE/agent-ca.crt.pem"
+AGENT_CA_DAYS="${AGENT_CA_DAYS:-3650}"
+if [[ -n "${AGENT_CA_CRT:-}" && -n "${AGENT_CA_KEY:-}" ]]; then
+  cp -f "$AGENT_CA_CRT" "$AGENT_CA_CRT_FILE"
+  cp -f "$AGENT_CA_KEY" "$AGENT_CA_KEY_FILE"
+  chmod 600 "$AGENT_CA_KEY_FILE"
+  note "已导入外部 agent CA → ${AGENT_CA_CRT_FILE}"
+elif [[ -f "$AGENT_CA_KEY_FILE" && -f "$AGENT_CA_CRT_FILE" ]]; then
+  note "复用已有 agent CA：${AGENT_CA_CRT_FILE}"
+else
+  openssl req -x509 -newkey rsa:4096 -nodes -sha256 \
+    -keyout "$AGENT_CA_KEY_FILE" -out "$AGENT_CA_CRT_FILE" -days "$AGENT_CA_DAYS" \
+    -subj "/CN=Wist Agent CA" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+  chmod 600 "$AGENT_CA_KEY_FILE"
+  note "已建 agent CA（签 agent 客户端证书；私钥与网关 CA 一起备份）：${AGENT_CA_CRT_FILE}"
 fi
 
 # ② 网关叶证书（由 CA 签发；缺 / 与当前 CA 不对应 / SAN 缺域名 → 重签）
@@ -148,4 +178,4 @@ EOF
   note "已生成值文件：${VALUE_JSON}（admin token 已随机生成）"
 fi
 
-echo "init-gateway 完成：${DIR}（锚 = ${CA_CRT}）"
+echo "init-gateway 完成：${DIR}（锚 = ${CA_CRT}；agent CA = ${AGENT_CA_CRT_FILE}）"

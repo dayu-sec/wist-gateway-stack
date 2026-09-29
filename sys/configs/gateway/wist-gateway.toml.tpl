@@ -20,6 +20,11 @@ admin_api_token = "{{admin_api_token}}"
 victoria_metrics_url = "http://victoria-metrics:8428"
 
 [agent]
+# agent CA：给 agent 签**客户端证书**（mTLS）。声明了它，注册/续期时网关就会用 agent 交的 CSR 签证书；
+# 也是「换库/丢库后 agent 自动重建登记」的前提。两个文件由 scripts/init-gateway.sh 生成（同给或同缺）。
+# 注：agent 侧仍用客户端证书校验网关（agent.trust_bundle_file = 网关 CA），两把 CA 各管一头。
+agent_ca_cert_file = "state/agent-ca.crt.pem"
+agent_ca_key_file = "state/agent-ca.key.pem"
 bootstrap_token_ttl_seconds = 900
 credential_ttl_seconds = 2592000
 store_file = "state/wist-gateway-store.json"

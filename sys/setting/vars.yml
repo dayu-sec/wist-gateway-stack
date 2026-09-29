@@ -19,8 +19,9 @@ system:
     value: v0.1.6-alpha
   - name: WEB_TAG
     value: v0.1.6-alpha
+  # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
-    value: v1.133.0
+    value: v1.153.0
   # wparse 镜像仓库与 tag：来自上游（无 TCR 镜像），内网/客户环境拉不到 ghcr.io 时
   # 把 WPARSE_IMAGE 指向内网镜像仓库（同步同版本镜像过去），tag 不变。
   - name: WPARSE_IMAGE
@@ -29,7 +30,7 @@ system:
   # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
   # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: 0.26.0-beta
+    value: 0.27.1-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

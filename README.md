@@ -81,6 +81,7 @@ wist-gateway-stack/
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
     backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
     restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
+    promote-dev-identity.sh # 一步：把开发态身份 + 库搬成发布态的（只搬文件，不碰容器；--dry-run 预演）
   .github/workflows/release.yml     # 打包发布（见「制品包」）
   README.md
 ```
@@ -273,7 +274,8 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 - **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
 - **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token / `package_file`，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
-- **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库 —— 目标现有的这些原样保留。适合「从别处只把**身份**搬过来、配置不动」的场景（如把开发环境的身份搬到发布态）。
+- **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
+- **一步搬身份（+ 库）**：`scripts/promote-dev-identity.sh`（默认 `--from ~/.wist-gateway --to <栈根>/configs/gateway`）—— 把开发态的**身份 + 管理面状态（SQLite 库）**搬成发布态的（`--level restore` 出包 + `--no-config` 恢复，**配置不动**）。**只搬文件、不碰容器**；`--dry-run` 可先预演。要让老 agent **无感**回来，用这个（只搬 PEM 不够）。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
 - 开发态同样可用：`./scripts/backup-gateway.sh --from ~/.wist-gateway`。

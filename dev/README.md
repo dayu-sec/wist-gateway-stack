@@ -144,8 +144,9 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 改后缀而来），启动时自动迁移。若库中**既无 Agent 也无注册 token**，会一次性导入遗留的
 `wist-gateway-store.json` 并改名为 `*.imported`；导入失败只告警，不阻断启动。
 
-> **备份/恢复**：只需备 **PEM（身份）**，库与历史不用备（agent 注册由 mTLS 自动重建）——
-> `./scripts/backup-gateway.sh --from ~/.wist-gateway`；恢复 `./scripts/restore-gateway.sh <文件> --to ~/.wist-gateway`（详见根 README「备份与恢复」）。
+> **备份/恢复**：身份 PEM 不可再生，必备；**库**里存着 agent 的**凭据**（bearer token）—— 要让老 agent
+> 无感回来必须连库一起搬（`--level restore` + `--no-config`，或直接用 `scripts/promote-dev-identity.sh`）。
+> `./scripts/backup-gateway.sh --from ~/.wist-gateway`；详见根 README「备份与恢复」。
 
 ## 环境变量覆盖
 

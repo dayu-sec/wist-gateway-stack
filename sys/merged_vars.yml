@@ -6,11 +6,11 @@ system:
 - name: WEB_TAG
   value: v0.1.6-alpha
 - name: VM_TAG
-  value: v1.133.0
+  value: v1.153.0
 - name: WPARSE_IMAGE
   value: ghcr.io/wp-labs/warp-parse
 - name: WPARSE_TAG
-  value: 0.26.0-beta
+  value: 0.27.1-alpha
 - name: GATEWAY_PORT
   value: 3000
 - name: WEB_PORT

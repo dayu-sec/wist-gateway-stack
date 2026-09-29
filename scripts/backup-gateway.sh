@@ -2,21 +2,24 @@
 # 备份网关的**身份与配置**（不可再生的 PEM）。默认**不含数据库与历史数据**；恢复见 `restore-gateway.sh`。
 #
 # 口径（与 mTLS 身份模型一致）：
-#   - **要备份**的是 PEM：网关 CA（信任锚 —— 丢了 = 全队 agent 重装）、叶证书、安装脚本签名密钥、
-#     agent CA（若开了 mTLS 签发）；外加 `wist-gateway.value.json` 与渲染出的 `wist-gateway.toml`。
-#   - **不用备份**数据库与历史数据：SQLite 里的 agent 注册会在 agent 重连时由 mTLS **自动重建**；
-#     指标历史随时间贬值。只有想保留**管理面状态**（派活 / 安装包录入记录 / 用途与上送绑定等）才加 `--with-store`。
-#   - 页面证书（`configs/web/tls/`）可重新生成（浏览器重新信任即可）；安装包缓存可重新录入 —— 都不备份。
+#   - **要备份**的是 PEM：网关 CA（信任锚 —— 丢了 = 全队 agent 重装）、agent CA（签发客户端证书）、
+#     叶证书、安装脚本签名密钥。
+#   - **不用备份**数据库与历史：SQLite 里的 agent 注册会在重连时由 mTLS **自动重建**；指标历史随时间贬值。
+#     只有想保留**管理面状态**（派活 / 安装包录入记录 / 用途与上送绑定等）才加 `--with-store`。
+#   - **渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`）是**派生**的：恢复后跑一次 localize 就能重生；
+#     只有想“恢复即用、且保住原 admin token”才加 `--with-config`。
+#   - 页面证书（`configs/web/tls/`）可重新生成；安装包缓存可重新录入 —— 都不备份。
 #
 # 用法：
-#   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-store]
+#   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-config] [--with-store]
 #   scripts/backup-gateway.sh check [--from <源目录>]
 #   scripts/backup-gateway.sh list  [备份文件|目录]     # 列已备份的归档；给了归档文件则列其内容
 #
 # 参数：
-#   --from <目录>   备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
-#   --to <文件>     backup 的输出文件（默认 ./wist-gateway-identity-<时间戳>.tar.gz）
-#   --with-store    连同 SQLite 库一起（保留管理面状态）
+#   --from <目录>    备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
+#   --to <文件>      输出文件（默认 ./wist-gateway-identity-<时间戳>.tar.gz）
+#   --with-config    连同渲染物（wist-gateway.toml + .value.json）；默认不含
+#   --with-store     连同 SQLite 库（保留管理面状态）；默认不含
 #
 # 也接受位置参数：scripts/backup-gateway.sh backup [源目录] [输出文件]
 #
@@ -29,6 +32,7 @@ CMD="backup"
 CONFIG_DIR=""
 OUT=""
 WITH_STORE=0
+WITH_CONFIG=0
 
 DEFAULT_CONFIG_DIR="configs/gateway"
 
@@ -40,22 +44,27 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
+# 默认只收 PEM（身份）；渲染物（toml/value.json）要 WITH_CONFIG=1；数据库要 WITH_STORE=1。
 collect_files() {
-  local dir="$1" with_store="$2" rel f
+  local dir="$1" rel f
   for rel in \
     state/gateway-ca.crt.pem state/gateway-ca.key.pem \
     state/agent-ca.crt.pem state/agent-ca.key.pem \
     state/admin-tls.crt.pem state/admin-tls.key.pem \
     state/dev-ca.crt.pem state/dev-ca.key.pem \
-    state/install-script-signing-ed25519.pkcs8.pem \
-    wist-gateway.toml wist-gateway.value.json; do
+    state/install-script-signing-ed25519.pkcs8.pem; do
     [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
   done
-  if [[ "${with_store}" == "1" ]]; then
+  if [[ "${WITH_CONFIG}" == "1" ]]; then
+    for rel in wist-gateway.toml wist-gateway.value.json; do
+      [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
+    done
+  fi
+  if [[ "${WITH_STORE}" == "1" ]]; then
     for f in "${dir}"/state/*.db "${dir}"/state/*.db-wal "${dir}"/state/*.db-shm; do
       [[ -e "${f}" ]] && printf '%s\n' "state/$(basename "${f}")"
     done
@@ -66,7 +75,7 @@ do_backup() {
   local dir="$1" out="$2"
   [[ -d "${dir}" ]] || die "找不到源目录：${dir}（先跑 init-gateway / 起一次网关生成；开发态传 --from ~/.wist-gateway）"
   local files=() f
-  while IFS= read -r f; do [[ -n "${f}" ]] && files+=("${f}"); done < <(collect_files "${dir}" "${WITH_STORE}")
+  while IFS= read -r f; do [[ -n "${f}" ]] && files+=("${f}"); done < <(collect_files "${dir}")
   [[ ${#files[@]} -gt 0 ]] || die "${dir} 下没有任何可备份的身份/配置文件"
 
   tar -czf "${out}" -C "${dir}" "${files[@]}"
@@ -79,10 +88,12 @@ do_backup() {
   if [[ ! -e "${dir}/state/gateway-ca.key.pem" && ! -e "${dir}/state/dev-ca.key.pem" ]]; then
     echo "  注意：未找到网关 CA 私钥 —— 若这台还没建 CA，备份不含信任锚。" >&2
   fi
-  if [[ "${WITH_STORE}" != "1" ]]; then
+  if [[ "${WITH_CONFIG}" != "1" || "${WITH_STORE}" != "1" ]]; then
     echo
-    echo "  未含：SQLite 库（agent 注册会由 mTLS 自动重建）／安装包缓存／指标历史／页面证书。"
-    echo "        要保留管理面状态（派活、安装包录入记录等）加 --with-store。"
+    echo "  未含（都是派生/可重建，默认不备）："
+    [[ "${WITH_CONFIG}" != "1" ]] && echo "    - wist-gateway.toml + wist-gateway.value.json（恢复后跑一次 localize 可重生；要保住原 admin token 加 --with-config）"
+    [[ "${WITH_STORE}" != "1" ]] && echo "    - SQLite 库（agent 注册由 mTLS 自动重建；要保留管理面状态加 --with-store）"
+    echo "    - 安装包缓存 / 指标历史 / 页面证书（都可重生成或重导入）"
   fi
   echo
   echo "  输出含私钥，请保管到**安全且离机**的位置。"
@@ -97,7 +108,7 @@ do_check() {
     [[ -z "${f}" ]] && continue
     printf '  %s\n' "${f}"
     any=1
-  done < <(collect_files "${dir}" "${WITH_STORE}")
+  done < <(collect_files "${dir}")
   [[ "${any}" == "1" ]] || echo "  （无）"
 }
 
@@ -141,6 +152,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-store)
       WITH_STORE=1
+      shift
+      ;;
+    --with-config)
+      WITH_CONFIG=1
       shift
       ;;
     --from)

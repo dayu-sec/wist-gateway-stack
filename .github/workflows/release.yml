@@ -10,8 +10,8 @@ permissions:
 jobs:
   # 打包：整仓内容（除 CI 自身的 .github）打成部署包。
   # 用 git archive 出包，只收 git 跟踪的内容 —— dev/bin/（约 92M 本地二进制）、
-  # data-plane/{data,.run}/、configs/gateway/（现场生成，已 ignore）、values/、_gal/.report
-  # 等都未入 git，天然不入包；configs/web/nginx.conf 随仓入库，会进包。
+  # data-plane/{data,.run}/、configs/gateway/ 与 configs/web/tls/（现场生成，已 ignore）、values/、_gal/.report
+  # 等都未入 git，天然不入包；sys/configs/web/nginx.conf.tpl 随仓入库，会进包。
   # 变量解析产物 sys/merged_vars.yml 是 gops 文档标注“需入库”的文件，已在仓库里、
   # 随 git archive 进包，所以这里不需要跑 gops。
   # 纪律：改了 sys/setting/vars.yml 后，本地跑一次 `gops sys update` 并把 merged_vars.yml
@@ -34,7 +34,7 @@ jobs:
             HEAD -- . ':(exclude).github' > "${bundle}.tar"
           gzip -9 "${bundle}.tar"
           echo "包内关键文件："
-          tar -tzf "${bundle}.tar.gz" | grep -E "sys/.*vars\.yml|sys/sys_model\.yml|docker-compose\.yml"
+          tar -tzf "${bundle}.tar.gz" | grep -E "sys/.*vars\.yml|sys/sys_model\.yml|sys/docker-compose\.yml"
           ls -lh "${bundle}.tar.gz"
 
       - uses: actions/upload-artifact@v7

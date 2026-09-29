@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${STACK_ROOT}"
-docker compose up -d victoria-metrics
+# compose 在 sys/ 下：显式 -f 指文件，--project-directory 把项目名与相对挂载路径基准钉回栈根
+COMPOSE=(docker compose --project-directory . -f sys/docker-compose.yml)
+"${COMPOSE[@]}" up -d victoria-metrics
 echo
-docker compose ps victoria-metrics
+"${COMPOSE[@]}" ps victoria-metrics

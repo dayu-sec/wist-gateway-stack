@@ -56,6 +56,7 @@ x-topology/wist/                  <- $WIST
 | `start-wparse.sh` | wparse 数据面（工程在 `../data-plane`） | 后台常驻（`--foreground` 可前台） | `stop-wparse.sh` |
 | `stop-wparse.sh` | 停 wparse | — | — |
 | `re-enroll.sh` | 把本机 wist-agentd 重新注册到网关 | 后台重启 agentd（`--foreground` 可前台） | `wist-agentd/dev/stop.sh` |
+| `setup-domain.sh` | 把网关切到某域名（域 = 网关身份） | —（改配置/证书，不起进程） | — |
 
 **没有 `stop-gateway.sh`**：gateway 的设计是前台运行、`Ctrl+C` 停。要停后台跑的 gateway，用
 `stop-svc.sh`，或自己 `kill "$(lsof -ti tcp:3000)"`。
@@ -65,14 +66,15 @@ x-topology/wist/                  <- $WIST
 | 组件 | 开发态地址 | 发布态对应 |
 |---|---|---|
 | gateway（控制面） | `https://127.0.0.1:3000`（**HTTPS**，自签证书） | `https://<host>:3000` |
-| web（前端） | `http://127.0.0.1:5174`（vite，**明文 HTTP**） | `http://<host>:8443`（nginx） |
+| web（前端） | `http://127.0.0.1:5174`（vite，**明文 HTTP**） | `https://<host>:8443`（nginx 终止 TLS） |
 | VictoriaMetrics | `http://127.0.0.1:18429`（容器内 8428） | `18429:8428` |
 | wparse（数据面） | 无对外端口 | 无对外端口 |
 | wist-agentd | 上报到 gateway `:3000` | 同 |
 
 > **端口口径与发布态一致**：gateway 那侧一直是 HTTPS。用 `curl` 排查记得加 `-k` 且用
 > `https://`——往 TLS 端口发明文 HTTP 会得到 `Received HTTP/0.9` 这种误导性报错
-> （网关日志里是 `failed TLS handshake ... InvalidContentType`）。
+> （网关日志里是 `failed TLS handshake ... InvalidContentType`）。发布态前端（`8443`）也
+> 由 nginx 终止 TLS（`https://<host>:8443`，证书是页面自己的）；开发态前端是 vite 的明文 `5174`。
 
 ## 二进制与路径（开发态实际运行的东西）
 
@@ -138,11 +140,12 @@ gateway 的 pidfile 记的是**前台包装脚本**而不是 gateway 进程本�
 
 | 组件 | 位置 | 内容 |
 |---|---|---|
-| gateway | `~/.wist-gateway/` | `wist-gateway.toml`；`state/`：SQLite 库、TLS 证书（自签**叶证书**，兼作 Agent 信任锚）、Ed25519 签名密钥、`install-package/`（管理面设置的安装包本地缓存） |
+| gateway | `~/.wist-gateway/` | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`dev-ca.crt.pem`，由 `setup-domain.sh` 建）、Ed25519 签名密钥、`install-package/`（管理面设置的安装包本地缓存）。**与发布态（`configs/gateway/`）分开两个目录** |
 | wist-agentd | `~/.wist-agentd/` | `agentd.toml`、`tasks/`、`state/agent_runtime.json`（`wic_` 凭据）、`log/` |
 | wparse | `data-plane/{data,.run}/` | 运行期数据与临时产物 |
 
-开发态与发布态的网关持久数据是**分开**的（开发态在 `$HOME`，发布态挂 `configs/gateway/`）；
+开发态与发布态的网关持久数据是**分开两个目录**：开发态在 `$HOME/.wist-gateway`，发布态挂 `configs/gateway/`
+（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等，分开才各自自洽）；
 wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf,connectors,models,topology}`（发布态只读挂载），
 运行态开发态在 `data-plane/{data,.run}`、发布态在 `../data-plane-run/`。
 
@@ -156,7 +159,9 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 |---|---|---|
 | `SKIP_VM` / `SKIP_WPARSE` / `SKIP_WEB` | `start-svc.sh`/`stop-svc.sh` 裁掉某个组件（`=1`） | 不跳过 |
 | `SKIP_BUILD` | 跳过 `cargo build`（`start-svc.sh`/`start-gateway.sh`） | 每次都构建 |
-| `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `~/.wist-gateway` |
+| `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `~/.wist-gateway`（发布态另用 `configs/gateway`） |
+| `GATEWAY_LISTEN` | `setup-domain.sh` 写进配置的监听地址 | `0.0.0.0:443` |
+| `GATEWAY_URL_PORT` | `setup-domain.sh` 对外基址里的端口（空串 = 不带端口） | 按监听端口推导 |
 | `GATEWAY_PIDFILE` | 网关包装脚本 pidfile | `/tmp/wist-gateway.pid` |
 | `GATEWAY_PORT` | `stop-svc.sh` 端口兜底用的端口 | `3000` |
 | `WEB_URL` | 前端地址（起停两侧必须一致） | `http://127.0.0.1:5174` |
@@ -178,7 +183,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 3. **`stop-web.sh` 的端口兜底会误伤**：它除了按 pidfile 停，还会清理该端口上所有监听进程。
    如果你另外用手工 `npm run dev` 起过一个前端，注意它可能占用的是 Vite 默认的 **5173**，
    而本目录的脚本固定用 **5174**（`--strictPort`）——两者不是同一个实例，别互相误停。
-4. **前端反代目标默认是 `https://localhost:3000`**（`server.proxy` 已设 `secure: false`，即**不校验**自签证书，所以自签场景不会 502，可直接用）。但 target 必须写成 `https://`；写 `http://` 会撞上上面第 2 条的 TLS 握手失败，表现为反代全挂。
+4. **前端反代目标由 `start-web.sh` 从网关配置推导**（取 `[server] listen_addr` 的端口 → `https://127.0.0.1:<port>`；读不到配置才回落 `https://localhost:3000`，可用 `WARP_INSIGHT_WEB_PROXY_TARGET` 覆盖）。target 必须写成 `https://`（`server.proxy` 已设 `secure: false`，不校验自签证书）；写 `http://` 会撞上上面第 2 条的 TLS 握手失败，表现为反代全挂。
 5. **`dev/bin/` 不入 git**（约 92M），随发布包也不带。里面只有 `wparse` 被脚本使用；
    `wpadm` / `wpgen` / `wpl-check` / `wprescue` 是**手工 WPL 开发工具**，无脚本引用
    （用法见 `../data-plane/models/wpl/mac/README.md`）。
@@ -200,11 +205,13 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
    `admin_api_token` 去签发 enrollment token；它只修 agentd 侧，不动网关。
 10. **`start-svc.sh` 放后台跑时，`Ctrl+C` 管不到 gateway**：此时用 `stop-svc.sh`，
    它靠 pidfile + 端口兜底来停。
-11. **网关自签 TLS 证书是「叶证书」形态**（`basicConstraints=CA:FALSE`），它同时被回填成 Agent 的信任锚。
-   `start-gateway.sh` 会检测到旧的 `CA:TRUE` 形态并**自动重新生成**（旧证书会被 Agent 侧的 rustls 以
-   `CaUsedAsEndEntity` 拒收，表现为 agentd 上报时 `error sending request`，而 `curl --cacert` 却测得过）。
-   证书一换就意味着**信任锚变了**：Agent 侧内嵌的 `trust_bundle` 随之失效，必须**重跑安装**
-   （`install.sh` 会用新的 initial-config 重写 `agentd.toml`；仅 `./dev/re-enroll.sh` 不会刷新 `trust_bundle`）。
+11. **信任锚走文件，且通常是 CA 根**：配置里是 `[agent] trust_bundle_file`（相对配置目录）。
+   `start-gateway.sh` 每次启动把它指向 `state/dev-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），
+   没有 CA 时才退回叶证书自身 `state/admin-tls.crt.pem`。旧的 `trust_bundle = """…"""` 内联写法已移除。
+   叶证书是 `CA:FALSE` 形态（`CA:TRUE` 会被 rustls 以 `CaUsedAsEndEntity` 拒收）。**只要锚（CA）不变，
+   轮换叶证书 / 换域名是安全的**，agent 无感；只有**锚变了**（换 CA、删掉 `dev-ca.*` 重生成，
+   或一直在无 CA 模式下换了叶证书）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
+   （仅 `./dev/re-enroll.sh` 不刷新它）。
 
 ## 目录
 
@@ -217,6 +224,7 @@ dev/
   start-vm.sh / stop-vm.sh      # 仅启/停 VictoriaMetrics（走 Docker）
   start-wparse.sh / stop-wparse.sh   # 仅启/停数据面（工程在 ../data-plane）
   re-enroll.sh                  # 重注册本机 wist-agentd 到网关
+  setup-domain.sh               # 把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
   bin/                          # wparse 等本地二进制（不入 git）
 
 ../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）

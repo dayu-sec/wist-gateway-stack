@@ -4,7 +4,7 @@
 # 做四件事：
 #   1. 建/复用一张小 CA（state/dev-ca.*.pem）—— 它成为 agent 的信任锚；
 #   2. 用这张 CA 签一张叶证书，SAN 含新域名（以及传入的旧域名、localhost、127.0.0.1）；
-#   3. 改写配置的 listen_addr / public_base_url / [agent] trust_bundle ——
+#   3. 改写配置的 listen_addr / public_base_url / [agent] trust_bundle_file ——
 #      其它字段一律不动，尤其**不碰 admin_api_token**（所以这里绝不调用 `wist-gateway init-config`，
 #      它会整份重写配置并换掉 token）；
 #   4. 打印自检命令与影响面（已装 agent 要不要重跑安装）。
@@ -18,7 +18,7 @@
 #     ./dev/setup-domain.sh c-dev02.test.gw.jingang.cloud c-dev01.test.gw.jingang.cloud
 #
 # 可覆盖 env：
-#   WIST_GATEWAY_HOME  网关持久目录（默认 ~/.wist-gateway）
+#   WIST_GATEWAY_HOME  网关持久目录（默认 ~/.wist-gateway；发布态另用 <栈根>/configs/gateway）
 #   GATEWAY_LISTEN     监听地址（默认 0.0.0.0:443；443 是特权端口，起服务要 root）
 #   GATEWAY_URL_PORT   对外基址里的端口；未设置时按 GATEWAY_LISTEN 推导（443 就不带端口）；
 #                      显式设成空串（GATEWAY_URL_PORT=）＝ 一定不带端口（前面挂反代时用）
@@ -195,71 +195,88 @@ else
   note "DRY_RUN：跳过证书生成/复用"
 fi
 
-# trust_bundle = 信任锚：有 CA 就是 CA 根，--no-ca 时是叶证书本身。
+# trust_bundle_file = 信任锚：有 CA 就是 CA 根，--no-ca 时是叶证书本身；配置只记它的**文件路径**。
 if [[ "${USE_CA}" == "1" ]]; then
   ANCHOR_FILE="${CA_CRT}"
 else
   ANCHOR_FILE="${LEAF_CRT}"
 fi
 
-if [[ "${DRY_RUN}" != "1" ]]; then
-  ANCHOR_PEM="$(cat "${ANCHOR_FILE}")"
-else
-  ANCHOR_PEM="(DRY_RUN：${ANCHOR_FILE} 的内容)"
-fi
-
 # ── 改写配置 ──────────────────────────────────────────────────────────────────
 # 逐段改行：listen_addr / public_base_url 只改 [server] 段里那两个键（[ingest] 也有
-# listen_addr，不能一条正则打天下）；trust_bundle 可能是 """ 多行块，单独替换。
-python3 - "${CONFIG}" "${LISTEN_VALUE}" "${PUBLIC_BASE_URL}" "${ANCHOR_PEM}" "${DRY_RUN}" <<'PY'
+# listen_addr，不能一条正则打天下）；信任锚只写 `[agent] trust_bundle_file`（指向锚文件），
+# 并清掉旧版内联 `trust_bundle = """…"""`（新配置不认它，留着会让网关以 missing field 起不来）。
+python3 - "${CONFIG}" "${LISTEN_VALUE}" "${PUBLIC_BASE_URL}" "${ANCHOR_FILE}" "${DRY_RUN}" <<'PY'
+import os
 import re
 import sys
 
-path, listen, base_url, anchor, dry = sys.argv[1:6]
+path, listen, base_url, anchor_file, dry = sys.argv[1:6]
+anchor_rel = os.path.join("state", os.path.basename(anchor_file))
 
 with open(path) as handle:
-    lines = handle.readlines()
+    lines = handle.read().splitlines()
 
 section = ""
 out = []
-hits = {"listen": 0, "url": 0}
-for line in lines:
+hits = {"listen": 0, "url": 0, "anchor": 0}
+index = 0
+while index < len(lines):
+    line = lines[index]
     stripped = line.strip()
     if stripped.startswith("[") and stripped.endswith("]"):
         section = stripped
+    if re.match(r"^trust_bundle\s*=", line):
+        # 旧版内联锚：连三引号块一起丢弃。
+        if '"""' in line and line.count('"""') < 2:
+            index += 1
+            while index < len(lines) and '"""' not in lines[index]:
+                index += 1
+        index += 1
+        continue
     if section == "[server]":
         if re.match(r"^listen_addr\s*=", line) and listen != "__KEEP__":
-            line = f'listen_addr = "{listen}"\n'
+            line = f'listen_addr = "{listen}"'
             hits["listen"] += 1
         elif re.match(r"^public_base_url\s*=", line):
-            line = f'public_base_url = "{base_url}"\n'
+            line = f'public_base_url = "{base_url}"'
             hits["url"] += 1
+    elif section == "[agent]" and re.match(r"^trust_bundle_file\s*=", line):
+        line = f'trust_bundle_file = "{anchor_rel}"'
+        hits["anchor"] += 1
     out.append(line)
+    index += 1
 
-text = "".join(out)
-block = 'trust_bundle = """\n' + anchor.strip() + '\n"""'
-text, count = re.subn(
-    r'(?ms)^trust_bundle = (""".*?"""|".*?")\s*\n', block + "\n", text, count=1
-)
+text = "\n".join(out) + "\n"
+if hits["anchor"] == 0:
+    text, replaced = re.subn(
+        r"(?m)^(\[agent\]\s*)$",
+        lambda m: m.group(1) + f'\ntrust_bundle_file = "{anchor_rel}"',
+        text,
+        count=1,
+    )
+    if replaced == 1:
+        hits["anchor"] = 1
 
-if hits["url"] != 1 or hits["listen"] > 1 or count != 1:
+if hits["url"] != 1 or hits["listen"] > 1 or hits["anchor"] != 1:
     sys.exit(
         "配置改写失败：server.listen_addr %d 处 / server.public_base_url %d 处 / "
-        "trust_bundle %d 处 —— 配置形状可能变过，请手工核对" % (hits["listen"], hits["url"], count)
+        "agent.trust_bundle_file %d 处 —— 配置形状可能变过，请手工核对"
+        % (hits["listen"], hits["url"], hits["anchor"])
     )
 
 if dry == "1":
     print("DRY_RUN：不改配置。将要写入：")
-    print(f'  listen_addr      = "{listen}"')
-    print(f'  public_base_url  = "{base_url}"')
-    print("  trust_bundle     = <锚 PEM，{} 行>".format(anchor.strip().count("\n") + 1))
+    print(f'  listen_addr             = "{listen}"')
+    print(f'  public_base_url         = "{base_url}"')
+    print(f'  agent.trust_bundle_file = "{anchor_rel}"')
 else:
     with open(path, "w") as handle:
         handle.write(text)
     print(f"配置已更新：{path}")
-    print(f'  listen_addr     = {listen if listen != "__KEEP__" else "(保留原值)"}')
-    print(f"  public_base_url = {base_url}")
-    print("  trust_bundle    = <锚 PEM>")
+    print(f'  listen_addr             = {listen if listen != "__KEEP__" else "(保留原值)"}')
+    print(f"  public_base_url         = {base_url}")
+    print(f"  trust_bundle_file       = {anchor_rel}")
 PY
 
 # ── 自检与影响面 ──────────────────────────────────────────────────────────────
@@ -311,15 +328,13 @@ cat <<EOF
 
 ── 别踩这几条 ──────────────────────────────────────────────────────────
   1. **别删 ${LEAF_CRT}**：start-gateway.sh 发现它缺失会按 CN=localhost 重新生成，
-     域名就白切了。它每次启动还会把信任锚重新灌进配置（现在优先用 dev-ca.crt.pem）。
+     域名就白切了。它每次启动还会把 `[agent] trust_bundle_file` 指回锚（有 dev-ca 时用 CA 根）。
   2. **别对已有配置跑 \`wist-gateway init-config\`**：整份重写，admin token 会变。
-  3. start-gateway.sh 的残留清理仍写死 3000（\`lsof -ti tcp:3000\`）——
-     端口换成 443 后改用它，或改用 ./dev/stop-svc.sh（它认 GATEWAY_PORT）。
 EOF
 
 if [[ -n "${URL_PORT}" && "${URL_PORT}" != "3000" ]]; then
   cat <<EOF
-  4. 前端 /api 反代目标要跟着改：
+  3. 前端 /api 反代目标要跟着改：
        WARP_INSIGHT_WEB_PROXY_TARGET=${PUBLIC_BASE_URL} ./dev/start-web.sh
 EOF
 fi

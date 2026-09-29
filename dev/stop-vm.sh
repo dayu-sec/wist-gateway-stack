@@ -6,4 +6,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${STACK_ROOT}"
-docker compose stop victoria-metrics
+# compose 在 sys/ 下（与 start-vm.sh 一致）
+docker compose --project-directory . -f sys/docker-compose.yml stop victoria-metrics

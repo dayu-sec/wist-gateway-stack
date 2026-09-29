@@ -2,7 +2,7 @@ system:
 - name: IMAGE_SPC
   value: ghcr.io/dayu-sec
 - name: GATEWAY_TAG
-  value: v0.1.2-alpha
+  value: v0.1.5-alpha
 - name: WEB_TAG
   value: v0.1.5-alpha
 - name: VM_TAG
@@ -17,17 +17,25 @@ system:
   value: 8443
 - name: VM_PORT
   value: 18429
+- name: WPARSE_PORT
+  value: 9000
 - name: RETENTION_PERIOD
   value: 6
 - name: TZ
   value: Asia/Shanghai
+- name: WEB_DOMAIN
+  value: c-dev01.test.gw.jingang.cloud
 - name: GATEWAY_CONFIG_DIR
   value: ./configs/gateway
 - name: WEB_NGINX_CONF
   value: ./configs/web/nginx.conf
+- name: WEB_TLS_DIR
+  value: ./configs/web/tls
 - name: WPARSE_WORK_DIR
   value: ./data-plane
 - name: WPARSE_RUN_DATA
   value: ./data-plane-run/data
 - name: WPARSE_RUN_STATE
   value: ./data-plane-run/.run
+- name: PACKAGE_DIR
+  value: ./packages

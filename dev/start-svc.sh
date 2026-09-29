@@ -61,7 +61,7 @@ wait_vm() {
     fi
     sleep 0.2
   done
-  echo "  VictoriaMetrics 未就绪（日志：docker compose logs victoria-metrics）" >&2
+  echo "  VictoriaMetrics 未就绪（日志：docker compose --project-directory . -f sys/docker-compose.yml logs victoria-metrics）" >&2
   return 1
 }
 

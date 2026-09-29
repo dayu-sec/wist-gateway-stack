@@ -2,13 +2,13 @@
 #
 # 这里的变量随环境/客户变化；`gops sys update` 解析出 sys/resolved_vars.yml，
 # `gops sys localize` 再合并 values/value.yml（客户覆盖）导出为同目录 `.env`，
-# 供 docker-compose.yml 里的 `${VAR}` 消费。
+# 供 sys/docker-compose.yml 里的 `${VAR}` 消费。
 #
 # 说明：
 #   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
 #   - 密钥不要写在这里：compose 里用 ${SEC_xxx} 占位，运行时由 `gops sys start`
 #     从 ~/.galaxy/sec_value.yml 注入，不落盘（本栈当前无密钥）；
-#   - 容器内端口/路径/服务名是应用契约，直接写在 docker-compose.yml 里。
+#   - 容器内端口/路径/服务名是应用契约，直接写在 sys/docker-compose.yml 里。
 system:
   # 镜像源前缀：国内走腾讯云 TCR，境外改成 ghcr.io/dayu-sec
   - name: IMAGE_SPC
@@ -16,7 +16,7 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.2-alpha
+    value: v0.1.5-alpha
   - name: WEB_TAG
     value: v0.1.5-alpha
   - name: VM_TAG
@@ -38,6 +38,9 @@ system:
     value: 8443
   - name: VM_PORT
     value: 18429
+  # 数据面入口端口：agentd 往这台上送日志/遥测（容器内是 wparse 的 source tcp_1:9000）
+  - name: WPARSE_PORT
+    value: 9000
 
   # 指标保留期（月）与时区
   - name: RETENTION_PERIOD
@@ -45,11 +48,19 @@ system:
   - name: TZ
     value: Asia/Shanghai
 
+  # 对外域名（前端站点证书的 SAN，也是网关 public_base_url 的 host）；改了重跑 localize
+  - name: WEB_DOMAIN
+    value: c-dev01.test.gw.jingang.cloud
+
   # 挂载源路径（按部署环境摆放）
   - name: GATEWAY_CONFIG_DIR
     value: ./configs/gateway
+  # 前端站点配置：由 sys/configs/web/nginx.conf.tpl 在 localize 时渲染到此（运行物，不入库）
   - name: WEB_NGINX_CONF
     value: ./configs/web/nginx.conf
+  # 前端站点 TLS 证书目录（运行时生成，不入库；web 容器挂到 /certs；用页面自己的证书，与网关分开）
+  - name: WEB_TLS_DIR
+    value: ./configs/web/tls
   # wparse 工程：配置的**唯一源**（conf/connectors/models/topology），开发态与发布态共用
   - name: WPARSE_WORK_DIR
     value: ./data-plane
@@ -64,3 +75,7 @@ system:
     value: ./data-plane-run/data
   - name: WPARSE_RUN_STATE
     value: ./data-plane-run/.run
+
+  # 安装包投放目录（宿主），只读挂到网关容器的 /packages；界面「本地来源」填 /packages/<文件名>
+  - name: PACKAGE_DIR
+    value: ./packages

@@ -18,7 +18,9 @@
 # 供 ./dev/stop-svc.sh 精确停止——杀本脚本会触发 EXIT trap 一并停掉 gateway。
 #
 # 网关持久数据（wist-gateway.toml + state/：SQLite 库 / TLS / 签名密钥）默认落在
-# ${HOME}/.wist-gateway，与 .run（运行期临时产物）分离；清 .run 不再清掉 agents 注册表。
+# ${HOME}/.wist-gateway，与运行期临时产物（.run）分离；清 .run 不再清掉 agents 注册表。
+# **与发布态（docker，用 `<栈根>/configs/gateway`）分开两个目录**：两边需要的值不同
+# （victoria_metrics_url、public_base_url、是否装 [content] 等），分开才能各自自洽。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,13 +88,15 @@ build_rust_binaries() {
 
 # 确保网关的 TLS 自签证书存在，且是**合法叶证书**。
 #
-# 这张证书既是服务端证书，又被回填成 Agent 的信任锚（见下方 trust_bundle 回填）。两个角色要求不同：
+# 网关自签 TLS 证书：与服务端/信任锚两个角色一致即可。开发态**自建一张小 CA**
+# （`state/dev-ca.crt.pem`，由 `./dev/setup-domain.sh` 建）时，锚 = 那张 CA 根，本证书是它签的叶证书；
+# 没有 CA 时，才退回「叶证书自身当锚」。两个角色要求不同：
 #   - 服务端：必须是合法叶证书（basicConstraints: critical,CA:FALSE，keyUsage 含 digitalSignature/
 #     keyEncipherment，extendedKeyUsage: serverAuth）。`openssl req -x509` 的旧默认会打上 `CA:TRUE`，
 #     rustls/webpki 便以 CaUsedAsEndEntity 拒收它作服务端证书 —— Agent 侧表现为 TLS 握手失败，
 #     日志里是 `wist-agentd status report failed: error sending request for url (...)`。
-#   - 信任锚：不要求是 CA，webpki 接受非 CA 的自签证书作锚，所以一张证书两用可行。
-#     代价是「换证书 = 换信任锚」，Agent 必须重新获取（见 ./dev/re-enroll.sh）。
+#   - 信任锚：有 CA 时是 CA 根（换域名/续期只重签叶证书，Agent 无感）；无 CA 时是叶证书自身
+#     （webpki 接受非 CA 的自签证书作锚），此时「换证书 = 换锚 = Agent 要重装」。
 ensure_admin_tls_cert() {
   local state_dir="$1"
   local cert="${state_dir}/admin-tls.crt.pem"
@@ -233,24 +237,50 @@ start_gateway() {
   ensure_admin_tls_cert "${state_dir}"
   # wist-gateway 启动校验 agent.package_file 存在；指向仓库 agentd 二进制。
   sed -i '' "s|^package_file = .*|package_file = \"${AGENTD_CRATE}/target/debug/wist-agentd\"|" "${GW_HOME}/wist-gateway.toml"
-  # 信任锚：**优先用 `dev-ca.crt.pem`**（`dev/setup-domain.sh` 建的那张小 CA），没有才用叶证书本身。
-  # 不这样写的话，每次重启都把锚退回叶证书，而已经装好的 agent 认的是 CA —— 新发出的安装命令
-  # 就与现网不一致了（agent 会拒収新证书，或新装的 agent 拿不到正确的锚）。
+  # 信任锚**只走文件** `[agent] trust_bundle_file`：优先 `dev-ca.crt.pem`（setup-domain.sh 建的小 CA，
+  # 锚 = CA 根 → 换域名/续期只重签叶证书、agent 无感）；没有 CA 才退回叶证书自身。
+  # 顺手清掉旧版内联写法 `trust_bundle = """…"""`（新配置已不认它，留着会让网关以
+  # `missing field trust_bundle_file` 起不来）。
   python3 - "${state_dir}/admin-tls.crt.pem" "${state_dir}/dev-ca.crt.pem" "${GW_HOME}/wist-gateway.toml" <<'PY'
-import os, re, sys
-nl = chr(10)
+import os
+import re
+import sys
+
 leaf, ca, path = sys.argv[1:4]
 anchor = ca if os.path.exists(ca) else leaf
-cert = open(anchor).read().strip()
-text = open(path).read()
-block = 'trust_bundle = """' + nl + cert + nl + '"""'
-text = re.sub(
-    r'(?ms)^trust_bundle = (""".*?"""|".*?")\s*\n',
-    block + '\n',
-    text,
-    count=1,
-)
-open(path, "w").write(text)
+anchor_rel = os.path.join("state", os.path.basename(anchor))
+
+with open(path) as handle:
+    lines = handle.read().splitlines()
+
+kept = []
+index = 0
+while index < len(lines):
+    line = lines[index]
+    if re.match(r"^trust_bundle\s*=", line):
+        # 旧版内联锚：连三引号块一起丢弃。
+        if '"""' in line and line.count('"""') < 2:
+            index += 1
+            while index < len(lines) and '"""' not in lines[index]:
+                index += 1
+        index += 1
+        continue
+    kept.append(line)
+    index += 1
+
+text = "\n".join(kept) + "\n"
+setting = f'trust_bundle_file = "{anchor_rel}"'
+if re.search(r"(?m)^trust_bundle_file\s*=", text):
+    text = re.sub(r"(?m)^trust_bundle_file\s*=.*$", setting, text, count=1)
+else:
+    text, replaced = re.subn(
+        r"(?m)^(\[agent\]\s*)$", lambda m: m.group(1) + "\n" + setting, text, count=1
+    )
+    if replaced != 1:
+        sys.exit("配置里找不到 [agent] 段，无法写入 trust_bundle_file")
+with open(path, "w") as handle:
+    handle.write(text)
+print(f"  trust_bundle_file = {anchor_rel}")
 PY
   WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml" \
     "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1 &

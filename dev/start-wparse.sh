@@ -31,7 +31,7 @@ mkdir -p "$(dirname "${LOCK}")"
 
 # 单实例保障：锁在运行态的 .run/ 下（<work-root>/.run/.wparse.lock）。
 # 引擎自身没有单实例保护（同名 work root 起两个会互写 .run/ 与输出），发布态由容器
-# entrypoint 的 flock 持锁（见 docker-compose.yml），这里用 python3 的 fcntl 拿同一把。
+# entrypoint 的 flock 持锁（见 sys/docker-compose.yml），这里用 python3 的 fcntl 拿同一把。
 # 锁 fd 设为可继承：Python 默认 O_CLOEXEC，不设的话 exec 后锁就没了。
 LOCK_PY=$(cat <<'PY'
 import fcntl, os, sys
@@ -43,7 +43,7 @@ try:
 except BlockingIOError:
     sys.stderr.write(
         "[wparse] 另一个 wparse 引擎正持有 " + lock + "：同一 work root 只能起一份\n"
-        "[wparse] 排查：pgrep -fl 'wparse daemon'；docker compose ps\n"
+        "[wparse] 排查：pgrep -fl 'wparse daemon'；gops sys status\n"
     )
     sys.exit(75)
 os.execv(cmd[0], cmd)
@@ -89,7 +89,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   BUSY="$(docker ps --filter "volume=${WORK_ROOT_ABS}" --format '{{.Names}}' 2>/dev/null | head -3 | tr '\n' ' ')"
   if [[ -n "${BUSY}" ]]; then
     echo "已有容器挂着这个 work root（${BUSY}），不能同时起宿主实例：" >&2
-    echo "  同一 work root 只能一个引擎；要停容器：docker compose stop wparse" >&2
+    echo "  同一 work root 只能一个引擎；要停容器：gops sys stop" >&2
     exit 75
   fi
 fi

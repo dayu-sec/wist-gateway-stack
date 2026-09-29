@@ -11,7 +11,7 @@
 #   ./dev/re-enroll.sh --foreground # 前台跑 agentd（联调看日志）
 #
 # 可覆盖 env：
-#   WIST_GATEWAY_HOME      网关数据 home（默认 ~/.wist-gateway）
+#   WIST_GATEWAY_HOME      网关数据 home（默认 ~/.wist-gateway；发布态另用 <栈根>/configs/gateway）
 #   WIST_GATEWAY_URL       网关地址（默认 https://127.0.0.1:3000）
 #   WIST_AGENTD_HOME       agentd 配置+数据 home（默认 ~/.wist-agentd）
 set -euo pipefail
@@ -91,4 +91,4 @@ fi
 echo
 echo "完成。验证："
 echo "  cat ${AGENTD_HOME}/state/agent_runtime.json       # 应有新的 wic_ 凭据"
-echo "  python3 -m json.tool ${GW_HOME}/state/wist-gateway-store.json"
+echo "  ls -l ${GW_HOME}/state/wist-gateway-store.db        # 注册表在内嵌 SQLite（不是 .json）"

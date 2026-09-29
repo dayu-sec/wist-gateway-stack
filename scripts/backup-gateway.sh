@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 备份 / 恢复网关的**身份与配置**（不可再生的 PEM）。默认**不含数据库与历史数据**。
+# 备份网关的**身份与配置**（不可再生的 PEM）。默认**不含数据库与历史数据**；恢复见 `restore-gateway.sh`。
 #
 # 口径（与 mTLS 身份模型一致）：
 #   - **要备份**的是 PEM：网关 CA（信任锚 —— 丢了 = 全队 agent 重装）、叶证书、安装脚本签名密钥、
@@ -10,21 +10,16 @@
 #
 # 用法：
 #   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-store]
-#   scripts/backup-gateway.sh restore <备份文件> [--to <目标目录>] [--force]
 #   scripts/backup-gateway.sh check [--from <源目录>]
 #
 # 参数：
 #   --from <目录>   备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
-#   --to <路径>     backup = 输出文件；restore = 目标目录
+#   --to <文件>     backup 的输出文件（默认 ./wist-gateway-identity-<时间戳>.tar.gz）
 #   --with-store    连同 SQLite 库一起（保留管理面状态）
-#   --force         restore 时覆盖已有文件
 #
-# 也接受位置参数（与 --from/--to 等价）：
-#   scripts/backup-gateway.sh backup  [源目录] [输出文件]
-#   scripts/backup-gateway.sh restore <备份文件> [目标目录]
+# 也接受位置参数：scripts/backup-gateway.sh backup [源目录] [输出文件]
 #
-# 恢复：把 PEM 放回 `<源目录>/state/` 即可（restore 会解包）。重启网关后，持有效客户端证书的
-#       agent 会**自动重新登记**；被删掉的数据库/历史不会恢复，也不需要。
+# 恢复用独立脚本：scripts/restore-gateway.sh <备份文件> [--to <目标目录>] [--force] [--restart]
 #
 # 输出含私钥：请落到**安全且离机**的位置（脚本把产物权限设为 0600）。
 set -euo pipefail
@@ -32,9 +27,7 @@ set -euo pipefail
 CMD="backup"
 CONFIG_DIR=""
 OUT=""
-FILE=""
 WITH_STORE=0
-FORCE=0
 
 DEFAULT_CONFIG_DIR="configs/gateway"
 
@@ -46,7 +39,7 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
@@ -94,25 +87,6 @@ do_backup() {
   echo "  输出含私钥，请保管到**安全且离机**的位置。"
 }
 
-do_restore() {
-  local file="$1" dir="$2"
-  [[ -f "${file}" ]] || die "找不到备份文件：${file}"
-  mkdir -p "${dir}/state"
-  if [[ "${FORCE}" != "1" ]]; then
-    local entry
-    while IFS= read -r entry; do
-      [[ "${entry}" == */ ]] && continue
-      [[ -e "${dir}/${entry}" ]] && die "目标已存在：${dir}/${entry}（要覆盖加 --force）"
-    done < <(tar -tzf "${file}")
-  fi
-  tar -xzf "${file}" -C "${dir}"
-  echo "已恢复 → $(abspath "${dir}")"
-  echo "  agent 身份：持有效客户端证书的 agent 会在重连时**自动重新登记**（无需人工）。"
-  echo "  下一步：重启网关让新配置/证书生效 ——"
-  echo "    ./dev/svc.sh stop gateway && ./dev/svc.sh start gateway        # 开发态"
-  echo "    或 docker compose --project-directory . -f sys/docker-compose.yml restart gateway  # 发布态"
-}
-
 do_check() {
   local dir="$1"
   [[ -d "${dir}" ]] || die "找不到源目录：${dir}"
@@ -138,10 +112,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-store)
       WITH_STORE=1
-      shift
-      ;;
-    --force)
-      FORCE=1
       shift
       ;;
     --from)
@@ -176,10 +146,8 @@ case "${CMD}" in
     do_backup "${CONFIG_DIR}" "${OUT}"
     ;;
   restore)
-    FILE="${positional[0]:-}"
-    [[ -n "${FILE}" ]] || die "用法：$0 restore <备份文件> [--to <目标目录>] [--force]"
-    CONFIG_DIR="${TO:-${positional[1]:-${DEFAULT_CONFIG_DIR}}}"
-    do_restore "${FILE}" "${CONFIG_DIR}"
+    usage >&2
+    die "恢复请用另一个脚本：scripts/restore-gateway.sh <备份文件> [--to <目标目录>] [--force] [--restart]"
     ;;
   check)
     CONFIG_DIR="${FROM:-${positional[0]:-${DEFAULT_CONFIG_DIR}}}"
@@ -190,6 +158,6 @@ case "${CMD}" in
     ;;
   *)
     usage >&2
-    die "未知子命令：${CMD}（可用：backup | restore | check）"
+    die "未知子命令：${CMD}（可用：backup | check）"
     ;;
 esac

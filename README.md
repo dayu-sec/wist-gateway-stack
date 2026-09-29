@@ -79,7 +79,8 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
-    backup-gateway.sh       # 备份/恢复网关**身份**（PEM）；数据库与历史不用备（见「备份与恢复」）
+    backup-gateway.sh       # 备份网关**身份**（PEM）；数据库与历史不用备（见「备份与恢复」）
+    restore-gateway.sh      # 从备份恢复身份（新机器重建）；库/历史不需要恢复
   .github/workflows/release.yml     # 打包发布（见「制品包」）
   README.md
 ```
@@ -265,8 +266,8 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ./scripts/backup-gateway.sh check --from configs/gateway                   # 先看会备份哪些件（不写文件）
 ./scripts/backup-gateway.sh --from configs/gateway --with-store            # 保留管理面状态（派活/安装包录入记录/用途与上送绑定）才加
 
-# 恢复（--to 指定**目标目录**，默认 configs/gateway；默认不覆盖已有文件，加 --force 才覆盖）
-./scripts/backup-gateway.sh restore <file> --to configs/gateway [--force]
+# 恢复（独立脚本；--to 指定**目标目录**，默认 configs/gateway；默认不覆盖已有文件，加 --force 才覆盖）
+./scripts/restore-gateway.sh <备份文件> --to configs/gateway [--force] [--restart]
 ```
 
 - **必须留**（不可再生）：`state/gateway-ca.key.pem`（信任锚 —— 丢了 = 全队 agent 用新 CA 重装）、`state/admin-tls.*`（叶证书）、`state/install-script-signing-ed25519.pkcs8.pem`（安装脚本签名密钥）、`wist-gateway.value.json`（admin token / 域名 / 包名）。

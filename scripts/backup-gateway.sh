@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# 备份网关的**身份与（可选）运行状态**。备份分**两级**，用 `--level` 选；恢复见 `restore-gateway.sh`。
+# 备份网关的**身份与运行状态**。备份分**两级**，用 `--level` 选；恢复见 `restore-gateway.sh`。
 #
-# 级别（口径与 mTLS 身份模型一致）：
-#   - `rebuild`（可重建级，**默认**）：只备**不可再生**的身份 —— 网关 CA（信任锚，丢了 = 全队 agent 重装）、
-#     agent CA（签客户端证书）、服务端叶证书、安装脚本签名密钥。其余都能从它们重建。
-#   - `restore`（可还原级）：在可重建级之上，再带**渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`）
-#     与 **SQLite 库** —— 用于按原样还原运行状态（含原 admin token、派活/安装包录入等管理面状态）。
+# 级别：
+#   - `rebuild`（可重建级，**默认**）：把网关**重新立起来**所需的全部 —— 身份 PEM（网关 CA = 信任锚，
+#     丢了 = 全队 agent 重装；agent CA；服务端叶证书；安装脚本签名密钥）＋ 渲染好的 `wist-gateway.toml`。
+#     恢复后**直接起网关即可**，不必再跑 localize 渲染。
+#   - `restore`（可还原级）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源，保住原 admin token /
+#     `package_file`）与 **SQLite 库** —— 按原样还原管理面状态（派活 / 安装包录入 / 用途与上送绑定等）。
 #
 # 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷，随时间贬值）、安装包缓存、
 # 页面证书（`configs/web/tls/`）、`configs/gateway/content/`。
@@ -21,7 +22,6 @@
 #   --to <文件>      输出文件（默认 ./wist-gateway-backup-<时间戳>.tar.gz）
 #
 # 恢复用独立脚本：scripts/restore-gateway.sh <备份文件> [--to <目标目录>] [--force] [--restart]
-#
 # 输出含私钥：请落到**安全且离机**的位置（脚本把产物权限设为 0600）。
 set -euo pipefail
 
@@ -41,7 +41,7 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 level_label() {
@@ -53,8 +53,8 @@ level_label() {
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
-#   可重建级：只 PEM（身份）。
-#   可还原级：再 + 渲染物（toml/value.json）+ SQLite 库。
+#   可重建级：身份 PEM + 渲染好的 wist-gateway.toml。
+#   可还原级：再 + 渲染源 value.json + SQLite 库。
 collect_files() {
   local dir="$1" rel f
   for rel in \
@@ -62,11 +62,12 @@ collect_files() {
     state/agent-ca.crt.pem state/agent-ca.key.pem \
     state/admin-tls.crt.pem state/admin-tls.key.pem \
     state/dev-ca.crt.pem state/dev-ca.key.pem \
-    state/install-script-signing-ed25519.pkcs8.pem; do
+    state/install-script-signing-ed25519.pkcs8.pem \
+    wist-gateway.toml; do
     [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
   done
   if [[ "${LEVEL}" == "restore" ]]; then
-    for rel in wist-gateway.toml wist-gateway.value.json; do
+    for rel in wist-gateway.value.json; do
       [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
     done
     for f in "${dir}"/state/*.db "${dir}"/state/*.db-wal "${dir}"/state/*.db-shm; do
@@ -94,7 +95,7 @@ do_backup() {
   fi
   if [[ "${LEVEL}" == "rebuild" ]]; then
     echo
-    echo "  可重建级只含身份 PEM；要连渲染物与 SQLite 库（按原样还原运行状态）用 --level restore。"
+    echo "  可重建级含身份 PEM + 渲染好的 toml；要连渲染源 value.json 与 SQLite 库（按原样还原管理面状态）用 --level restore。"
   fi
   echo
   echo "  输出含私钥，请保管到**安全且离机**的位置。"

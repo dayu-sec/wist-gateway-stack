@@ -15,6 +15,7 @@
 # 生成物：
 #   <dir>/state/gateway-ca.key.pem / gateway-ca.crt.pem     # 网关 CA（锚；私钥务必备份）
 #   <dir>/state/admin-tls.key.pem / admin-tls.crt.pem       # 网关叶证书（CA 签；可轮换）
+#   <dir>/state/install-script-signing-ed25519.pkcs8.pem    # 安装脚本签名私钥（Ed25519 PKCS#8；可重生）
 #   <dir>/wist-gateway.value.json                           # 渲染模板用的值（token / url / package）
 #
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
@@ -38,6 +39,7 @@ CA_KEY="$STATE/gateway-ca.key.pem"
 CA_CRT="$STATE/gateway-ca.crt.pem"
 TLS_CRT="$STATE/admin-tls.crt.pem"
 TLS_KEY="$STATE/admin-tls.key.pem"
+SIGNING_KEY="$STATE/install-script-signing-ed25519.pkcs8.pem"
 VALUE_JSON="$DIR/wist-gateway.value.json"
 CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
@@ -106,7 +108,17 @@ EOF
   note "已用 CA 签发网关叶证书：${TLS_CRT}（SAN: ${domain},localhost,127.0.0.1）"
 fi
 
-# ③ 渲染值文件（token / url / package）。**只在缺失时写** —— token 一旦生成必须持久。
+# ③ 安装脚本签名私钥（Ed25519 PKCS#8）。模板 `install_script_signing_private_key_file` 引用它，
+#    网关启动要求它**存在**（缺失即拒绝启动）；缺则生成（幂等）。可重生：只影响之后签发的安装脚本。
+if [[ -f "$SIGNING_KEY" ]]; then
+  note "签名私钥已存在，跳过：${SIGNING_KEY}"
+else
+  openssl genpkey -algorithm ED25519 -out "$SIGNING_KEY" >/dev/null 2>&1
+  chmod 600 "$SIGNING_KEY"
+  note "已生成安装脚本签名私钥（Ed25519 PKCS#8）：${SIGNING_KEY}"
+fi
+
+# ④ 渲染值文件（token / url / package）。**只在缺失时写** —— token 一旦生成必须持久。
 if [[ -f "$VALUE_JSON" ]]; then
   note "值文件已存在，跳过：${VALUE_JSON}"
 else

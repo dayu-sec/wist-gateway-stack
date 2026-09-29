@@ -79,8 +79,8 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
-    backup-gateway.sh       # 备份网关**身份**（PEM）；数据库与历史不用备（见「备份与恢复」）
-    restore-gateway.sh      # 从备份恢复身份（新机器重建）；库/历史不需要恢复
+    backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
+    restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
   .github/workflows/release.yml     # 打包发布（见「制品包」）
   README.md
 ```
@@ -258,12 +258,12 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 ## 备份与恢复
 
-**要备份的只有 PEM（身份）**，数据库与历史都不用备：
+**要备份的核心是身份 PEM；数据库与历史都不用备**：
 
 ```bash
 # 备份分两级（--level）：rebuild = 可重建级（默认）；restore = 可还原级
 ./scripts/backup-gateway.sh --from configs/gateway                    # 可重建级 → ./wist-gateway-backup-<时间戳>.tar.gz
-./scripts/backup-gateway.sh --level restore --from configs/gateway    # 可还原级（再加 toml/value.json + SQLite 库）
+./scripts/backup-gateway.sh --level restore --from configs/gateway    # 可还原级（再加 value.json + SQLite 库）
 ./scripts/backup-gateway.sh check --from configs/gateway              # 先看会备份哪些件（不写文件）
 ./scripts/backup-gateway.sh list                                      # 列已备份的归档；list <归档文件> 看它里面有哪些件
 
@@ -271,8 +271,8 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--force] [--restart]
 ```
 
-- **可重建级**（`--level rebuild`，默认）：只备**不可再生**的身份 —— `state/gateway-ca.key.pem`（信任锚，丢了 = 全队 agent 用新 CA 重装）、`state/agent-ca.key.pem`（签客户端证书的 CA），以及叶证书 / 签名密钥（小，省一次重签）。**其余都能从它们重建**：恢复 PEM 后跑一次 `gops sys localize` 即可。
-- **可还原级**（`--level restore`）：在可重建级之上，再带**渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`，保住原 admin token）与 **SQLite 库**（派活、安装包录入记录、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
+- **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
+- **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token / `package_file`，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
 - 开发态同样可用：`./scripts/backup-gateway.sh --from ~/.wist-gateway`。

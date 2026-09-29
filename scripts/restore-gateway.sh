@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# 恢复网关的**身份与配置**（PEM）到目标目录 —— 典型场景：**在新机器**上用别处带来的备份重建。
+# 恢复网关的**身份与配置**到目标目录 —— 典型场景：**在新机器**上用别处带来的备份重建。
 #
-# 只恢复身份文件（PEM）；数据库/历史不在备份里、也不需要：重启网关后，持有效客户端证书的
-# agent 会**自动重新登记**。
+# 解包内容取决于备份级别（见 `backup-gateway.sh --level`）：可重建级 = 身份 PEM + 渲染好的
+# `wist-gateway.toml`；可还原级再带 `wist-gateway.value.json` 与 SQLite 库。库/历史不在（也不必在）
+# 备份里：重启网关后，持有效客户端证书的 agent 会**自动重新登记**。
 #
 # 用法：
 #   scripts/restore-gateway.sh <备份文件> [--to <配置目录>] [--force] [--restart]
@@ -12,7 +13,6 @@
 #   --force      覆盖目标里已存在的同名文件（默认拒绝）
 #   --restart    解包后重启网关（走 stack 根的 compose：docker compose … restart gateway）
 #
-# 恢复后：持有效证书的 agent 自动回来，无需逐台重装；页面证书、安装包缓存可重新生成/导入（不在备份里）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

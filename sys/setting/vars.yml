@@ -16,9 +16,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.5-alpha
+    value: v0.1.6-alpha
   - name: WEB_TAG
-    value: v0.1.5-alpha
+    value: v0.1.6-alpha
   - name: VM_TAG
     value: v1.133.0
   # wparse 镜像仓库与 tag：来自上游（无 TCR 镜像），内网/客户环境拉不到 ghcr.io 时

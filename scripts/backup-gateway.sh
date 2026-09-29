@@ -101,10 +101,13 @@ do_check() {
 }
 
 # ── 解析参数 ──
-if [[ $# -gt 0 ]]; then
-  CMD="$1"
-  shift
-fi
+# 子命令可省：首参不是 backup/check/restore（而是 flag 或位置参数）时就当 backup。
+case "${1:-}" in
+  backup | check | restore)
+    CMD="$1"
+    shift
+    ;;
+esac
 FROM=""
 TO=""
 positional=()

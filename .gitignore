@@ -23,6 +23,11 @@ dev/bin/
 # ===== gops 生成物 =====
 # 变量解析结果（gops sys update / package 生成）
 sys/resolved_vars.yml
+# 交付锁（`gops sys package` 生成：version + generated_at + merged_vars/values 的哈希）。
+# 不入库：它带时间戳，且哈希的是**当前**的 merged/values —— 提交进来就要每次发版重生一份，
+# 否则很快就写成旧版本号 + 旧哈希（会漂、会撒谎）。它由 package 自己塞进交付包里（实测：
+# 默认 `git ls-files` 模式下也会带上它），所以入库对交付没有增益。
+/deliver.lock
 # 值文件：忽略派生的值文件，保留客户覆盖 values/value.yml（版本化）
 values/*
 !values/value.yml

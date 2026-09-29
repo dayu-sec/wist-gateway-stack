@@ -3,6 +3,14 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.11-alpha] - 2026-09-29
+
+### 变更
+
+- `.gitignore`：把 `gops sys package` 生成的 **交付锁 `deliver.lock`** 纳入忽略。它是每次打包重生的记录
+  （version + generated_at + merged_vars/values 的哈希），而且 package 会自己把它塞进交付包里 ——
+  入库只会多一份“写着旧版本号 + 旧哈希”的会漂移文件。
+
 ## [0.1.10-alpha] - 2026-09-29
 
 ### 变更

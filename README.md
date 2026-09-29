@@ -70,7 +70,6 @@ wist-gateway-stack/
   dev/                      # 开发态：单一入口 + 本地二进制
     svc.sh                  # 起/停/看 全栈（vm | wparse | web | gateway）
     setup-domain.sh         # 按需：切域名（建/复用 dev CA + 签叶证书 + 改配置）
-    re-enroll.sh            # 按需：重注册本机 wist-agentd
     bin/                    # wparse 本地二进制
   configs/                  # 运行期配置/密钥（现场生成，不入 git / 不入包）
     gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ state/（证书/密钥/store/包缓存）
@@ -207,7 +206,6 @@ gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 
 # 按需一次性工具（不属于 start 流程）
 ./dev/setup-domain.sh <域名>     # 换域名（改配置 + 重签证书；改完需重启 gateway）
-./dev/re-enroll.sh               # 把本机 wist-agentd 重新注册到网关（需 gateway 已在跑）
 ```
 
 > `svc.sh` 与发布态的 `gops sys start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起

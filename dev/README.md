@@ -51,9 +51,10 @@ x-topology/wist/                  <- $WIST
 | 只重启前端（gateway 已在跑） | `./dev/svc.sh start web` |
 | 只停/起某个组件 | `./dev/svc.sh stop web` / `./dev/svc.sh start gateway --no-build` |
 | 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完需重启 gateway**） |
-| 本机 agentd 重新注册 | `./dev/re-enroll.sh`（需 gateway 已在跑） |
 
-> **不要**再去找 `start-web.sh` / `stop-vm.sh` 之类的单组件脚本 —— 它们已并入 `svc.sh`。
+> **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
+> `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
+> **自动**重新登记（mTLS 自愈）；真要手动重注册，用 `wist-agentd` 自带的 `enroll`。
 > `svc.sh start` 会把 `vm`/`wparse`/`web`/`gateway` 按序起全（已在跑的跳过），你不用逐个跑。
 
 ## 组件与脚本
@@ -161,8 +162,6 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 | `WPARSE_GATEWAY_ENDPOINT` | wparse 的 agent-facts sink 端点 | `http://127.0.0.1:3001` |
 | `GATEWAY_LISTEN` | `setup-domain.sh` 写进配置的监听地址 | `0.0.0.0:443` |
 | `GATEWAY_URL_PORT` | `setup-domain.sh` 对外基址里的端口（空串 = 不带端口） | 按监听端口推导 |
-| `WIST_GATEWAY_URL` | `re-enroll.sh` 用的网关地址 | `https://127.0.0.1:3000` |
-| `WIST_AGENTD_HOME` | agentd 配置 + 数据目录 | `~/.wist-agentd` |
 
 ## 注意事项
 
@@ -189,15 +188,15 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
    容器后起会两边都跑）；默认靠运行态目录隔离就不会撞。
 7. **停 wparse 只在 `ps` 确认 pid 确实是 wparse 时才 kill**：pidfile 可能被别的进程写过（典型：容器把
    `pid=1` 写进共享 work root 时，盲 `kill` 会去杀 launchd/systemd）——已加护栏，发现不对会拒绝并提示。
-8. **`re-enroll.sh` / `setup-domain.sh` 都要求 gateway 已起过**（前者需网关在跑，后者需配置存在）；
-   它们是**按需一次性工具**，不属于 `svc.sh start` 流程。
+8. **`setup-domain.sh` 要求 gateway 已起过**（需配置存在）；它是**按需一次性工具**，不属于 `svc.sh start` 流程。
+   本机 agentd 的重新注册**不需要专门脚本**：持有效客户端证书的 agent 会在网关库丢失/换域名时**自动**重新登记（mTLS 自愈）；真要手动重注册，用 `wist-agentd` 自带的 `enroll`。
 9. **信任锚走文件，且通常是 CA 根**：配置里是 `[agent] trust_bundle_file`（相对配置目录）。`svc.sh`
    每次启动把它指向 `state/dev-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），没有 CA 时才退回叶证书
    自身 `state/admin-tls.crt.pem`。旧的 `trust_bundle = """…"""` 内联写法已迁移（新配置不认它，留着会以
    `missing field trust_bundle_file` 起不来）。叶证书是 `CA:FALSE` 形态（`CA:TRUE` 会被 rustls 以
    `CaUsedAsEndEntity` 拒收）。**只要锚（CA）不变，轮换叶证书 / 换域名是安全的**，agent 无感；
    只有**锚变了**（换 CA、删掉 `dev-ca.*` 重生成）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
-   （仅 `./dev/re-enroll.sh` 不刷新它）。
+   （仅重新注册/enroll 不刷新它）。
 10. **`setup-domain.sh` 只改配置/证书，不重启 gateway**：改完记得 `./dev/svc.sh stop gateway && ./dev/svc.sh start gateway`。
 
 ## 目录
@@ -207,7 +206,6 @@ dev/
   README.md                     # 本文件
   svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/gateway）
   setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
-  re-enroll.sh                  # 按需：重注册本机 wist-agentd 到网关
   bin/                          # wparse 等本地二进制（不入 git）
 
 ../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）

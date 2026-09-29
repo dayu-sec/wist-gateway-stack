@@ -348,7 +348,7 @@ if [[ "${USE_CA}" == "1" ]]; then
   cat <<EOF
   信任锚 = CA 根（${ANCHOR_FILE}）。**这次切换会换掉锚**（从旧的自签证书换成 CA），
   所以本机那个 agentd 必须**重跑一次安装**（install.sh 会重写 endpoint 与 trust_bundle；
-  \`dev/re-enroll.sh\` 只换注册 token，不刷新这两样，跑了没用）。
+  仅重新注册/enroll 不刷新这两样，没用）。
 
   以后**再**换域名：只要
     · 新域名仍是这张 CA 签的（本脚本会重签）；

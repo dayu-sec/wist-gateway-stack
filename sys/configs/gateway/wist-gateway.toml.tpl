@@ -8,10 +8,9 @@
 # 只参数化**随部署环境变化**的量；其余（监听地址、相对路径、容器内服务名、TTL）是
 # 应用契约或固定值，保持字面量，不因环境而变。
 #
-# 三个占位（注意：pem/注释里不要再写同样的花括号占位，否则会被一并替换）：
+# 两个占位（注意：pem/注释里不要再写同样的花括号占位，否则会被一并替换）：
 #   public_base_url   对外基址，须落在网关 TLS 证书 SAN 内、且是 https://
 #   admin_api_token   管理台/管理 API 的 Bearer token（密钥，不要入库）
-#   package_file      容器内可见的 agentd 安装包文件名（与 package 目录里的一致）
 [server]
 listen_addr = "0.0.0.0:3000"
 public_base_url = "{{public_base_url}}"
@@ -21,7 +20,6 @@ admin_api_token = "{{admin_api_token}}"
 victoria_metrics_url = "http://victoria-metrics:8428"
 
 [agent]
-package_file = "{{package_file}}"
 bootstrap_token_ttl_seconds = 900
 credential_ttl_seconds = 2592000
 store_file = "state/wist-gateway-store.json"

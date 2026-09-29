@@ -81,8 +81,9 @@ x-topology/wist/                  <- $WIST
 | VictoriaMetrics | **无本地二进制**：Docker 镜像 `victoriametrics/victoria-metrics:${VM_TAG}` | `VM_TAG` 等（见 `sys/setting/vars.yml`） |
 | wist-agentd | `$WIST/wist-agentd/target/debug/wist-agentd` | `WIST_AGENTD_BIN`（仅 `wist-agentd/dev/start.sh`） |
 
-`svc.sh start gateway` 会把 `wist-agentd` 的路径写进网关配置的 `agent.package_file`
-（gateway 启动时校验该文件存在），因此这个二进制也属于本目录的隐式依赖。
+`wist-agentd` 的二进制**不再是网关配置项**（`agent.package_file` 已删）：安装包只有「管理面录入」
+一个来源。dev 态要发安装命令时，到「安装包」页把本地来源填成它的宿主路径
+（`$WIST/wist-agentd/target/debug/wist-agentd`）录入一次即可；录制会持久化在库里，不必每次重启再录。
 
 ### 构建策略
 

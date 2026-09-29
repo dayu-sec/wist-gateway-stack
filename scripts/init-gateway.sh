@@ -16,14 +16,14 @@
 #   <dir>/state/gateway-ca.key.pem / gateway-ca.crt.pem     # 网关 CA（锚；私钥务必备份）
 #   <dir>/state/admin-tls.key.pem / admin-tls.crt.pem       # 网关叶证书（CA 签；可轮换）
 #   <dir>/state/install-script-signing-ed25519.pkcs8.pem    # 安装脚本签名私钥（Ed25519 PKCS#8；可重生）
-#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（token / url / package）
+#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（token / url）
 #
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
 #   sys/configs/gateway/wist-gateway.toml.tpl 渲染（gx.tpl）。
 #
 # 可覆盖 env：
-#   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时从已有 value.json 推断）
-#   AGENT_PACKAGE_FILE  容器内可见的 agentd 安装包文件名（缺省：目录里的 wist-agentd-*.tar.gz）
+#   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时依次从已有 value.json、
+#                       已有叶证书的 SAN 推断）
 #   CERT_DAYS           叶证书有效期天数（默认 397）
 #   CA_DAYS             CA 有效期天数（默认 3650）
 #   GATEWAY_CA_CRT / GATEWAY_CA_KEY   复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
@@ -48,11 +48,17 @@ command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密�
 
 note() { echo "  $*"; }
 
-# 域名：env 优先；否则从已有 value.json 的 public_base_url 里取 host
+# 域名：env 优先 → 已有 value.json 的 public_base_url → 已有叶证书的 SAN。
+# 都推不出也**不立刻判死**：只有确实要签发/重签或要新建值文件时才需要域名（见 ②/④）。
 domain="${WEB_DOMAIN:-}"
 if [[ -z "$domain" && -f "$VALUE_JSON" ]]; then
   domain="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"https\{0,1\}:\/\/\([^"\/]*\).*/\1/p' "$VALUE_JSON" | head -n1)"
   domain="${domain%%:*}" # 去掉可能的端口
+fi
+if [[ -z "$domain" && -f "$TLS_CRT" ]]; then
+  domain="$(openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null \
+    | tr ',' '\n' | sed -n 's/^[[:space:]]*DNS:\([^[:space:],]*\).*/\1/p' | grep -v '^localhost$' | head -n1)"
+  [[ -n "$domain" ]] && note "域名取自已有叶证书的 SAN：${domain}"
 fi
 
 # ① 网关 CA（信任锚；只建一次，绝不重生成）
@@ -75,19 +81,24 @@ else
 fi
 
 # ② 网关叶证书（由 CA 签发；缺 / 与当前 CA 不对应 / SAN 缺域名 → 重签）
-if [[ -z "$domain" ]]; then
-  echo "需要 WEB_DOMAIN 才能生成/重签 TLS 证书（未提供，且无法从 value.json 推断）" >&2
-  exit 1
-fi
+#    域名**不是进来就要**：已有叶证书由当前 CA 签、又没指定要换成哪个域名时，本就无事可做。
 leaf_ok=0
 if [[ -f "$TLS_CRT" && -f "$TLS_KEY" ]] \
-  && openssl verify -CAfile "$CA_CRT" "$TLS_CRT" >/dev/null 2>&1 \
-  && openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:${domain}"; then
-  leaf_ok=1
+  && openssl verify -CAfile "$CA_CRT" "$TLS_CRT" >/dev/null 2>&1; then
+  if [[ -z "$domain" ]]; then
+    note "已有叶证书由当前 CA 签发（未指定 WEB_DOMAIN，跳过 SAN 校验）：${TLS_CRT}"
+    leaf_ok=1
+  elif openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:${domain}"; then
+    leaf_ok=1
+  fi
 fi
 if [[ "$leaf_ok" == 1 ]]; then
-  note "叶证书已由当前 CA 签发且含域名，跳过：${TLS_CRT}"
+  note "叶证书已由当前 CA 签发${domain:+且含域名 ${domain}}，跳过：${TLS_CRT}"
 else
+  if [[ -z "$domain" ]]; then
+    echo "需要域名才能（重新）签发叶证书：设 WEB_DOMAIN=<域名> 再跑，或让已有叶证书的 SAN 提供它，或用 \`gops sys localize\` 走部署流程（它会注入 WEB_DOMAIN）" >&2
+    exit 1
+  fi
   [[ -f "$TLS_CRT" ]] && note "已有叶证书与当前 CA 不对应或缺域名，重签"
   if [[ ! -f "$TLS_KEY" ]]; then
     openssl genrsa -out "$TLS_KEY" 2048 >/dev/null 2>&1
@@ -118,24 +129,19 @@ else
   note "已生成安装脚本签名私钥（Ed25519 PKCS#8）：${SIGNING_KEY}"
 fi
 
-# ④ 渲染值文件（token / url / package）。**只在缺失时写** —— token 一旦生成必须持久。
+# ④ 渲染值文件（token / url）。**只在缺失时写** —— token 一旦生成必须持久。
 if [[ -f "$VALUE_JSON" ]]; then
   note "值文件已存在，跳过：${VALUE_JSON}"
 else
-  pkg="${AGENT_PACKAGE_FILE:-}"
-  if [[ -z "$pkg" ]]; then
-    pkg="$(cd "$DIR" && ls wist-agentd-*.tar.gz 2>/dev/null | head -n1 || true)"
-  fi
-  if [[ -z "$pkg" ]]; then
-    pkg="wist-agentd.tar.gz"
-    note "警告：目录里没有 wist-agentd-*.tar.gz，package_file 先写 ${pkg}，请把安装包放到 ${DIR}/"
+  if [[ -z "$domain" ]]; then
+    echo "需要域名才能新建 ${VALUE_JSON}（public_base_url）：设 WEB_DOMAIN=<域名> 再跑，或用 \`gops sys localize\`" >&2
+    exit 1
   fi
   token="$(openssl rand -hex 24)"
   cat >"$VALUE_JSON" <<EOF
 {
   "public_base_url": "https://${domain}",
-  "admin_api_token": "${token}",
-  "package_file": "${pkg}"
+  "admin_api_token": "${token}"
 }
 EOF
   chmod 600 "$VALUE_JSON"

@@ -35,3 +35,5 @@ wist-gateway-identity-*.tar.gz
 .DS_Store
 .report
 .run*
+# 迁移（gops >= 1.4）：模块按目标模型分组
+sys/*/mods

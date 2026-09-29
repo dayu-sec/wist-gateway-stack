@@ -146,7 +146,7 @@ gops sys update && gops sys localize
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
 #   渲染 configs/web/nginx.conf               # 前端站点配置（注入域名）
 
-# 起服务（另：内建 agent 包若要可用，需在 configs/gateway/ 里放 agent.package_file 指向的文件；缺了不阻断启动）
+# 起服务（安装包不是配置项：要发安装命令就先录入来源，见下一条；没录也不阻断启动）
 gops sys start
 
 # 投放 agent 安装包并设为分发来源（容器读不到宿主机路径 → 统一走 /packages）：
@@ -214,7 +214,7 @@ gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 > `svc.sh` 与发布态的 `gops sys start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
 > 且已在跑则跳过，最后把 gateway 跑在前台；退出时后台组件不会一起停，整栈停止用 `./dev/svc.sh stop`。
 
-`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；把 `package_file` 指到本仓库的 `wist-agentd` 二进制；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
+`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 
 前置：本地有 Rust 工具链（脚本会 `cargo build` `wist-gateway` / `wist-agentd`）、`wist-gateway-web/node_modules`（先 `npm install`）、`dev/bin/` 里有 wparse 二进制。日志：`/tmp/wist-gateway-server.log`、`/tmp/wist-gateway-web.log`。
 
@@ -249,7 +249,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 ## 已知坑
 
-1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**`agent.package_file` 不是硬要求**（gateway `v0.1.7-alpha` 起）：为空、或指向的文件不存在都不阻断启动，只让安装包分发不可用（相关端点被调用时才明确报错）。
+1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
 2. **信任锚走文件，且是 CA 根**。配置用 `agent.trust_bundle_file = state/gateway-ca.crt.pem`（相对配置目录），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
 3. **叶证书必须带 `basicConstraints=CA:FALSE`（叶形态）、且由网关 CA 签**。`openssl req -x509` 的旧默认会打 `CA:TRUE`，rustls/webpki 会以 `CaUsedAsEndEntity` 拒收；`scripts/init-gateway.sh` 生成的叶证书是 `CA:FALSE` + `serverAuth`，并由网关 CA 签发。**轮换叶证书（换域名 / 续期）是安全的**——锚 = CA 根不变，agent 无感；只有当**锚本身**变了（换 CA / 删掉 `gateway-ca.*` 重生成）才需要**重跑安装**（仅重新注册不刷新锚）。
 4. **改证书/配置后要重启网关容器**：`gops sys start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。
@@ -273,7 +273,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ```
 
 - **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
-- **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token / `package_file`，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
+- **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
 - **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
 - **一步搬身份（+ 库）**：`scripts/promote-dev-identity.sh`（默认 `--from ~/.wist-gateway --to <栈根>/configs/gateway`）—— 把开发态的**身份 + 管理面状态（SQLite 库）**搬成发布态的（`--level restore` 出包 + `--no-config` 恢复，**配置不动**）。**只搬文件、不碰容器**；`--dry-run` 可先预演。要让老 agent **无感**回来，用这个（只搬 PEM 不够）。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。

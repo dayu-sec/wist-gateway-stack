@@ -5,8 +5,8 @@
 #   - `rebuild`（可重建级，**默认**）：把网关**重新立起来**所需的全部 —— 身份 PEM（网关 CA = 信任锚，
 #     丢了 = 全队 agent 重装；agent CA；服务端叶证书；安装脚本签名密钥）＋ 渲染好的 `wist-gateway.toml`。
 #     恢复后**直接起网关即可**，不必再跑 localize 渲染。
-#   - `restore`（可还原级）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源，保住原 admin token /
-#     `package_file`）与 **SQLite 库** —— 按原样还原管理面状态（派活 / 安装包录入 / 用途与上送绑定等）。
+#   - `restore`（可还原级）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源，保住原 admin token）
+#     与 **SQLite 库** —— 按原样还原管理面状态（派活 / 安装包录入 / 用途与上送绑定等）。
 #
 # 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷，随时间贬值）、安装包缓存、
 # 页面证书（`configs/web/tls/`）、`configs/gateway/content/`。

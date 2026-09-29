@@ -340,8 +340,9 @@ build_binaries() {
 # 生成/迁移网关配置。每次启动都做：
 #   - 缺配置 → `wist-gateway init-config` 生成（含随机 admin token）；
 #   - 信任锚写 `[agent] trust_bundle_file`（优先 gateway-ca.crt.pem，退回叶证书）；迁移旧的内联
-#     `trust_bundle = """…"""` 写法（新配置不认它，留着会以 missing field 起不来）；
-#   - `package_file` 指到本仓 agentd 二进制（网关启动校验它存在）。
+#     `trust_bundle = """…"""` 写法（新配置不认它，留着会以 missing field 起不来）。
+# 注：安装包**不再是配置项**（`agent.package_file` 已删）—— 它只有「管理面录入」一个来源，
+#     在「安装包」页录本仓 agentd 二进制的路径即可（dev 态直接填宿主路径）。
 ensure_gateway_config() {
   local config="${GW_HOME}/wist-gateway.toml"
   mkdir -p "${GW_HOME}/state"
@@ -390,10 +391,7 @@ with open(path, "w") as handle:
 print(f"  trust_bundle_file = {anchor_rel}")
 PY
 
-  # ② package_file → 本仓 agentd 二进制
-  sed -i '' "s|^package_file = .*|package_file = \"${AGENTD_CRATE}/target/debug/wist-agentd\"|" "${config}"
-
-  # ③ 策展内容（模型仓是创作源，拷到配置目录就近引用；找不到模型仓就跳过）
+  # ② 策展内容（模型仓是创作源，拷到配置目录就近引用；找不到模型仓就跳过）
   ensure_content_files
 }
 

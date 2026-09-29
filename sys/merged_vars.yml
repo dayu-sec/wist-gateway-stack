@@ -2,9 +2,9 @@ system:
 - name: IMAGE_SPC
   value: ghcr.io/dayu-sec
 - name: GATEWAY_TAG
-  value: v0.1.7-alpha
+  value: v0.1.8-alpha
 - name: WEB_TAG
-  value: v0.1.6-alpha
+  value: v0.1.7-alpha
 - name: VM_TAG
   value: v1.153.0
 - name: WPARSE_IMAGE

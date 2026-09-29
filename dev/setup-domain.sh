@@ -100,7 +100,7 @@ require_cmd openssl
 require_cmd python3
 
 [[ -f "${CONFIG}" ]] || die "找不到网关配置：${CONFIG}
-先跑 ./dev/start-gateway.sh 生成配置（**别**手跑 init-config：它会换掉 admin token）"
+先跑 ./dev/svc.sh start gateway 生成配置（**别**手跑 init-config：它会换掉 admin token）"
 mkdir -p "${STATE_DIR}"
 
 # ── 监听与对外基址 ────────────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ EOF
 
 if [[ "${LISTEN_VALUE}" == "__KEEP__" ]]; then
   cat <<EOF
-  监听保持原样，直接用：./dev/start-gateway.sh
+  监听保持原样，直接用：./dev/svc.sh start gateway
 EOF
 else
   LISTEN_PORT_NOW="${LISTEN_VALUE##*:}"
@@ -319,7 +319,7 @@ else
 EOF
   else
     cat <<EOF
-  普通端口，直接用：./dev/start-gateway.sh
+  普通端口，直接用：./dev/svc.sh start gateway
 EOF
   fi
 fi
@@ -327,7 +327,7 @@ fi
 cat <<EOF
 
 ── 别踩这几条 ──────────────────────────────────────────────────────────
-  1. **别删 ${LEAF_CRT}**：start-gateway.sh 发现它缺失会按 CN=localhost 重新生成，
+  1. **别删 ${LEAF_CRT}**：svc.sh 发现它缺失会按 CN=localhost 重新生成，
      域名就白切了。它每次启动还会把 `[agent] trust_bundle_file` 指回锚（有 dev-ca 时用 CA 根）。
   2. **别对已有配置跑 \`wist-gateway init-config\`**：整份重写，admin token 会变。
 EOF
@@ -335,7 +335,7 @@ EOF
 if [[ -n "${URL_PORT}" && "${URL_PORT}" != "3000" ]]; then
   cat <<EOF
   3. 前端 /api 反代目标要跟着改：
-       WARP_INSIGHT_WEB_PROXY_TARGET=${PUBLIC_BASE_URL} ./dev/start-web.sh
+       WARP_INSIGHT_WEB_PROXY_TARGET=${PUBLIC_BASE_URL} ./dev/svc.sh start web
 EOF
 fi
 

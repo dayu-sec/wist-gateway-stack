@@ -30,7 +30,7 @@
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
 > `docker stop` 的 SIGTERM 直达引擎、能优雅退出；拿不到锁时日志 `flock: failed to get lock`、容器 `Exited (75)`）。
-> 开发态 `dev/start-wparse.sh` 用**同一位置**的锁（`<work-root>/.run/.wparse.lock`）并额外用
+> 开发态 `dev/svc.sh` 的 wparse 启动用**同一位置**的锁（`<work-root>/.run/.wparse.lock`）并额外用
 > `docker ps --filter volume=<work-root>` 探测容器。已知边界：macOS 上容器与宿主**不共享** flock
 > （work root 是 virtiofs），因此只做到“宿主能发现容器”；反方向靠**运行态目录隔离**（两者默认就不在同一处），
 > Linux 上同一内核同一 inode，flock 天然共享。
@@ -67,13 +67,10 @@ wist-gateway-stack/
   data-plane/               # wparse 工程：配置的唯一源（conf/connectors/models/topology；开发态与发布态共用）
     conf/ connectors/ topology/ models/
   data-plane-run/           # 发布态 wparse 运行态根（data/ + .run/ 分别挂到容器 /data/data、/data/.run；不入 git）
-  dev/                      # 开发态：本地二进制 + 启停脚本
-    start-svc.sh / stop-svc.sh      # 开发态一站式：起/停 VM + wparse + web + gateway
-    start-gateway.sh        # 仅启控制面后端 gateway（前台）
-    start-web.sh / stop-web.sh      # 仅启/停前端 web
-    start-vm.sh / stop-vm.sh        # 仅启/停 VictoriaMetrics（走 Docker）
-    start-wparse.sh / stop-wparse.sh   # 仅启/停数据面（工程在 ../data-plane）
-    re-enroll.sh            # 重注册本机 wist-agentd
+  dev/                      # 开发态：单一入口 + 本地二进制
+    svc.sh                  # 起/停/看 全栈（vm | wparse | web | gateway）
+    setup-domain.sh         # 按需：切域名（建/复用 dev CA + 签叶证书 + 改配置）
+    re-enroll.sh            # 按需：重注册本机 wist-agentd
     bin/                    # wparse 本地二进制
   configs/                  # 运行期配置/密钥（现场生成，不入 git / 不入包）
     gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ state/（证书/密钥/store/包缓存）
@@ -87,7 +84,7 @@ wist-gateway-stack/
   README.md
 ```
 
-> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`dev/start-gateway.sh`）落 `~/.wist-gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
+> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `~/.wist-gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
 
 > **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动。schema 在启动时自动迁移；备份该文件即可备份注册表，删掉它则所有 Agent 需要重新注册。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
 
@@ -198,33 +195,25 @@ gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ## 开发态（本地二进制）
 
 ```bash
-# 一步到位：VictoriaMetrics + wparse + 控制面全起（控制面前台，Ctrl+C 停）
-./dev/start-svc.sh
-./dev/start-svc.sh --dry-run   # 先看会起哪些/跳过哪些（不启动）
+# 唯一入口：构建一次 → VictoriaMetrics/wparse/web 后台 → gateway 前台（Ctrl+C 停）
+./dev/svc.sh start
+./dev/svc.sh start --dry-run     # 先看会起哪些/跳过哪些（不启动）
+./dev/svc.sh status              # 看四个组件当前状态
+./dev/svc.sh stop                # 逆序停全栈
 
-# 或按组件单独起：
-# 1. VictoriaMetrics（第三方依赖，无本地二进制，用 Docker 起）
-./dev/start-vm.sh / ./dev/stop-vm.sh
+# 只操作某个组件（组件：vm | wparse | web | gateway）
+./dev/svc.sh start web           # 只重启前端（gateway 已在跑时）
+./dev/svc.sh stop gateway
 
-# 2. wparse 数据平台（工程在 data-plane/；默认 VM 端点 http://127.0.0.1:18429）
-./dev/start-wparse.sh / ./dev/stop-wparse.sh
-WPARSE_VM_ENDPOINT=http://127.0.0.1:18429 ./dev/start-wparse.sh   # 显式覆盖
-
-# 3. 控制面：gateway(https://127.0.0.1:3000) / web(5174)
-./dev/start-gateway.sh        # 只要后端（前台，Ctrl+C 停）
-./dev/start-web.sh            # 只要前端
-./dev/stop-web.sh             # 停前端
-
-# 4. 可选：把本机 wist-agentd 重新注册到网关
-./dev/re-enroll.sh
+# 按需一次性工具（不属于 start 流程）
+./dev/setup-domain.sh <域名>     # 换域名（改配置 + 重签证书；改完需重启 gateway）
+./dev/re-enroll.sh               # 把本机 wist-agentd 重新注册到网关（需 gateway 已在跑）
 ```
 
-> `start-svc.sh` 与发布态的 `gops sys start` 对应：它把前 3 步（VM / wparse / web）后台常驻拉起
-> 且已在跑则跳过，最后 exec 交接给 `start-gateway.sh` 把 gateway 跑在前台。
-> 退出时后台组件不会一起停，整栈停止用 `./dev/stop-svc.sh`。
-> 可用 `SKIP_VM=1` / `SKIP_WPARSE=1` / `SKIP_WEB=1` 裁剪。
+> `svc.sh` 与发布态的 `gops sys start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
+> 且已在跑则跳过，最后把 gateway 跑在前台；退出时后台组件不会一起停，整栈停止用 `./dev/svc.sh stop`。
 
-`dev/start-gateway.sh` 会自动做这几件事：**每次启动都 `cargo build` `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；把 `package_file` 指到本仓库的 `wist-agentd` 二进制；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `dev-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
+`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；把 `package_file` 指到本仓库的 `wist-agentd` 二进制；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `dev-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 
 前置：本地有 Rust 工具链（脚本会 `cargo build` `wist-gateway` / `wist-agentd`）、`wist-gateway-web/node_modules`（先 `npm install`）、`dev/bin/` 里有 wparse 二进制。日志：`/tmp/wist-gateway-server.log`、`/tmp/wist-gateway-web.log`。
 
@@ -254,7 +243,7 @@ wist-gateway-stack-<tag>.tar.gz
 
 wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，由运行环境注入：
 
-- 开发态：`start-wparse.sh` 默认 `http://127.0.0.1:18429`。
+- 开发态：`svc.sh` 起 wparse 时默认 `http://127.0.0.1:18429`。
 - 发布态：compose 注入 `http://victoria-metrics:8428`。
 
 ## 已知坑

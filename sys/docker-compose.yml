@@ -54,7 +54,7 @@ services:
   #   -F（不 fork）→ wparse 自己就是 PID 1，docker stop 的 SIGTERM 直达引擎、能优雅退出；
   #   -n → 拿不到锁立即失败（不排队），避免“默默等锁”看不出配错了；
   #   --verbose + -E 75 → 失败时日志打 `flock: failed to get lock`、容器以 75 退出。
-  # 开发态脚本（dev/start-wparse.sh）用同一把锁，所以容器与宿主也不会同时跑。
+  # 开发态脚本（dev/svc.sh）用同一把锁，所以容器与宿主也不会同时跑。
   # 这层包装是绕过：引擎自身应当持锁 —— 已提上游 wp-labs/warp-parse#365，
   # 上游实现后这里的 entrypoint 可以直接去掉。
   wparse:

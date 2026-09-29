@@ -73,6 +73,6 @@ head -n 1 /Library/Logs/DiagnosticReports/*.ips > crash-panic/sample.dat
 3. 命中并核对字段/分类后，把规则合入正式数据面规则目录并配 sink 组：
    - wist-agentd 上送帧（macos P0 采集）→ 合并进 `models/wpl/agent_uplink/parse.wpl`（sink：`macos-agent`）；
    - 未来新增独立来源类 → 新建 `models/wpl/<pkg>/parse.wpl` 包目录 + 对应 OML 与 `topology/sinks` 分组；
-4. 重启数据面（`stop-wparse.sh` / `start-wparse.sh`）后核对 `data/out_dat/` 与 `data/rescue/`。
+4. 重启数据面（`dev/svc.sh stop wparse` / `dev/svc.sh start wparse`）后核对 `data/out_dat/` 与 `data/rescue/`。
 
 > `models/wpl/parse.wpl`（示例 nginx 规则）与 `models/wpl/agent_uplink/`（生产上送规则）不受本目录影响。

@@ -79,13 +79,14 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
+    backup-gateway.sh       # 备份/恢复网关**身份**（PEM）；数据库与历史不用备（见「备份与恢复」）
   .github/workflows/release.yml     # 打包发布（见「制品包」）
   README.md
 ```
 
 > **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `~/.wist-gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
 
-> **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动。schema 在启动时自动迁移；备份该文件即可备份注册表，删掉它则所有 Agent 需要重新注册。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
+> **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动；schema 在启动时自动迁移。**这个库不用备份**：库丢了，持有效客户端证书的 agent 会在重连时自动重新登记（mTLS 自愈）——真正不可再生的只有 PEM（见「备份与恢复」）。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
 
 ## 发布态（经 gops 管理）
 
@@ -158,7 +159,7 @@ docker compose --project-directory . -f sys/docker-compose.yml restart gateway
 > 域名 / 端口改 `sys/setting/vars.yml`（客户覆盖写 `values/value.yml`），再重跑 `gops sys update && gops sys localize`，最后重启网关容器。
 >
 > **身份模型（CA 签叶）**：`scripts/init-gateway.sh` 建一张**网关 CA**（`state/gateway-ca.{crt,key}.pem`），网关**叶证书由它签发**，agent 的信任锚 = **CA 根**（配置 `agent.trust_bundle_file = state/gateway-ca.crt.pem`）。于是**换域名 / 续期 / 换 SAN 只重签叶证书，锚不变、agent 无感**。
-> **CA 私钥不可再生**：`state/gateway-ca.key.pem` 丢了 = 换锚 = **全队 agent 重装**，务必备份（参见「备份」）。
+> **CA 私钥不可再生**：`state/gateway-ca.key.pem` 丢了 = 换锚 = **全队 agent 重装**，务必备份（见「备份与恢复」）。
 
 ### B. 容器自动初始化（零配置）
 
@@ -253,3 +254,27 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 5. **镜像 tag 是浮动 `:latest`**。同一份 compose 在不同时间拉到的镜像可能不同，升级也对不齐；生产建议钉到固定版本（必要时加 `@sha256:` 摘要），做法就是改 `sys/docker-compose.yml` 里 `gateway` / `web` 的 `image`。
 6. **容器读不到宿主路径**（设置安装包来源时最常见）。网关对**以 `/` 开头的来源**是在**它自己的**文件系统里 `fs::read`；compose 下只有被挂进来的目录可见。所以「本地来源」只能是**容器内路径**：`/packages/<文件名>`（投放目录，见 `scripts/import-package.sh`）或 `/config/<文件名>`（配置目录），否则报 `failed to read package from <宿主路径>: No such file or directory`（界面表现为 502）。拉取成功后网关会把包缓存到 `configs/gateway/state/install-package/`（在挂载卷里，可备份）。
    > 提醒：**别删 `packages/` 目录本身**（容器正挂载它）——删了会让挂载失效、容器内 `/packages` 直接消失；重建容器才恢复（`docker compose --project-directory . -f sys/docker-compose.yml up -d --force-recreate gateway`）。
+
+## 备份与恢复
+
+**要备份的只有 PEM（身份）**，数据库与历史都不用备：
+
+```bash
+# 备份（默认只含身份与配置；产物 0600，含私钥 —— 请保管到安全且离机的位置）
+./scripts/backup-gateway.sh                 # → ./wist-gateway-identity-<时间戳>.tar.gz
+./scripts/backup-gateway.sh check           # 先看会备份哪些件（不写文件）
+./scripts/backup-gateway.sh --with-store    # 要保留管理面状态（派活/安装包录入记录/用途与上送绑定）才加
+
+# 恢复（解包回 configs/gateway；默认不覆盖已有文件，加 --force 才覆盖）
+./scripts/backup-gateway.sh restore <file> [config_dir] [--force]
+```
+
+- **必须留**（不可再生）：`state/gateway-ca.key.pem`（信任锚 —— 丢了 = 全队 agent 用新 CA 重装）、`state/admin-tls.*`（叶证书）、`state/install-script-signing-ed25519.pkcs8.pem`（安装脚本签名密钥）、`wist-gateway.value.json`（admin token / 域名 / 包名）。
+- **不用留（可重建）**：
+  - SQLite 库 —— agent 注册由 mTLS **自动重建**（重连即重新登记）；
+  - 指标历史（VictoriaMetrics 卷）—— 随时间贬值；
+  - 安装包缓存（`state/install-package/`）—— 可重新导入；
+  - 页面证书（`configs/web/tls/`）—— 重新生成、浏览器重新信任即可；
+  - `configs/gateway/content/` —— 从模型仓重新拷（`svc.sh` / localize 会做）。
+- 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
+- 开发态同样可用：`./scripts/backup-gateway.sh backup ~/.wist-gateway`。

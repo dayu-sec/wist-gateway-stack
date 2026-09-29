@@ -27,6 +27,9 @@ values/*
 # .env 由 gops sys localize 生成（非密钥配置；密钥走 ${SEC_xxx} 不落盘）
 .env
 
+# 网关身份备份产物（含私钥，别入库）
+wist-gateway-identity-*.tar.gz
+
 # macOS
 .DS_Store
 .report

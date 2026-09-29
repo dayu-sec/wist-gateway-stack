@@ -16,7 +16,7 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.6-alpha
+    value: v0.1.7-alpha
   - name: WEB_TAG
     value: v0.1.6-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）

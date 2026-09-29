@@ -3,6 +3,13 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.8-alpha] - 2026-09-29
+
+### 变更
+
+- 网关镜像顶到 `v0.1.7-alpha`——该版起「内置 agent 安装包」缺失或为空**不再阻断网关启动**，只让安装包分发不可用（需要它的端点被调用时才明确报错）。
+- 文档：纠正「`agent.package_file` 指向的文件必须存在」的旧说法。
+
 ## [0.1.7-alpha] - 2026-09-29
 
 ### 新增

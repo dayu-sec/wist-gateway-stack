@@ -146,7 +146,7 @@ gops sys update && gops sys localize
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
 #   渲染 configs/web/nginx.conf               # 前端站点配置（注入域名）
 
-# 起服务（另：agent.package_file 指向的**内建**包需在 configs/gateway/ 里，启动时校验存在）
+# 起服务（另：内建 agent 包若要可用，需在 configs/gateway/ 里放 agent.package_file 指向的文件；缺了不阻断启动）
 gops sys start
 
 # 投放 agent 安装包并设为分发来源（容器读不到宿主机路径 → 统一走 /packages）：
@@ -249,7 +249,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 ## 已知坑
 
-1. **网关启动有一组硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥、`agent.package_file` 指向的文件必须存在；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。
+1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**`agent.package_file` 不是硬要求**（gateway `v0.1.7-alpha` 起）：为空、或指向的文件不存在都不阻断启动，只让安装包分发不可用（相关端点被调用时才明确报错）。
 2. **信任锚走文件，且是 CA 根**。配置用 `agent.trust_bundle_file = state/gateway-ca.crt.pem`（相对配置目录），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
 3. **叶证书必须带 `basicConstraints=CA:FALSE`（叶形态）、且由网关 CA 签**。`openssl req -x509` 的旧默认会打 `CA:TRUE`，rustls/webpki 会以 `CaUsedAsEndEntity` 拒收；`scripts/init-gateway.sh` 生成的叶证书是 `CA:FALSE` + `serverAuth`，并由网关 CA 签发。**轮换叶证书（换域名 / 续期）是安全的**——锚 = CA 根不变，agent 无感；只有当**锚本身**变了（换 CA / 删掉 `gateway-ca.*` 重生成）才需要**重跑安装**（仅重新注册不刷新锚）。
 4. **改证书/配置后要重启网关容器**：`gops sys start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。

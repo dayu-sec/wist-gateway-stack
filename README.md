@@ -261,22 +261,18 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 **要备份的只有 PEM（身份）**，数据库与历史都不用备：
 
 ```bash
-# 备份（默认源目录就是 configs/gateway；开发态传 --from ~/.wist-gateway）
-./scripts/backup-gateway.sh --from configs/gateway          # 默认只备 PEM（身份）→ ./wist-gateway-identity-<时间戳>.tar.gz
-./scripts/backup-gateway.sh check --from configs/gateway    # 先看会备份哪些件（不写文件）
-./scripts/backup-gateway.sh list                            # 列已备份的归档；list <归档文件> 看它里面有哪些件
-./scripts/backup-gateway.sh --with-config                   # 连渲染物 toml/value.json 一起（保住原 admin token）
-./scripts/backup-gateway.sh --with-store                    # 连 SQLite 库一起（保留派活等管理面状态）
+# 备份分两级（--level）：rebuild = 可重建级（默认）；restore = 可还原级
+./scripts/backup-gateway.sh --from configs/gateway                    # 可重建级 → ./wist-gateway-backup-<时间戳>.tar.gz
+./scripts/backup-gateway.sh --level restore --from configs/gateway    # 可还原级（再加 toml/value.json + SQLite 库）
+./scripts/backup-gateway.sh check --from configs/gateway              # 先看会备份哪些件（不写文件）
+./scripts/backup-gateway.sh list                                      # 列已备份的归档；list <归档文件> 看它里面有哪些件
 
 # 恢复（独立脚本；默认目标目录 configs/gateway，默认不覆盖已有文件，加 --force 才覆盖）
 ./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--force] [--restart]
 ```
 
-- **必须留**（不可再生）：`state/gateway-ca.key.pem`（信任锚 —— 丢了 = 全队 agent 用新 CA 重装）、`state/agent-ca.key.pem`（签发客户端证书的 CA）。只建一次，务必备份。
-- **顺带留**（小，省一次重签/重生）：`state/admin-tls.*`（服务端叶证书，可由 CA 重签）、`state/install-script-signing-*.pem`（安装脚本签名密钥，可重生）。
-- **默认不备（派生/可重建）**：
-  - `wist-gateway.toml` + `wist-gateway.value.json` —— 渲染物，恢复后 `gops sys localize` 重生。*（`value.json` 里唯一独特的是 **admin token**：要保住它就加 `--with-config`；不介意就让它重生、重登一次即可。）*
-  - SQLite 库 —— agent 注册由 mTLS **自动重建**（重连即重新登记）；要保留派活/安装包录入等管理面状态才加 `--with-store`；
-  - 指标历史、安装包缓存、页面证书、`content/` —— 可重生成或重导入。
+- **可重建级**（`--level rebuild`，默认）：只备**不可再生**的身份 —— `state/gateway-ca.key.pem`（信任锚，丢了 = 全队 agent 用新 CA 重装）、`state/agent-ca.key.pem`（签客户端证书的 CA），以及叶证书 / 签名密钥（小，省一次重签）。**其余都能从它们重建**：恢复 PEM 后跑一次 `gops sys localize` 即可。
+- **可还原级**（`--level restore`）：在可重建级之上，再带**渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`，保住原 admin token）与 **SQLite 库**（派活、安装包录入记录、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
+- 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
 - 开发态同样可用：`./scripts/backup-gateway.sh --from ~/.wist-gateway`。

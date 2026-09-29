@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
-# 备份网关的**身份与配置**（不可再生的 PEM）。默认**不含数据库与历史数据**；恢复见 `restore-gateway.sh`。
+# 备份网关的**身份与（可选）运行状态**。备份分**两级**，用 `--level` 选；恢复见 `restore-gateway.sh`。
 #
-# 口径（与 mTLS 身份模型一致）：
-#   - **要备份**的是 PEM：网关 CA（信任锚 —— 丢了 = 全队 agent 重装）、agent CA（签发客户端证书）、
-#     叶证书、安装脚本签名密钥。
-#   - **不用备份**数据库与历史：SQLite 里的 agent 注册会在重连时由 mTLS **自动重建**；指标历史随时间贬值。
-#     只有想保留**管理面状态**（派活 / 安装包录入记录 / 用途与上送绑定等）才加 `--with-store`。
-#   - **渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`）是**派生**的：恢复后跑一次 localize 就能重生；
-#     只有想“恢复即用、且保住原 admin token”才加 `--with-config`。
-#   - 页面证书（`configs/web/tls/`）可重新生成；安装包缓存可重新录入 —— 都不备份。
+# 级别（口径与 mTLS 身份模型一致）：
+#   - `rebuild`（可重建级，**默认**）：只备**不可再生**的身份 —— 网关 CA（信任锚，丢了 = 全队 agent 重装）、
+#     agent CA（签客户端证书）、服务端叶证书、安装脚本签名密钥。其余都能从它们重建。
+#   - `restore`（可还原级）：在可重建级之上，再带**渲染物**（`wist-gateway.toml` + `wist-gateway.value.json`）
+#     与 **SQLite 库** —— 用于按原样还原运行状态（含原 admin token、派活/安装包录入等管理面状态）。
+#
+# 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷，随时间贬值）、安装包缓存、
+# 页面证书（`configs/web/tls/`）、`configs/gateway/content/`。
 #
 # 用法：
-#   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-config] [--with-store]
-#   scripts/backup-gateway.sh check [--from <源目录>]
+#   scripts/backup-gateway.sh [--level rebuild|restore] [--from <源目录>] [--to <输出文件>]
+#   scripts/backup-gateway.sh check [--level rebuild|restore] [--from <源目录>]
 #   scripts/backup-gateway.sh list  [备份文件|目录]     # 列已备份的归档；给了归档文件则列其内容
 #
 # 参数：
+#   --level <级别>   rebuild（可重建级，默认）| restore（可还原级）
 #   --from <目录>    备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
-#   --to <文件>      输出文件（默认 ./wist-gateway-identity-<时间戳>.tar.gz）
-#   --with-config    连同渲染物（wist-gateway.toml + .value.json）；默认不含
-#   --with-store     连同 SQLite 库（保留管理面状态）；默认不含
-#
-# 也接受位置参数：scripts/backup-gateway.sh backup [源目录] [输出文件]
+#   --to <文件>      输出文件（默认 ./wist-gateway-backup-<时间戳>.tar.gz）
 #
 # 恢复用独立脚本：scripts/restore-gateway.sh <备份文件> [--to <目标目录>] [--force] [--restart]
 #
@@ -31,10 +28,10 @@ set -euo pipefail
 CMD="backup"
 CONFIG_DIR=""
 OUT=""
-WITH_STORE=0
-WITH_CONFIG=0
+LEVEL="rebuild"
 
 DEFAULT_CONFIG_DIR="configs/gateway"
+LEVELS="rebuild restore"
 
 die() {
   echo "错误：$*" >&2
@@ -44,11 +41,20 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+}
+
+level_label() {
+  case "$1" in
+    rebuild) echo "可重建级" ;;
+    restore) echo "可还原级" ;;
+    *) echo "$1" ;;
+  esac
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
-# 默认只收 PEM（身份）；渲染物（toml/value.json）要 WITH_CONFIG=1；数据库要 WITH_STORE=1。
+#   可重建级：只 PEM（身份）。
+#   可还原级：再 + 渲染物（toml/value.json）+ SQLite 库。
 collect_files() {
   local dir="$1" rel f
   for rel in \
@@ -59,12 +65,10 @@ collect_files() {
     state/install-script-signing-ed25519.pkcs8.pem; do
     [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
   done
-  if [[ "${WITH_CONFIG}" == "1" ]]; then
+  if [[ "${LEVEL}" == "restore" ]]; then
     for rel in wist-gateway.toml wist-gateway.value.json; do
       [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
     done
-  fi
-  if [[ "${WITH_STORE}" == "1" ]]; then
     for f in "${dir}"/state/*.db "${dir}"/state/*.db-wal "${dir}"/state/*.db-shm; do
       [[ -e "${f}" ]] && printf '%s\n' "state/$(basename "${f}")"
     done
@@ -81,19 +85,16 @@ do_backup() {
   tar -czf "${out}" -C "${dir}" "${files[@]}"
   chmod 600 "${out}" 2>/dev/null || true
 
-  echo "已备份 → ${out}"
+  echo "已备份（$(level_label "${LEVEL}")）→ ${out}"
   echo "  源目录：$(abspath "${dir}")"
   echo "  内容："
   printf '    %s\n' "${files[@]}"
   if [[ ! -e "${dir}/state/gateway-ca.key.pem" && ! -e "${dir}/state/dev-ca.key.pem" ]]; then
     echo "  注意：未找到网关 CA 私钥 —— 若这台还没建 CA，备份不含信任锚。" >&2
   fi
-  if [[ "${WITH_CONFIG}" != "1" || "${WITH_STORE}" != "1" ]]; then
+  if [[ "${LEVEL}" == "rebuild" ]]; then
     echo
-    echo "  未含（都是派生/可重建，默认不备）："
-    [[ "${WITH_CONFIG}" != "1" ]] && echo "    - wist-gateway.toml + wist-gateway.value.json（恢复后跑一次 localize 可重生；要保住原 admin token 加 --with-config）"
-    [[ "${WITH_STORE}" != "1" ]] && echo "    - SQLite 库（agent 注册由 mTLS 自动重建；要保留管理面状态加 --with-store）"
-    echo "    - 安装包缓存 / 指标历史 / 页面证书（都可重生成或重导入）"
+    echo "  可重建级只含身份 PEM；要连渲染物与 SQLite 库（按原样还原运行状态）用 --level restore。"
   fi
   echo
   echo "  输出含私钥，请保管到**安全且离机**的位置。"
@@ -102,7 +103,7 @@ do_backup() {
 do_check() {
   local dir="$1"
   [[ -d "${dir}" ]] || die "找不到源目录：${dir}"
-  echo "会被备份的件（源目录 $(abspath "${dir}")）："
+  echo "会被备份的件（$(level_label "${LEVEL}")；源目录 $(abspath "${dir}")）："
   local f any=0
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
@@ -112,7 +113,7 @@ do_check() {
   [[ "${any}" == "1" ]] || echo "  （无）"
 }
 
-# 列“已备份的文件”：给了归档文件就列它里面有哪些件；否则在目录里找 wist-gateway-identity-*.tar.gz。
+# 列“已备份的文件”：给了归档文件就列它里面有哪些件；否则在目录里找 wist-gateway-backup-*.tar.gz。
 do_list() {
   local arg="${1:-}"
   if [[ -n "${arg}" && -f "${arg}" ]]; then
@@ -125,7 +126,7 @@ do_list() {
   [[ -d "${dir}" ]] || die "不是文件也不是目录：${arg}"
   echo "已备份的归档（${dir}）："
   local found=0 f
-  for f in "${dir}"/wist-gateway-identity-*.tar.gz; do
+  for f in "${dir}"/wist-gateway-backup-*.tar.gz; do
     [[ -e "${f}" ]] || continue
     found=1
     printf '  %-58s %8s  %s\n' "$(basename "${f}")" "$(ls -lh "${f}" | awk '{print $5}')" "$(date -r "${f}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '')"
@@ -138,7 +139,7 @@ do_list() {
 }
 
 # ── 解析参数 ──
-# 子命令可省：首参不是 backup/check/restore（而是 flag 或位置参数）时就当 backup。
+# 子命令可省：首参不是 backup/check/restore/list（而是 flag 或位置参数）时就当 backup。
 case "${1:-}" in
   backup | check | restore | list)
     CMD="$1"
@@ -150,13 +151,12 @@ TO=""
 positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-store)
-      WITH_STORE=1
-      shift
-      ;;
-    --with-config)
-      WITH_CONFIG=1
-      shift
+    --level)
+      case "${2:-}" in
+        rebuild | restore) LEVEL="$2" ;;
+        *) die "--level 只接受：${LEVELS}" ;;
+      esac
+      shift 2
       ;;
     --from)
       [[ -n "${2:-}" ]] || die "--from 需要一个源目录"
@@ -186,7 +186,7 @@ case "${CMD}" in
   backup)
     CONFIG_DIR="${FROM:-${positional[0]:-${DEFAULT_CONFIG_DIR}}}"
     OUT="${TO:-${positional[1]:-}}"
-    [[ -n "${OUT}" ]] || OUT="./wist-gateway-identity-$(date +%Y%m%d-%H%M%S).tar.gz"
+    [[ -n "${OUT}" ]] || OUT="./wist-gateway-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
     do_backup "${CONFIG_DIR}" "${OUT}"
     ;;
   restore)

@@ -28,6 +28,7 @@ values/*
 .env
 
 # 网关身份备份产物（含私钥，别入库）
+wist-gateway-backup-*.tar.gz
 wist-gateway-identity-*.tar.gz
 
 # macOS

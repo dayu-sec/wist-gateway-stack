@@ -24,7 +24,7 @@ system:
 - name: TZ
   value: Asia/Shanghai
 - name: WEB_DOMAIN
-  value: c-dev01.test.gw.jingang.cloud
+  value: gw.example.com
 - name: GATEWAY_CONFIG_DIR
   value: ./configs/gateway
 - name: WEB_NGINX_CONF

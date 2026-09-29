@@ -1,0 +1,12 @@
+# 现场值（覆盖 sys/setting/vars.yml 里的产品默认值）。**现场值只写这里。**
+#
+# 改完跑 `gops sys localize` 即生效 —— 不需要 `gops sys update`，也不用动 sys/merged_vars.yml：
+# 覆盖值会在**同一次 localize 内一致地**进入 .env、渲染出的配置（nginx / 网关 toml）与证书 SAN。
+#
+# 反过来说：改 sys/setting/vars.yml（产品默认）才需要 `gops sys update`（并把 sys/merged_vars.yml
+# 一起提交），否则改了不生效 —— 这就是「改了 vars.yml 却没反应」的原因。
+
+# 对外域名：前端站点证书 SAN + 网关 public_base_url 的 host（一个域名，一台机器）
+WEB_DOMAIN: c-dev01.test.gw.jingang.cloud
+# 宿主端口：网关对外的 HTTPS 端口（容器内仍是 3000）
+GATEWAY_PORT: 443

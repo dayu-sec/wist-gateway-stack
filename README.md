@@ -21,7 +21,7 @@
 | `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
 | `victoria-metrics` | 指标存储 | `${VM_PORT}:8428` | `victoriametrics/victoria-metrics` |
 
-> **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量，定义在 `sys/setting/vars.yml`（默认 TCR）；改源或钉版本改那里，或在该系统的 `values/value.yml` 做客户覆盖，再 `gops sys update && gops sys localize` 重新生成 `.env`。
+> **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量：改**产品默认**改 `sys/setting/vars.yml`（默认 TCR），改**本环境用什么**改 `values/value.yml`（推荐，一条命令生效，见「变量与本地化」）。
 >
 > **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.26.0-beta`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `data-plane/` 一起升**。
 >
@@ -38,7 +38,8 @@
 > 这层包装是**绕上游**：引擎本该自己持锁。已提 [wp-labs/warp-parse#365](https://github.com/wp-labs/warp-parse/issues/365)——
 > 上游实现单实例保护后，container entrypoint 与 dev 脚本里的锁都可以去掉。
 >
-> **改完 vars.yml 记得确认 `.env` 真的变了**：`gops 1.3.0` 起 `values/sys_value.yml` 的语义是「覆盖层（注释模板）」，基线是 `sys/merged_vars.yml`；而**旧版 gops 留下的全量快照会把所有默认值钉死**（症状：改了 `vars.yml`，`gops sys update && gops sys localize` 后 `.env` 还是旧值）。遇到就这样重生一份：
+> **改了 `sys/setting/vars.yml` 却没生效？** 先看有没有跑 `gops sys update`（`localize` 不重解析它，见「变量与本地化」）。
+> 另：`gops 1.3.0` 起 `values/sys_value.yml` 的语义是「覆盖层（注释模板）」，基线是 `sys/merged_vars.yml`；**旧版 gops 留下的全量快照会把所有默认值钉死**。遇到就重生一份：
 >
 > ```bash
 > rm values/sys_value.yml && gops sys update && gops sys localize   # 重生为注释模板；需要覆盖再取消注释
@@ -106,12 +107,25 @@ wist-gateway-stack/
 
 ### 变量与本地化
 
-compose 里随环境/客户变的量（镜像源与 tag、宿主端口、保留期、时区、挂载路径）都是 `${VAR}` 占位，定义在 `sys/setting/vars.yml`。改默认值就改它；**客户/环境覆盖写 `values/value.yml`**，不要改生成物。然后按顺序跑：
+**一条规则：现场值只写 `values/value.yml`（入库），改完跑 `gops sys localize` 即生效** ——
+不需要 `update`，也不用动 `sys/merged_vars.yml`。覆盖值会在同一次 localize 内一致地进入
+`.env`、渲染出的配置（nginx / 网关 toml）与证书 SAN。
 
 ```bash
-gops sys update      # 解析变量 → sys/resolved_vars.yml（+ values/sys_value.yml）
-gops sys localize    # 合并默认值与 values/value.yml → .env（compose 读它）
+vim values/value.yml      # 改域名 / 宿主端口等现场值（已跟踪，不忽略）
+gops sys localize         # 一条命令：渲染配置 + 导出 .env（compose 读它）
 ```
+
+`sys/setting/vars.yml` 是**产品默认值**（随仓走的基线），现场一般**不用碰**。确实要改产品默认时：
+
+```bash
+gops sys update           # 解析 vars.yml → sys/merged_vars.yml（入库，要一起提交）
+gops sys localize
+```
+
+> 为什么区分：`localize` **不会**重新解析 `vars.yml`（`sys/merged_vars.yml` 在就等于「已解析」，
+> 只在它缺失时才自动补跑 update）。所以改了 `vars.yml` 不跑 `update` 不生效 —— 而覆盖值是在
+> localize 的合并阶段生效的，一条命令就够。
 
 **`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做三件**幂等**的事：
 
@@ -122,7 +136,6 @@ gops sys localize    # 合并默认值与 values/value.yml → .env（compose �
 
 `gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过。
 
-> 顺序不能反：先 `update` 再 `localize`。
 > 本栈当前无密钥；将来若需要，compose 里用 `${SEC_xxx}` 占位，由 `gops sys start` 从 `~/.galaxy/sec_value.yml` 注入，不落盘。
 
 ### 前置：挂载文件
@@ -158,7 +171,7 @@ gops sys start
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway
 ```
 
-> 域名 / 端口改 `sys/setting/vars.yml`（客户覆盖写 `values/value.yml`），再重跑 `gops sys update && gops sys localize`，最后重启网关容器。
+> 域名 / 端口改 **`values/value.yml`**（现场值的唯一入口），跑 `gops sys localize` 后重启网关容器即生效；只有改产品默认 `sys/setting/vars.yml` 才需要先 `gops sys update`。若换了域名，前端站点证书要 `rm -rf configs/web/tls` 让它按新域名重签（网关叶证书会自动重签）。
 >
 > **身份模型（CA 签叶）**：`scripts/init-gateway.sh` 建一张**网关 CA**（`state/gateway-ca.{crt,key}.pem`），网关**叶证书由它签发**，agent 的信任锚 = **CA 根**（配置 `agent.trust_bundle_file = state/gateway-ca.crt.pem`）。于是**换域名 / 续期 / 换 SAN 只重签叶证书，锚不变、agent 无感**。
 > **CA 私钥不可再生**：`state/gateway-ca.key.pem` 丢了 = 换锚 = **全队 agent 重装**，务必备份（见「备份与恢复」）。

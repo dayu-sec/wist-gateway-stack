@@ -15,6 +15,8 @@ dev/bin/
 # 网关/前端**运行期**配置与密钥（现场生成；含 admin token / TLS 私钥 / 签名密钥 / store / 证书）
 # 声明文件（web/nginx.conf.tpl、gateway/wist-gateway.toml.tpl）已移到 sys/configs/ 随库入库。
 /configs/
+# 同类目录的任何副本（`configs_x/` 等：同样是运行物，含 CA 私钥 / store，绝不入库）
+/configs*/
 # 安装包投放目录（现场放 agent 安装包，只读挂给网关容器）
 /packages/
 

@@ -1,8 +1,11 @@
-# 系统级变量定义（system 段，仅非密钥配置）
+# 系统级变量定义（system 段，仅非密钥配置）—— **产品默认值**
 #
-# 这里的变量随环境/客户变化；`gops sys update` 解析出 sys/resolved_vars.yml，
-# `gops sys localize` 再合并 values/value.yml（客户覆盖）导出为同目录 `.env`，
-# 供 sys/docker-compose.yml 里的 `${VAR}` 消费。
+# ⚠ 现场值不要写在这里：写 `values/value.yml`（它覆盖本文件，`gops sys localize` 即生效）。
+#    改**本文件**才需要 `gops sys update`（并把 `sys/merged_vars.yml` 一起提交），否则不生效。
+#
+# 链路：本文件 → `gops sys update` → `sys/merged_vars.yml`（入库）
+#       → `gops sys localize`（+ 合并 values/ 覆盖）→ 栈根 `.env` + `sys/configs/*.tpl` 渲染结果，
+#       供 `sys/docker-compose.yml` 与网关/前端消费。
 #
 # 说明：
 #   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
@@ -49,9 +52,10 @@ system:
   - name: TZ
     value: Asia/Shanghai
 
-  # 对外域名（前端站点证书的 SAN，也是网关 public_base_url 的 host）；改了重跑 localize
+  # 对外域名（前端站点证书的 SAN，也是网关 public_base_url 的 host）
+  # —— 只是**默认值**；现场值走 values/value.yml（改那里 localize 即生效）
   - name: WEB_DOMAIN
-    value: c-dev01.test.gw.jingang.cloud
+    value: gw.example.com
 
   # 挂载源路径（按部署环境摆放）
   - name: GATEWAY_CONFIG_DIR

@@ -339,7 +339,7 @@ build_binaries() {
 
 # 生成/迁移网关配置。每次启动都做：
 #   - 缺配置 → `wist-gateway init-config` 生成（含随机 admin token）；
-#   - 信任锚写 `[agent] trust_bundle_file`（优先 dev-ca.crt.pem，退回叶证书）；迁移旧的内联
+#   - 信任锚写 `[agent] trust_bundle_file`（优先 gateway-ca.crt.pem，退回叶证书）；迁移旧的内联
 #     `trust_bundle = """…"""` 写法（新配置不认它，留着会以 missing field 起不来）；
 #   - `package_file` 指到本仓 agentd 二进制（网关启动校验它存在）。
 ensure_gateway_config() {
@@ -352,8 +352,13 @@ ensure_gateway_config() {
     echo "  复用已有配置：${config}"
   fi
 
-  # ① 信任锚走文件（[agent] trust_bundle_file）
-  python3 - "${GW_HOME}/state/admin-tls.crt.pem" "${GW_HOME}/state/dev-ca.crt.pem" "${config}" <<'PY'
+  # ① 信任锚走文件（[agent] trust_bundle_file）。旧名 dev-ca.* → 统一为 gateway-ca.*
+  #    （内容不变，锚不变；与发布态同名，便于直接对拷）。
+  if [[ -f "${GW_HOME}/state/dev-ca.crt.pem" && ! -f "${GW_HOME}/state/gateway-ca.crt.pem" ]]; then
+    mv -f "${GW_HOME}/state/dev-ca.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem"
+    [[ -f "${GW_HOME}/state/dev-ca.key.pem" ]] && mv -f "${GW_HOME}/state/dev-ca.key.pem" "${GW_HOME}/state/gateway-ca.key.pem"
+  fi
+  python3 - "${GW_HOME}/state/admin-tls.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem" "${config}" <<'PY'
 import os, re, sys
 leaf, ca, path = sys.argv[1:4]
 anchor = ca if os.path.exists(ca) else leaf

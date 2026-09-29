@@ -2,7 +2,7 @@
 # 把网关切到某个域名（域名 = 网关的身份）。
 #
 # 做四件事：
-#   1. 建/复用一张小 CA（state/dev-ca.*.pem）—— 它成为 agent 的信任锚；
+#   1. 建/复用一张小 CA（state/gateway-ca.*.pem）—— 它成为 agent 的信任锚；
 #   2. 用这张 CA 签一张叶证书，SAN 含新域名（以及传入的旧域名、localhost、127.0.0.1）；
 #   3. 改写配置的 listen_addr / public_base_url / [agent] trust_bundle_file ——
 #      其它字段一律不动，尤其**不碰 admin_api_token**（所以这里绝不调用 `wist-gateway init-config`，
@@ -131,8 +131,8 @@ else
 fi
 
 # ── 证书 ──────────────────────────────────────────────────────────────────────
-CA_KEY="${STATE_DIR}/dev-ca.key.pem"
-CA_CRT="${STATE_DIR}/dev-ca.crt.pem"
+CA_KEY="${STATE_DIR}/gateway-ca.key.pem"
+CA_CRT="${STATE_DIR}/gateway-ca.crt.pem"
 LEAF_KEY="${STATE_DIR}/admin-tls.key.pem"
 LEAF_CRT="${STATE_DIR}/admin-tls.crt.pem"
 LEAF_EXT="${STATE_DIR}/admin-tls.ext"
@@ -142,6 +142,13 @@ note() {
 }
 
 if [[ "${DRY_RUN}" != "1" ]]; then
+  # 旧名 dev-ca.* → 统一为 gateway-ca.*（内容不变，锚不变；与发布态同名，便于直接对拷）。
+  if [[ -f "${STATE_DIR}/dev-ca.crt.pem" && ! -f "${CA_CRT}" ]]; then
+    mv -f "${STATE_DIR}/dev-ca.crt.pem" "${CA_CRT}"
+    [[ -f "${STATE_DIR}/dev-ca.key.pem" ]] && mv -f "${STATE_DIR}/dev-ca.key.pem" "${CA_KEY}"
+    note "已把 dev-ca.* 改名为 gateway-ca.*（锚内容不变）"
+  fi
+
   # ① CA（只建一次）。它是 agent 的信任锚：**换了它，那批 agent 全部要重装**，
   #    所以已存在时一律复用，绝不顺手重生成。
   if [[ "${USE_CA}" == "1" ]]; then
@@ -328,7 +335,7 @@ cat <<EOF
 
 ── 别踩这几条 ──────────────────────────────────────────────────────────
   1. **别删 ${LEAF_CRT}**：svc.sh 发现它缺失会按 CN=localhost 重新生成，
-     域名就白切了。它每次启动还会把 `[agent] trust_bundle_file` 指回锚（有 dev-ca 时用 CA 根）。
+     域名就白切了。它每次启动还会把 `[agent] trust_bundle_file` 指回锚（有 gateway-ca 时用 CA 根）。
   2. **别对已有配置跑 \`wist-gateway init-config\`**：整份重写，admin token 会变。
 EOF
 

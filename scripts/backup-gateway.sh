@@ -61,7 +61,6 @@ collect_files() {
     state/gateway-ca.crt.pem state/gateway-ca.key.pem \
     state/agent-ca.crt.pem state/agent-ca.key.pem \
     state/admin-tls.crt.pem state/admin-tls.key.pem \
-    state/dev-ca.crt.pem state/dev-ca.key.pem \
     state/install-script-signing-ed25519.pkcs8.pem \
     wist-gateway.toml; do
     [[ -e "${dir}/${rel}" ]] && printf '%s\n' "${rel}"
@@ -90,7 +89,7 @@ do_backup() {
   echo "  源目录：$(abspath "${dir}")"
   echo "  内容："
   printf '    %s\n' "${files[@]}"
-  if [[ ! -e "${dir}/state/gateway-ca.key.pem" && ! -e "${dir}/state/dev-ca.key.pem" ]]; then
+  if [[ ! -e "${dir}/state/gateway-ca.key.pem" ]]; then
     echo "  注意：未找到网关 CA 私钥 —— 若这台还没建 CA，备份不含信任锚。" >&2
   fi
   if [[ "${LEVEL}" == "rebuild" ]]; then

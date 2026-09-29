@@ -131,7 +131,7 @@ gateway 的 pidfile 记的是**前台承载进程**（`svc.sh`）而不是 gatew
 
 | 组件 | 位置 | 内容 |
 |---|---|---|
-| gateway | `~/.wist-gateway/` | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`dev-ca.crt.pem`）、Ed25519 签名密钥、`install-package/` |
+| gateway | `~/.wist-gateway/` | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`gateway-ca.crt.pem`）、Ed25519 签名密钥、`install-package/` |
 | wist-agentd | `~/.wist-agentd/` | `agentd.toml`、`tasks/`、`state/agent_runtime.json`（`wic_` 凭据）、`log/` |
 | wparse | `data-plane/{data,.run}/` | 运行期数据与临时产物 |
 
@@ -194,11 +194,11 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 8. **`setup-domain.sh` 要求 gateway 已起过**（需配置存在）；它是**按需一次性工具**，不属于 `svc.sh start` 流程。
    本机 agentd 的重新注册**不需要专门脚本**：持有效客户端证书的 agent 会在网关库丢失/换域名时**自动**重新登记（mTLS 自愈）；真要手动重注册，用 `wist-agentd` 自带的 `enroll`。
 9. **信任锚走文件，且通常是 CA 根**：配置里是 `[agent] trust_bundle_file`（相对配置目录）。`svc.sh`
-   每次启动把它指向 `state/dev-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），没有 CA 时才退回叶证书
+   每次启动把它指向 `state/gateway-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），没有 CA 时才退回叶证书
    自身 `state/admin-tls.crt.pem`。旧的 `trust_bundle = """…"""` 内联写法已迁移（新配置不认它，留着会以
    `missing field trust_bundle_file` 起不来）。叶证书是 `CA:FALSE` 形态（`CA:TRUE` 会被 rustls 以
    `CaUsedAsEndEntity` 拒收）。**只要锚（CA）不变，轮换叶证书 / 换域名是安全的**，agent 无感；
-   只有**锚变了**（换 CA、删掉 `dev-ca.*` 重生成）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
+   只有**锚变了**（换 CA、删掉 `gateway-ca.*` 重生成）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
    （仅重新注册/enroll 不刷新它）。
 10. **`setup-domain.sh` 只改配置/证书，不重启 gateway**：改完记得 `./dev/svc.sh stop gateway && ./dev/svc.sh start gateway`。
 

@@ -213,7 +213,7 @@ gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 > `svc.sh` 与发布态的 `gops sys start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
 > 且已在跑则跳过，最后把 gateway 跑在前台；退出时后台组件不会一起停，整栈停止用 `./dev/svc.sh stop`。
 
-`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；把 `package_file` 指到本仓库的 `wist-agentd` 二进制；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `dev-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
+`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；把 `package_file` 指到本仓库的 `wist-agentd` 二进制；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 
 前置：本地有 Rust 工具链（脚本会 `cargo build` `wist-gateway` / `wist-agentd`）、`wist-gateway-web/node_modules`（先 `npm install`）、`dev/bin/` 里有 wparse 二进制。日志：`/tmp/wist-gateway-server.log`、`/tmp/wist-gateway-web.log`。
 
@@ -268,11 +268,12 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ./scripts/backup-gateway.sh list                                      # 列已备份的归档；list <归档文件> 看它里面有哪些件
 
 # 恢复（独立脚本；默认目标目录 configs/gateway，默认不覆盖已有文件，加 --force 才覆盖）
-./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--force] [--restart]
+./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--pem-only] [--force] [--restart]
 ```
 
 - **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
 - **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token / `package_file`，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
+- **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库 —— 目标现有的这些原样保留。适合「从别处只把**身份**搬过来、配置不动」的场景（如把开发环境的身份搬到发布态）。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
 - 开发态同样可用：`./scripts/backup-gateway.sh --from ~/.wist-gateway`。

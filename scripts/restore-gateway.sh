@@ -6,13 +6,13 @@
 # 备份里：重启网关后，持有效客户端证书的 agent 会**自动重新登记**。
 #
 # 用法：
-#   scripts/restore-gateway.sh <备份文件> [--to <配置目录>] [--force] [--restart]
+#   scripts/restore-gateway.sh <备份文件> [--to <配置目录>] [--pem-only] [--force] [--restart]
 #
 #   <备份文件>   scripts/backup-gateway.sh 产出的 .tar.gz
 #   --to <目录>  解包目标（默认 configs/gateway；开发态传 ~/.wist-gateway）
+#   --pem-only   只恢复 **PEM**（身份材料：CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库
 #   --force      覆盖目标里已存在的同名文件（默认拒绝）
 #   --restart    解包后重启网关（走 stack 根的 compose：docker compose … restart gateway）
-#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +24,7 @@ FILE=""
 TO=""
 FORCE=0
 RESTART=0
+PEM_ONLY=0
 
 die() {
   echo "错误：$*" >&2
@@ -52,6 +53,10 @@ while [[ $# -gt 0 ]]; do
       RESTART=1
       shift
       ;;
+    --pem-only)
+      PEM_ONLY=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -69,26 +74,52 @@ done
 FILE="${positional[0]:-}"
 [[ -n "${FILE}" ]] || {
   usage >&2
-  die "用法：$0 <备份文件> [--to <配置目录>] [--force] [--restart]"
+  die "用法：$0 <备份文件> [--to <配置目录>] [--pem-only] [--force] [--restart]"
 }
 [[ -f "${FILE}" ]] || die "找不到备份文件：${FILE}"
 DEST="${TO:-${positional[1]:-${DEFAULT_DIR}}}"
 
 mkdir -p "${DEST}/state"
 
-# 安全：默认不覆盖已有文件（避免把在用的身份材料糊掉）。
-if [[ "${FORCE}" != "1" ]]; then
-  entry=""
-  while IFS= read -r entry; do
-    [[ "${entry}" == */ ]] && continue
-    [[ -e "${DEST}/${entry}" ]] && die "目标已存在：${DEST}/${entry}（要覆盖加 --force）"
-  done < <(tar -tzf "${FILE}")
+# 选取要恢复的条目（跳过目录项）。--pem-only 时**只留 `.pem`** —— 身份材料（CA / 叶证书 / 签名私钥）；
+# 目标里现有的 toml / value.json / 库原样保留，适合「只把身份搬过去」的场景。
+entries=()
+skipped=()
+entry=""
+while IFS= read -r entry; do
+  [[ "${entry}" == */ ]] && continue
+  if [[ "${PEM_ONLY}" == "1" && "${entry}" != *.pem ]]; then
+    skipped+=("${entry}")
+    continue
+  fi
+  entries+=("${entry}")
+done < <(tar -tzf "${FILE}")
+
+if [[ ${#entries[@]} -eq 0 ]]; then
+  if [[ "${PEM_ONLY}" == "1" ]]; then
+    die "备份里没有 .pem，--pem-only 无可恢复项：${FILE}"
+  fi
+  die "备份是空的：${FILE}"
 fi
 
-tar -xzf "${FILE}" -C "${DEST}"
+# 安全：默认不覆盖已有文件（避免把在用的身份材料糊掉）。只检查**本次要恢复**的条目。
+if [[ "${FORCE}" != "1" ]]; then
+  for entry in "${entries[@]}"; do
+    [[ -e "${DEST}/${entry}" ]] && die "目标已存在：${DEST}/${entry}（要覆盖加 --force）"
+  done
+fi
+
+tar -xzf "${FILE}" -C "${DEST}" "${entries[@]}"
 echo "已恢复 → $(abspath "${DEST}")"
+if [[ "${PEM_ONLY}" == "1" ]]; then
+  echo "  模式：仅 PEM（身份材料）；跳过 ${#skipped[@]} 个非 PEM 文件（toml / value.json / 库等，目标现有的原样保留）"
+fi
 echo "  内容："
-tar -tzf "${FILE}" | sed 's/^/    /'
+printf '    %s\n' "${entries[@]}"
+if [[ ${#skipped[@]} -gt 0 ]]; then
+  echo "  跳过："
+  printf '    %s\n' "${skipped[@]}"
+fi
 echo
 echo "  agent 身份：持有效客户端证书的 agent 会在重连时**自动重新登记**，无需人工。"
 

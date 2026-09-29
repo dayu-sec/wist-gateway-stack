@@ -19,7 +19,7 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.8-alpha
+    value: v0.1.9-alpha
   - name: WEB_TAG
     value: v0.1.7-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
@@ -37,7 +37,7 @@ system:
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT
-    value: 3000
+    value: 443
   - name: WEB_PORT
     value: 8443
   - name: VM_PORT

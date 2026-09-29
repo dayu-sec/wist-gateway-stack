@@ -9,34 +9,44 @@
 #   - 页面证书（`configs/web/tls/`）可重新生成（浏览器重新信任即可）；安装包缓存可重新录入 —— 都不备份。
 #
 # 用法：
-#   scripts/backup-gateway.sh                             # 备份 configs/gateway → ./wist-gateway-identity-<ts>.tar.gz
-#   scripts/backup-gateway.sh --with-store                # 连同 SQLite 库一起（含管理面状态）
-#   scripts/backup-gateway.sh backup  [config_dir] [out]  # 指定目标目录 / 输出文件
-#   scripts/backup-gateway.sh restore <file> [config_dir] [--force]
-#   scripts/backup-gateway.sh check   [config_dir]        # 只列会被备份的关键件，不写文件
+#   scripts/backup-gateway.sh [backup] [--from <源目录>] [--to <输出文件>] [--with-store]
+#   scripts/backup-gateway.sh restore <备份文件> [--to <目标目录>] [--force]
+#   scripts/backup-gateway.sh check [--from <源目录>]
 #
-# 开发态也可用：scripts/backup-gateway.sh backup ~/.wist-gateway
+# 参数：
+#   --from <目录>   备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
+#   --to <路径>     backup = 输出文件；restore = 目标目录
+#   --with-store    连同 SQLite 库一起（保留管理面状态）
+#   --force         restore 时覆盖已有文件
 #
-# 恢复：把 PEM 放回 `<config_dir>/state/` 即可（restore 会解包）。重启网关后，持有效客户端证书的
+# 也接受位置参数（与 --from/--to 等价）：
+#   scripts/backup-gateway.sh backup  [源目录] [输出文件]
+#   scripts/backup-gateway.sh restore <备份文件> [目标目录]
+#
+# 恢复：把 PEM 放回 `<源目录>/state/` 即可（restore 会解包）。重启网关后，持有效客户端证书的
 #       agent 会**自动重新登记**；被删掉的数据库/历史不会恢复，也不需要。
 #
 # 输出含私钥：请落到**安全且离机**的位置（脚本把产物权限设为 0600）。
 set -euo pipefail
 
 CMD="backup"
-CONFIG_DIR="configs/gateway"
+CONFIG_DIR=""
 OUT=""
 FILE=""
 WITH_STORE=0
 FORCE=0
+
+DEFAULT_CONFIG_DIR="configs/gateway"
 
 die() {
   echo "错误：$*" >&2
   exit 1
 }
 
+abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
+
 usage() {
-  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 # 会进备份的相对路径（相对 config_dir；只收**存在**的）。
@@ -60,7 +70,7 @@ collect_files() {
 
 do_backup() {
   local dir="$1" out="$2"
-  [[ -d "${dir}" ]] || die "找不到配置目录：${dir}（先跑 init-gateway / 起一次网关生成）"
+  [[ -d "${dir}" ]] || die "找不到源目录：${dir}（先跑 init-gateway / 起一次网关生成；开发态传 --from ~/.wist-gateway）"
   local files=() f
   while IFS= read -r f; do [[ -n "${f}" ]] && files+=("${f}"); done < <(collect_files "${dir}" "${WITH_STORE}")
   [[ ${#files[@]} -gt 0 ]] || die "${dir} 下没有任何可备份的身份/配置文件"
@@ -69,7 +79,7 @@ do_backup() {
   chmod 600 "${out}" 2>/dev/null || true
 
   echo "已备份 → ${out}"
-  echo "  来源：${dir}"
+  echo "  源目录：$(abspath "${dir}")"
   echo "  内容："
   printf '    %s\n' "${files[@]}"
   if [[ ! -e "${dir}/state/gateway-ca.key.pem" && ! -e "${dir}/state/dev-ca.key.pem" ]]; then
@@ -96,7 +106,7 @@ do_restore() {
     done < <(tar -tzf "${file}")
   fi
   tar -xzf "${file}" -C "${dir}"
-  echo "已恢复 → ${dir}"
+  echo "已恢复 → $(abspath "${dir}")"
   echo "  agent 身份：持有效客户端证书的 agent 会在重连时**自动重新登记**（无需人工）。"
   echo "  下一步：重启网关让新配置/证书生效 ——"
   echo "    ./dev/svc.sh stop gateway && ./dev/svc.sh start gateway        # 开发态"
@@ -105,8 +115,8 @@ do_restore() {
 
 do_check() {
   local dir="$1"
-  [[ -d "${dir}" ]] || die "找不到配置目录：${dir}"
-  echo "会被备份的件（来源 ${dir}）："
+  [[ -d "${dir}" ]] || die "找不到源目录：${dir}"
+  echo "会被备份的件（源目录 $(abspath "${dir}")）："
   local f any=0
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
@@ -117,34 +127,62 @@ do_check() {
 }
 
 # ── 解析参数 ──
-args=("$@")
-[[ ${#args[@]} -gt 0 ]] && { CMD="${args[0]}"; args=("${args[@]:1}"); }
+if [[ $# -gt 0 ]]; then
+  CMD="$1"
+  shift
+fi
+FROM=""
+TO=""
 positional=()
-for a in "${args[@]:-}"; do
-  case "${a}" in
-    --with-store) WITH_STORE=1 ;;
-    --force) FORCE=1 ;;
-    -h | --help) usage; exit 0 ;;
-    -*) die "未知参数：${a}" ;;
-    *) positional+=("${a}") ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-store)
+      WITH_STORE=1
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --from)
+      [[ -n "${2:-}" ]] || die "--from 需要一个源目录"
+      FROM="$2"
+      shift 2
+      ;;
+    --to)
+      [[ -n "${2:-}" ]] || die "--to 需要一个路径"
+      TO="$2"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "未知参数：$1"
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
   esac
 done
 
 case "${CMD}" in
   backup)
-    [[ ${#positional[@]} -ge 1 ]] && CONFIG_DIR="${positional[0]}"
-    [[ ${#positional[@]} -ge 2 ]] && OUT="${positional[1]}"
+    CONFIG_DIR="${FROM:-${positional[0]:-${DEFAULT_CONFIG_DIR}}}"
+    OUT="${TO:-${positional[1]:-}}"
     [[ -n "${OUT}" ]] || OUT="./wist-gateway-identity-$(date +%Y%m%d-%H%M%S).tar.gz"
     do_backup "${CONFIG_DIR}" "${OUT}"
     ;;
   restore)
-    [[ ${#positional[@]} -ge 1 ]] || die "用法：$0 restore <备份文件> [config_dir] [--force]"
-    FILE="${positional[0]}"
-    [[ ${#positional[@]} -ge 2 ]] && CONFIG_DIR="${positional[1]}"
+    FILE="${positional[0]:-}"
+    [[ -n "${FILE}" ]] || die "用法：$0 restore <备份文件> [--to <目标目录>] [--force]"
+    CONFIG_DIR="${TO:-${positional[1]:-${DEFAULT_CONFIG_DIR}}}"
     do_restore "${FILE}" "${CONFIG_DIR}"
     ;;
   check)
-    [[ ${#positional[@]} -ge 1 ]] && CONFIG_DIR="${positional[0]}"
+    CONFIG_DIR="${FROM:-${positional[0]:-${DEFAULT_CONFIG_DIR}}}"
     do_check "${CONFIG_DIR}"
     ;;
   -h | --help)

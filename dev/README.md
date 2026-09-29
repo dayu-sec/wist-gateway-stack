@@ -145,7 +145,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 `wist-gateway-store.json` 并改名为 `*.imported`；导入失败只告警，不阻断启动。
 
 > **备份**：只需要备 **PEM（身份）**，库与历史不用备（agent 注册由 mTLS 自动重建）——
-> `./scripts/backup-gateway.sh backup ~/.wist-gateway`（`restore` 同理；详见根 README「备份与恢复」）。
+> `./scripts/backup-gateway.sh --from ~/.wist-gateway`（`restore --to …` 同理；详见根 README「备份与恢复」）。
 
 ## 环境变量覆盖
 

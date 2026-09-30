@@ -80,6 +80,7 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
+    import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
     backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
     restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
     promote-dev-identity.sh # 一步：把开发态身份 + 库搬成发布态的（只搬文件，不碰容器；--dry-run 预演）
@@ -162,10 +163,16 @@ gops sys update && gops sys localize
 # 起服务（安装包不是配置项：要发安装命令就先录入来源，见下一条；没录也不阻断启动）
 gops sys start
 
-# 投放 agent 安装包并设为分发来源（容器读不到宿主机路径 → 统一走 /packages）：
+# 投放 agent 安装包并设为分发来源（容器读**不到**宿主机路径 → 统一走 /packages）：
 #   --latest 取 ../wist-agentd/target/package 最新；也可传具体文件/目录
 ./scripts/import-package.sh --latest --set
 #   等价于：cp 到 packages/ + 调管理 API 把来源设为 /packages/<文件名>
+
+# 投放**知识库内容包**（采集目录/包/模板 + 用途规则 + 发现策略）。
+# 不录就是空载：不产「系统类型」建议、不产用途建议（发现策略走 agentd 内建默认值）。
+#   知识库是**录入 ≠ 生效**：--set 只录入，--activate 才当场切（旧版工作不被追改，见网关设计稿 §8）。
+#   包从 wist-knowledge 的 Release 下载（wist-knowledge-<版本>.tar.gz），或本地 `scripts/package.sh` 打一个。
+./scripts/import-knowledge.sh --latest --set --activate
 
 # 改了证书/配置后，必须**重启网关容器**才生效（`up -d` 不会因挂载文件变化而重建）：
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway

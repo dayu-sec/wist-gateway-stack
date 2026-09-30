@@ -12,6 +12,10 @@ mod operators {
     gx.cmd ( "mkdir -p packages" );
     // ③ 备料：Ed25519 签名密钥 / 网关 TLS 证书 / 渲染值 value.json（缺什么补什么）
     gx.cmd ( "./scripts/init-gateway.sh configs/gateway" );
+    // ③' 备料（可选）：知识库内容包的验签公钥。给了就用（并写进渲染值，让模板渲染出 [knowledge] 段）；
+    //     没给就什么都不做（不验签）。必须在 ④ 之前：它是渲染的输入。
+    //     来源：env KNOWLEDGE_SIGNING_PUBKEY=<公钥 PEM 路径>，或同级 wist-knowledge 仓的 keys/。
+    gx.cmd ( "./scripts/init-knowledge-signing.sh configs/gateway" );
     // ① 渲染网关运行配置：模板 + value.json → configs/gateway/wist-gateway.toml（依赖 ③）
     gx.tpl (
       tpl  : "./sys/configs/gateway/wist-gateway.toml.tpl",

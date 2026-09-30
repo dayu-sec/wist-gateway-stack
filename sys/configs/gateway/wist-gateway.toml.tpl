@@ -11,6 +11,9 @@
 # 两个占位（注意：pem/注释里不要再写同样的花括号占位，否则会被一并替换）：
 #   public_base_url   对外基址，须落在网关 TLS 证书 SAN 内、且是 https://
 #   admin_api_token   管理台/管理 API 的 Bearer token（密钥，不要入库）
+#
+# 可选段引用的一个渲染值（**空 = 不渲染该段**，由 scripts/init-knowledge-signing.sh 维护）：
+#   knowledge_signing_pubkey  知识库内容包的验签公钥相对路径；空 = 不验签
 [server]
 listen_addr = "0.0.0.0:3000"
 public_base_url = "{{public_base_url}}"
@@ -37,3 +40,11 @@ environment_id = "env-default"
 # wparse 容器连得上；明文 HTTP。
 [ingest]
 listen_addr = "0.0.0.0:3001"
+
+{{#if knowledge_signing_pubkey}}
+# 知识库内容包的**验签**：内容包只认发布侧（wist-knowledge CI）那把私钥签过的（设计 §9）。
+# 公钥由 scripts/init-knowledge-signing.sh 放到 state/；**给了就必须验过才允许录入** ——
+# 配了却读不到文件，网关会**拒绝启动**（故意如此：静默降级比验不了更糟）。
+[knowledge]
+signing_public_key_file = "{{knowledge_signing_pubkey}}"
+{{/if}}

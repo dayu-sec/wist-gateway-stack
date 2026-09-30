@@ -81,6 +81,7 @@ wist-gateway-stack/
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
     import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
+    init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
     backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
     restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
     promote-dev-identity.sh # 一步：把开发态身份 + 库搬成发布态的（只搬文件，不碰容器；--dry-run 预演）
@@ -173,6 +174,12 @@ gops sys start
 #   知识库是**录入 ≠ 生效**：--set 只录入，--activate 才当场切（旧版工作不被追改，见网关设计稿 §8）。
 #   包从 wist-knowledge 的 Release 下载（wist-knowledge-<版本>.tar.gz），或本地 `scripts/package.sh` 打一个。
 ./scripts/import-knowledge.sh --latest --set --activate
+
+# （可选）让网关**强制验签**内容包：给公钥，localize 会渲染出 `[knowledge]` 段
+#   公钥在 wist-knowledge 仓的 keys/knowledge-signing.pub.pem（同级仓时自动取，不用给路径）。
+#   启用后**只收**发布侧签过的包（未签名的会被拒：package_signature_invalid）。
+KNOWLEDGE_SIGNING_PUBKEY=/path/to/knowledge-signing.pub.pem gops sys localize
+#   关掉：rm configs/gateway/state/knowledge-signing.pub.pem && gops sys localize
 
 # 改了证书/配置后，必须**重启网关容器**才生效（`up -d` 不会因挂载文件变化而重建）：
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway

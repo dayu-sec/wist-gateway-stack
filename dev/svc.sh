@@ -30,6 +30,7 @@
 #   WIST_GATEWAY_HOME（默认 ~/.wist-gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
 #   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
+#   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,7 +38,7 @@ STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 GW_CRATE="${ROOT_DIR}/wist-gateway"
 AGENTD_CRATE="${ROOT_DIR}/wist-agentd"
-WIST_DESIGN_DIR="${WIST_DESIGN_DIR:-${ROOT_DIR}/../wist-design}"
+WIST_KNOWLEDGE_DIR="${WIST_KNOWLEDGE_DIR:-${ROOT_DIR}/wist-knowledge}"
 
 # ── 控制面 gateway ──
 GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
@@ -391,14 +392,14 @@ with open(path, "w") as handle:
 print(f"  trust_bundle_file = {anchor_rel}")
 PY
 
-  # ② 策展内容（模型仓是创作源，拷到配置目录就近引用；找不到模型仓就跳过）
+  # ② 策展内容（wist-knowledge 是创作源，拷到配置目录就近引用；找不到知识库仓就跳过）
   ensure_content_files
 }
 
 ensure_content_files() {
-  local src="${WIST_DESIGN_DIR}/jumo/model/content"
+  local src="${WIST_KNOWLEDGE_DIR}"
   if [[ ! -d "${src}" ]]; then
-    echo "  未找到模型仓内容目录，跳过内容装载：${src}"
+    echo "  未找到知识库仓目录，跳过内容装载：${src}"
     return 0
   fi
   local dst="${GW_HOME}/content"

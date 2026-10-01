@@ -46,10 +46,20 @@ environment_id = "env-default"
 [ingest]
 listen_addr = "0.0.0.0:3001"
 
-{{#if knowledge_signing_pubkey}}
-# 知识库内容包的**验签**：内容包只认发布侧（wist-knowledge CI）那把私钥签过的（设计 §9）。
-# 公钥由 scripts/init-knowledge-signing.sh 放到 state/；**给了就必须验过才允许录入** ——
-# 配了却读不到文件，网关会**拒绝启动**（故意如此：静默降级比验不了更糟）。
+# 知识库（`[knowledge]`）：两个键各管一头，都不配也不会出错。
+#
+#   signing_public_key_file  内容包的**验签**：包只认发布侧（wist-knowledge CI）那把私钥签过的
+#                            （设计 §9）。公钥由 scripts/init-knowledge-signing.sh 放到 state/。
+#                            给了就必须验过才允许录入；配了却读不到/不是公钥，网关会拒绝启动。
+#   source_dir               **启动期知识源**（出厂初始包）：管理面还没激活过可用包时用它；
+#                            一旦管理面切了可用包，包就接管（优先级见网关 `app/knowledge.rs`
+#                            的 `resolve`）。内容由 `gops sys localize` 里的 gx.download +
+#                            scripts/install-initial-knowledge.sh 备好。
+#
+# `knowledge/initial` 是**应用契约**（相对本配置目录的固定值，不随环境变）—— 与
+# scripts/install-initial-knowledge.sh 的落点必须一致，**改一处要同时改另一处**。
 [knowledge]
+{{#if knowledge_signing_pubkey}}
 signing_public_key_file = "{{knowledge_signing_pubkey}}"
 {{/if}}
+source_dir = "knowledge/initial"

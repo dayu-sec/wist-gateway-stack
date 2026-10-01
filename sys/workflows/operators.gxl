@@ -31,6 +31,25 @@ mod operators {
       dst  : "./configs/web/nginx.conf",
       file : "./configs/web/nginx.value.json"
     );
+    // ⑤ 初始知识库内容包（出厂自带）：把合并后的 KNOWLEDGE_PKG_URL 拉到投放目录 packages/。
+    //     该目录只读挂给网关的 /packages，界面「知识库」页「本地来源」填 /packages/<文件名> 即可录入
+    //     —— 录入 ≠ 生效，还要点激活。置空 = 跳过（离线 / 不需要初始包）。
+    //
+    //     这里有两个 GXL 细节（都踩过）：
+    //       · 条件里的 ${VAR} 取的是**流程变量空间**，gops 注入的环境变量不在里面（直接写
+    //         `if ${X} != ""` 会 VarMiss）。所以先用 gx.read_cmd 把 env 读进空间再比较 ——
+    //         与上面几步用 $(printenv XXX) 是同一个原因。
+    //       · gx.download 的 local_file 给目录时必须带路径分隔符（写 "./packages"，不能写裸
+    //         "packages"）：裸名的 Path::parent() 是空串，exists() 为假，会直接报
+    //         `parent path not exists`。
+    //         目录形式会按 URL 文件名落盘，且默认 reuse_cache（存在即跳过）——
+    //         URL 里带版本、文件名随版本变，所以升版本不会复用旧包。
+    gx.read_cmd ( name: "KNOWLEDGE_PKG_URL", cmd: "printenv KNOWLEDGE_PKG_URL || true", silence: "true" );
+    if defined(${KNOWLEDGE_PKG_URL}) && ${KNOWLEDGE_PKG_URL} != "" {
+      gx.download ( url: "${KNOWLEDGE_PKG_URL}", local_file: "./packages" );
+      // 解开到网关的**启动期知识源**目录（`[knowledge] source_dir`）—— 目录口径见脚本头部注释
+      gx.cmd ( "./scripts/install-initial-knowledge.sh" );
+    }
   }
 
 }

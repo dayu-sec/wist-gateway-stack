@@ -19,9 +19,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.1.11-alpha
+    value: v0.1.12-alpha
   - name: WEB_TAG
-    value: v0.1.8-alpha
+    value: v0.1.9-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.153.0
@@ -90,3 +90,12 @@ system:
   # 安装包投放目录（宿主），只读挂到网关容器的 /packages；界面「本地来源」填 /packages/<文件名>
   - name: PACKAGE_DIR
     value: ./packages
+
+  # 初始知识库内容包（出厂自带）：`gops sys localize` 时用 gx.download 拉到 PACKAGE_DIR（packages/），
+  # 网关「知识库」页的「本地来源」填 /packages/<文件名> 即可录入（录入 ≠ 生效，还要点激活）。
+  #   - 置空 = 跳过这一步（离线 / 不需要初始包；把包手工放进 packages/ 效果相同）
+  #   - 内网 / 镜像源：在 values/value.yml 覆盖成可达地址
+  #   - URL 带版本、文件名随版本变：升版本不会复用上一版的包（gx.download 按文件名判重）
+  #   - 包本身的完整性由网关把关（manifest.json 摘要 + 配了验签公钥就验签），下载只保证不残缺
+  - name: KNOWLEDGE_PKG_URL
+    value: https://github.com/dayu-sec/wist-knowledge/releases/download/v0.1.1/wist-knowledge-0.1.1.tar.gz

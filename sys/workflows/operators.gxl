@@ -24,8 +24,11 @@ mod operators {
       dst  : "./configs/gateway/wist-gateway.toml",
       file : "./configs/gateway/wist-gateway.value.json"
     );
-    // ② 前端站点 TLS 证书（页面自己的）：存在即跳过；域名取合并后的值 WEB_DOMAIN
-    gx.cmd ( "test -f configs/web/tls/web-tls.crt.pem || ./scripts/init-web-tls.sh $(printenv WEB_DOMAIN)" );
+    // ② 前端站点 TLS 证书（页面自己的）：web CA + 由它签的叶。
+    //     **不再用 `test -f … ||` 挡住** —— 幂等由脚本自己判（缺 / 换了域名 / 与当前 CA 不对应才重签）；
+    //     如果这里短路，改了 WEB_DOMAIN 就永远不会重签（叶的 SAN 里没有新域名，浏览器报域名不匹配）。
+    //     域名取合并后的值 WEB_DOMAIN；脚本末尾会打印该导入哪份 CA。
+    gx.cmd ( "./scripts/init-web-tls.sh $(printenv WEB_DOMAIN)" );
     // ④ 渲染前端站点配置：由环境生成渲染值，再 gx.tpl → configs/web/nginx.conf
     gx.cmd ( "mkdir -p configs/web && printf '{\"web_domain\":\"%s\"}' $(printenv WEB_DOMAIN) > configs/web/nginx.value.json" );
     gx.tpl (

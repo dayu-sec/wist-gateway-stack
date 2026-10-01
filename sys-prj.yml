@@ -18,3 +18,29 @@ ignore:
   - data-plane-run
   # 开发态脚本用的本地二进制（dev/bin/，~92M，随平台而异）：现场自己装/自己编，不进交付包。
   - dev/bin
+
+# 现场态：升级/重建时**不覆盖、也不删**的路径（glob，相对系统根）。
+#
+# 不变式 `ignore ⊆ preserve`：不进交付包的按定义就不是包内容，升级当然也不该碰它。
+# 这里比 ignore 更大：`.env` / `packages` 没被 ignore（它们本来就不入库），但同样是现场态。
+# 由 `gops prj diagnose` 校这不一致。
+preserve:
+  - .env
+  - configs
+  - packages
+  - data-plane-run
+  - dev/bin
+
+# 备份选取分级（只表达“丢了什么代价”，**不触发任何删除**）：
+#   restore 档：丢了要重装 / 换身份 → `gops prj backup` 默认收，`gops prj restore` 放回。
+#   rebuild 档：可重建 → 默认不收，`--include-rebuild` 才收（价值只是省一次重投）。
+# 不在两档里的 = 不收、不碰（如 `configs/gateway/state/logs/` 的运行日志）。
+backup:
+  restore:
+    - configs/gateway/state/*.pem
+    - configs/gateway/state/wist-gateway-store.db*
+    - configs/gateway/wist-gateway.toml
+    - configs/gateway/wist-gateway.value.json
+    - configs/web/tls
+  rebuild:
+    - packages

@@ -4,7 +4,7 @@ system:
 - name: GATEWAY_TAG
   value: v0.1.12-alpha
 - name: WEB_TAG
-  value: v0.1.9-alpha
+  value: v0.1.10-alpha
 - name: VM_TAG
   value: v1.153.0
 - name: WPARSE_IMAGE

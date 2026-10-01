@@ -1,3 +1,20 @@
 test_envs:
   dep_root: ''
   deps: []
+
+# `gops sys package` 打包时排除的路径（glob，相对系统根；默认模式与 `--full` **都生效**）。
+#
+# 为什么必须有这条：`--full` 是 `WalkDir` 整目录（只跳 `.git/`），而 `configs/` 里是**现场生成的身份材料**
+# —— `state/` 下有 CA 私钥、TLS 私钥、安装脚本签名私钥与 store 库（见 .gitignore 的说明）。不加这条，
+# 一次 `gops sys package --full` 就会把整套私钥塞进交付包。默认模式本来就只收 git 入库文件，这里是护栏。
+#
+# 身份/内容要跟着交付走，走的是它们自己的通路，不是系统包：
+#   身份：scripts/backup-gateway.sh / restore-gateway.sh
+#   内容：KNOWLEDGE_PKG_URL（或现场投放 configs/gateway/knowledge/initial/）
+ignore:
+  - configs
+  # wparse 运行态根（WPARSE_RUN_DATA / WPARSE_RUN_STATE）：pid / 锁 / 引擎自带的 sqlite 与输出。
+  # 那是**现场跑出来的**东西，随交付包发出去既无意义，还可能把上一台的运行态带进新环境。
+  - data-plane-run
+  # 开发态脚本用的本地二进制（dev/bin/，~92M，随平台而异）：现场自己装/自己编，不进交付包。
+  - dev/bin

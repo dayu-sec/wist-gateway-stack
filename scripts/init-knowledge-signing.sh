@@ -11,9 +11,15 @@
 #   scripts/init-knowledge-signing.sh [目标目录]        # 默认 configs/gateway
 #
 # 公钥从哪来（按顺序）：
-#   1. env KNOWLEDGE_SIGNING_PUBKEY=<路径>             # 显式指定（部署时最常用）
-#   2. 同级仓 wist-knowledge 的 keys/knowledge-signing.pub.pem（本地开发布局）
-#   都不给/都不在  → **不启用验签**（不改任何东西；已有公钥也保持原样）
+#   1. env KNOWLEDGE_SIGNING_PUBKEY=<路径>              # 显式指定（现场覆盖）
+#   2. <栈根>/sys/keys/knowledge-signing.pub.pem        # **随栈入库**：交付就靠这条
+#   3. 同级仓 wist-knowledge 的 keys/knowledge-signing.pub.pem（本地开发布局的便利）
+# 都不给/都不在  → **不启用验签**（不改任何东西；已有公钥也保持原样）
+#
+# 为什么要 ②：交付出去的是**栈自己**，同级没有 wist-knowledge 仓 —— 只靠 ③ 的话，
+# 现场永远找不到公钥，验签默默变成关闭（2026-10-01 在 gateway-alone 上真实踩到）。
+# ② 是 ③ 的副本（发布侧那把私钥的公开半边，公开信息，入库无秘密）；
+# 对发布制品验过：指纹 502d6b90a96afb0b…，与 wist-knowledge v0.1.1 的 .sig 对得上。
 #
 # 启用 / 关掉：
 #   启用：给上面任一个来源（或直接把公钥拷成 <dir>/state/knowledge-signing.pub.pem）→ 跑 localize
@@ -27,11 +33,18 @@ DIR="${1:-configs/gateway}"
 STACK_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VALUE_JSON="${DIR}/wist-gateway.value.json"
 TARGET="${DIR}/state/knowledge-signing.pub.pem"
+VENDORED="${STACK_ROOT}/sys/keys/knowledge-signing.pub.pem"
 SIBLING="${STACK_ROOT}/../wist-knowledge/keys/knowledge-signing.pub.pem"
 
 note() { echo "  $*"; }
 
+# 指纹：公钥换没用/换错了，看这一串就明白（打印前 16 位，够区分）。
+fp() { openssl pkey -pubin -in "$1" -outform DER 2>/dev/null | shasum -a 256 | cut -c1-16; }
+
 SRC="${KNOWLEDGE_SIGNING_PUBKEY:-}"
+if [[ -z "$SRC" && -f "$VENDORED" ]]; then
+  SRC="$VENDORED"
+fi
 if [[ -z "$SRC" && -f "$SIBLING" ]]; then
   SRC="$SIBLING"
 fi
@@ -50,10 +63,10 @@ if [[ -n "$SRC" ]]; then
     exit 1
   }
   if [[ -f "$TARGET" ]] && cmp -s "$SRC" "$TARGET"; then
-    note "验签公钥已就位（内容一致，跳过）：${TARGET}"
+    note "验签公钥已就位（内容一致，跳过）：${TARGET}（来源 ${SRC}，指纹 $(fp "$TARGET")…）"
   else
     install -m 0644 "$SRC" "$TARGET"
-    note "已放置验签公钥：${TARGET}（来源 ${SRC}）"
+    note "已放置验签公钥：${TARGET} ← ${SRC}（指纹 $(fp "$TARGET")…）"
   fi
 elif [[ -f "$TARGET" ]]; then
   note "已有验签公钥，保持不变：${TARGET}"
@@ -61,9 +74,10 @@ else
   note "未提供验签公钥 → **不启用**知识库包验签（只记 sha256）"
 fi
 
-# 把"验签是否启用"写进渲染值：模板里的 `{{#if knowledge_signing_pubkey}}` 据此决定
-# 是否渲染 `[knowledge]` 段。为什么改 value.json 而不是让模板恒渲染：网关**配了公钥却读不到
-# 文件就拒绝启动**——"启用"必须和"文件真的在"严格同步，否则会变成一台上不了线的网关。
+# 把"验签是否启用"写进渲染值：模板据此决定是否渲染 `signing_public_key_file` **那一行**
+# （`[knowledge]` 段本身现在恒渲染 —— 它还带与验签无关的 `source_dir`）。
+# 为什么必须与"文件真的在"严格同步：网关**配了公钥却读不到/不是公钥就会拒绝启动**
+# （`infra/config.rs` 的 validate）——不同步就会造出一台上不了线的网关。
 if [[ ! -f "$VALUE_JSON" ]]; then
   note "还没有 ${VALUE_JSON}（先跑 scripts/init-gateway.sh）——本轮跳过渲染值更新"
   exit 0

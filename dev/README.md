@@ -34,7 +34,7 @@ x-topology/wist/                  <- $WIST
 # 只看计划，不启动
 ./dev/svc.sh start --dry-run
 
-# 看四个组件当前状态
+# 看各组件当前状态
 ./dev/svc.sh status
 
 # 停全栈（逆序：gateway → web → wparse → VM）
@@ -51,15 +51,16 @@ x-topology/wist/                  <- $WIST
 | 只重启前端（gateway 已在跑） | `./dev/svc.sh start web` |
 | 只停/起某个组件 | `./dev/svc.sh stop web` / `./dev/svc.sh start gateway --no-build` |
 | 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完需重启 gateway**） |
+| 不要 agent 面 / 不想碰 sudo | `./dev/svc.sh start --no-forward` |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
 > **自动**重新登记（mTLS 自愈）；真要手动重注册，用 `wist-agentd` 自带的 `enroll`。
-> `svc.sh start` 会把 `vm`/`wparse`/`web`/`gateway` 按序起全（已在跑的跳过），你不用逐个跑。
+> `svc.sh start` 会把 `vm`/`wparse`/`web`/`forward`/`gateway` 按序起全（已在跑的跳过），你不用逐个跑。
 
 ## 组件与脚本
 
-`svc.sh` 管四个组件（顺序 = 依赖序）：
+`svc.sh` 日常管四个组件（顺序 = 依赖序），另有一个可选组件 `forward`：
 
 | 组件 | 是什么 | 前台/后台 | 说明 |
 |---|---|---|---|
@@ -67,6 +68,7 @@ x-topology/wist/                  <- $WIST
 | `wparse` | 数据面 ELT 引擎 | 后台常驻 | 本地 `dev/bin/wparse`；工程在 `../data-plane` |
 | `web` | 前端 vite dev server（`5174`） | 后台常驻 | `npm run dev`，工作目录 `$WIST/wist-gateway-web` |
 | `gateway` | 控制面后端（HTTPS `:3000`） | **前台**（Ctrl+C 停） | 跑在最后；其余组件不随其退出而停 |
+| `forward` | `443 → 网关端口` 纯 TCP 转发 | 后台常驻 | **在默认 `start` 里**（绑 443 要 sudo；`--no-forward` 摘掉）；见下面「组件 forward」一节 |
 
 **没有单独的 `stop-gateway.sh`**：gateway 前台运行、`Ctrl+C` 停；后台跑时用 `svc.sh stop gateway`
 （靠 pidfile + 端口兜底停）。
@@ -154,6 +156,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 | 变量 | 作用 | 默认 |
 |---|---|---|
 | `SKIP_BUILD` | 等价 `--no-build`（跳过 `cargo build`） | 每次都构建 |
+| `SKIP_FORWARD` | 等价 `--no-forward`（整个摘掉 `forward`） | 不摘 |
 | `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `~/.wist-gateway`（发布态另用 `configs/gateway`） |
 | `GATEWAY_PIDFILE` | 网关承载进程 pidfile | `/tmp/wist-gateway.pid` |
 | `GATEWAY_PORT` | `stop gateway` 端口兜底用的端口 | `3000` |
@@ -167,6 +170,46 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 | `WPARSE_GATEWAY_ENDPOINT` | wparse 的 agent-facts sink 端点 | `http://127.0.0.1:3001` |
 | `GATEWAY_LISTEN` | `setup-domain.sh` 写进配置的监听地址 | `0.0.0.0:443` |
 | `GATEWAY_URL_PORT` | `setup-domain.sh` 对外基址里的端口（空串 = 不带端口） | 按监听端口推导 |
+| `FORWARD_LISTEN` | `forward` 组件监听的端口（**起/停/status 三侧必须一致**） | `443` |
+| `FORWARD_BIND` | `forward` 绑定地址 | `0.0.0.0` |
+| `FORWARD_TARGET_PORT` | `forward` 的转发目标端口 | 按网关配置推导 |
+| `FORWARD_PIDFILE` / `FORWARD_LOG` | 转发器 pidfile / 日志 | `/tmp/wist-gateway-forward.pid` / `.log` |
+| `FORWARD_SCRIPT` | 转发器脚本（纯 TCP，不碰 TLS） | `dev/forward-443.py` |
+
+## 组件 `forward`：让 agent 也走 443（补发布态由 docker 提供的那一跳）
+
+发布态 agentd 连的 `https://<域名>`（隐式 **443**）不是网关进程自己听的 —— 那是 compose 里
+`${GATEWAY_PORT}:3000` 这行**端口映射**给的。dev 态没有 docker，网关按配置听高位端口（默认
+`3000`），于是 agent 侧只剩“域名:3000”可填 —— 那就不是发布态那个形态了。
+
+`forward` 就是这个缺口：一个**纯 TCP** 转发器（TLS 仍由网关终止，证书/信任锚/SNI 全部原样透传，
+agent 侧地址不必带端口）。**它是默认 `start` 的一部分** —— “agent 能不能连上来”是日常问题，
+不该靠人记得敲第二个命令；所以 `./dev/svc.sh start` 就会把它带上（`start [组件…]` 点名了别的组件时不带）。
+
+```bash
+./dev/svc.sh start              # 含 forward：443 → 网关监听端口
+./dev/svc.sh start forward      # 只要它（网关已在跑、只补这一跳）
+./dev/svc.sh start --no-forward # 不要 agent 面 / 不想碰 sudo
+./dev/svc.sh status             # 多一行 forward：看清 agent 能不能走 443
+./dev/svc.sh stop  forward      # 只停它（root 起的会自己退回 sudo）
+```
+
+**sudo 怎么处理**（绑 <1024 的端口要 root，但这件事不该把整次 `start` 拖死）：三级降级 ——
+免密 sudo → 交互终端上要一次密码（会明确告知为什么）→ 实在要不到就**跳过并告诉你**，
+栈照旧起来。只要它（`start forward`）时则是硬错误：那是你点名要的东西。
+
+两件要知道的事：
+
+1. **`FORWARD_LISTEN` 起停两侧必须一致**（同 `WEB_URL` 的口径）：`status`/`stop` 看的是它。
+2. **网关看到的对端地址会变成 `127.0.0.1`** —— 所有 agent 挤进同一个限流桶，日志里也看不出真实
+   来源（这是“纯转发”的代价）。**要保真实源 IP** 就别用它（`--no-forward`），改用内核级重定向
+   （`sudo sh -c 'printf "rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 443 ->\
+   127.0.0.1 port 3000\n" | pfctl -ef -'`，撤销 `sudo pfctl -F all -f /etc/pf.conf`）。
+
+另一条路：**让网关自己就听 443**（`GATEWAY_LISTEN=0.0.0.0:443 ./dev/setup-domain.sh <域名>` +
+`sudo ./dev/svc.sh start gateway --no-forward`）—— 与发布态完全一致、也不需要转发器、还保真实
+源 IP，但网关会以 **root** 跑，它写的 `state/*`（库、`knowledge/`、日志）都变成 root 所有，
+之后普通用户的 dev 会踩权限。
 
 ## 注意事项
 

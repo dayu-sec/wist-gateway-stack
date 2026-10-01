@@ -29,6 +29,9 @@
 # 可覆盖 env：
 #   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时依次从已有 value.json、
 #                       已有叶证书的 SAN 推断）
+#   VICTORIA_METRICS_URL 网关查询观测后端的地址（写进 value.json，供模板渲染 victoria_metrics_url）。
+#                       缺省 http://victoria-metrics:8428（发布态 = compose 服务名）。开发态
+#                       （网关跑在宿主进程）要改成宿主可达地址，如 http://127.0.0.1:18429。
 #   CERT_DAYS           叶证书有效期天数（默认 397）
 #   CA_DAYS             CA 有效期天数（默认 3650）
 #   GATEWAY_CA_CRT / GATEWAY_CA_KEY   复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
@@ -50,6 +53,8 @@ SIGNING_KEY="$STATE/install-script-signing-ed25519.pkcs8.pem"
 VALUE_JSON="$DIR/wist-gateway.value.json"
 CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
+# 网关查询观测后端的地址：随运行形态（容器 / 宿主进程）而变，故进渲染值而非写死模板。
+VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
 
@@ -159,10 +164,11 @@ else
   note "已生成安装脚本签名私钥（Ed25519 PKCS#8）：${SIGNING_KEY}"
 fi
 
-# ④ 渲染值文件（token / url）。**只在缺失时写** —— token 一旦生成必须持久。
-if [[ -f "$VALUE_JSON" ]]; then
-  note "值文件已存在，跳过：${VALUE_JSON}"
-else
+# ④ 渲染值文件（public_base_url / victoria_metrics_url / admin token / 验签公钥）。
+#    **admin token 一旦生成必须持久**（只在缺失时整份新建）；
+#    但 victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变，**每轮都对齐到当前值**，
+#    免得「复用已有 value.json」把错值一直带进渲染结果（症状：网关跑在宿主时「数据采集」页 502）。
+if [[ ! -f "$VALUE_JSON" ]]; then
   if [[ -z "$domain" ]]; then
     echo "需要域名才能新建 ${VALUE_JSON}（public_base_url）：设 WEB_DOMAIN=<域名> 再跑，或用 \`gops sys localize\`" >&2
     exit 1
@@ -171,11 +177,37 @@ else
   cat >"$VALUE_JSON" <<EOF
 {
   "public_base_url": "https://${domain}",
+  "victoria_metrics_url": "${VM_URL}",
   "admin_api_token": "${token}"
 }
 EOF
   chmod 600 "$VALUE_JSON"
   note "已生成值文件：${VALUE_JSON}（admin token 已随机生成）"
+else
+  command -v python3 >/dev/null 2>&1 || {
+    echo "需要 python3 才能更新 ${VALUE_JSON}（就地改键、保住已生成的 admin token）" >&2
+    exit 1
+  }
+  python3 - "$VALUE_JSON" "$VM_URL" <<'PY'
+import json, os, sys, tempfile
+
+path, vm_url = sys.argv[1], sys.argv[2]
+with open(path) as handle:
+    value = json.load(handle)
+if value.get("victoria_metrics_url", "") == vm_url:
+    print(f"  值文件已是 victoria_metrics_url={vm_url!r}，跳过")
+    sys.exit(0)
+value["victoria_metrics_url"] = vm_url
+# 原子替换，并保持 0600（它装着 admin token，别因为改写把权限放宽）。
+directory = os.path.dirname(os.path.abspath(path))
+fd, tmp = tempfile.mkstemp(dir=directory, prefix=".value-", suffix=".json")
+with os.fdopen(fd, "w") as handle:
+    json.dump(value, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+print(f"  值文件已更新：victoria_metrics_url={vm_url!r}")
+PY
 fi
 
 echo "init-gateway 完成：${DIR}（锚 = ${CA_CRT}；agent CA = ${AGENT_CA_CRT_FILE}）"

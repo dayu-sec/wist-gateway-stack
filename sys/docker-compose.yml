@@ -14,9 +14,22 @@
 #   - 容器内端口/路径/服务名是应用契约，直接写在这里。
 #   - 本栈当前无密钥；如需，用 ${SEC_xxx} 占位，由 `gops sys start` 注入、不落盘。
 
+# 单实例保障（发布态这一半）：**一个操作系统上只允许跑一套本栈**。
+#
+# 三个服务都钉了**固定 `container_name`**（不是 compose 默认的 `<项目>-<服务>-1`）。
+# 为什么必须钉：默认名里带**项目名**，而项目名默认取目录名 —— 两份同名目录的栈会共用同一批
+# 容器名，第二个 `up` 不会报错，而是**悄悄接管/顶掉**第一个的容器（“停了却还在跑”就是这么来的）。
+# 钉死之后，第二个栈的 `up` 会在创建时就**当场报名字冲突**。名字写成字面量、不走变量，是故意的：
+# 可配的名字等于没有保证。
+#
+# 边界：这一层只能挡“同宿主上的第二套 compose”，挡不住手工 `docker run` 的野实例，
+# 也管不到容器内的进程（网关自己的 `flock` 锁在容器里是独立的一把，见
+# `wist-gateway/src/infra/single_instance.rs` 与下面 wparse 那段的同一思路）。
+
 services:
   # ── 观测：指标 ──
   victoria-metrics:
+    container_name: wist-gateway-stack-vm
     image: victoriametrics/victoria-metrics:${VM_TAG}
     restart: unless-stopped
     ports:
@@ -58,6 +71,7 @@ services:
   # 这层包装是绕过：引擎自身应当持锁 —— 已提上游 wp-labs/warp-parse#365，
   # 上游实现后这里的 entrypoint 可以直接去掉。
   wparse:
+    container_name: wist-gateway-stack-wparse
     image: ${WPARSE_IMAGE}:${WPARSE_TAG}
     restart: unless-stopped
     entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.run/.wparse.lock", "/usr/local/bin/wparse"]
@@ -86,6 +100,7 @@ services:
 
   # ── 控制面后端 ──
   gateway:
+    container_name: wist-gateway-stack-gateway
     # 本地零配置联调可换成 bootstrap 镜像（image 改成 wist-gateway:bootstrap）
     image: ${IMAGE_SPC}/wist-gateway:${GATEWAY_TAG}
     restart: unless-stopped
@@ -104,6 +119,7 @@ services:
 
   # ── 前端 ──
   web:
+    container_name: wist-gateway-stack-web
     image: ${IMAGE_SPC}/wist-gateway-web:${WEB_TAG}
     restart: unless-stopped
     volumes:

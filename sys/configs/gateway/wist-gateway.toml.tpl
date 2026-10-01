@@ -5,12 +5,17 @@
 #   或单独：gx run -e debug localize
 #   （见 _gal/work.gxl；tpl=本文件，data=wist-gateway.value.json，dst=wist-gateway.toml）
 #
-# 只参数化**随部署环境变化**的量；其余（监听地址、相对路径、容器内服务名、TTL）是
-# 应用契约或固定值，保持字面量，不因环境而变。
+# 只参数化**随部署环境变化**的量；其余（监听地址、相对路径、TTL）是应用契约或固定值，
+# 保持字面量，不因环境而变。
 #
-# 两个占位（注意：pem/注释里不要再写同样的花括号占位，否则会被一并替换）：
-#   public_base_url   对外基址，须落在网关 TLS 证书 SAN 内、且是 https://
-#   admin_api_token   管理台/管理 API 的 Bearer token（密钥，不要入库）
+# 三个占位（注意：pem/注释里不要再写同样的花括号占位，否则会被一并替换）：
+#   public_base_url       对外基址，须落在网关 TLS 证书 SAN 内、且是 https://
+#   admin_api_token       管理台/管理 API 的 Bearer token（密钥，不要入库）
+#   victoria_metrics_url  网关查询观测后端（VictoriaMetrics）的地址。**随运行形态变**：
+#                         发布态网关是容器，走 compose 服务名 http://victoria-metrics:8428；
+#                         开发态网关是宿主进程，解析不到服务名，必须是宿主可达地址
+#                         （如 http://127.0.0.1:18429）。默认值在 sys/setting/vars.yml 的
+#                         VICTORIA_METRICS_URL。值取自 scripts/init-gateway.sh 写的渲染值。
 #
 # 可选段引用的一个渲染值（**空 = 不渲染该段**，由 scripts/init-knowledge-signing.sh 维护）：
 #   knowledge_signing_pubkey  知识库内容包的验签公钥相对路径；空 = 不验签
@@ -20,7 +25,7 @@ public_base_url = "{{public_base_url}}"
 tls_cert_file = "state/admin-tls.crt.pem"
 tls_key_file = "state/admin-tls.key.pem"
 admin_api_token = "{{admin_api_token}}"
-victoria_metrics_url = "http://victoria-metrics:8428"
+victoria_metrics_url = "{{victoria_metrics_url}}"
 
 [agent]
 # agent CA：给 agent 签**客户端证书**（mTLS）。声明了它，注册/续期时网关就会用 agent 交的 CSR 签证书；

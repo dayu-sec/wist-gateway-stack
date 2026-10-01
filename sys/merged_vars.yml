@@ -2,9 +2,9 @@ system:
 - name: IMAGE_SPC
   value: ghcr.io/dayu-sec
 - name: GATEWAY_TAG
-  value: v0.1.9-alpha
+  value: v0.1.11-alpha
 - name: WEB_TAG
-  value: v0.1.7-alpha
+  value: v0.1.8-alpha
 - name: VM_TAG
   value: v1.153.0
 - name: WPARSE_IMAGE
@@ -17,6 +17,8 @@ system:
   value: 8443
 - name: VM_PORT
   value: 18429
+- name: VICTORIA_METRICS_URL
+  value: http://victoria-metrics:8428
 - name: WPARSE_PORT
   value: 9000
 - name: RETENTION_PERIOD

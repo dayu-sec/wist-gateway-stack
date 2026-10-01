@@ -5,32 +5,43 @@
 # 网关持久数据在 `~/.wist-gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
 #
 # 用法：
-#   ./dev/svc.sh start [组件…] [--no-build] [--dry-run]
+#   ./dev/svc.sh start [组件…] [--no-build] [--no-forward] [--dry-run]
 #   ./dev/svc.sh stop  [组件…]
 #   ./dev/svc.sh status
 #
-#   组件（不给 = 全部）：vm | wparse | web | gateway（也可写 all）
+#   组件（不给 = vm|wparse|web|forward|gateway）：vm | wparse | web | gateway | forward（也可写 all）
+#     forward = `FORWARD_LISTEN （默认 443）→ 网关监听端口` 的纯 TCP 转发。它就一件事：把发布态由
+#     docker 提供的那一跳（`${GATEWAY_PORT}:3000`）在 dev 态补上，好让 agentd 用**不带端口**的域名走 443。
+#     它在**默认 start 里**（agent 能不能连上来是日常问题，不该靠人记得敲第二个命令）；
+#     绑 <1024 的端口要 sudo：能免密就用、交互终端上要一次密码、实在要不到就**跳过并告知**
+#     （不拖垮整次 start）。不想碰权限/不需要 agent 面就走 `--no-forward`。
 #
 # 同一口径（不再有「有的跳过、有的报错」）：
 #   start：先 `cargo build` 一次（wist-gateway + wist-agentd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
-#          每个组件**已在运行则跳过**；按 vm → wparse → web → gateway 顺序；
+#          每个组件**已在运行则跳过**；按 vm → wparse → web → forward → gateway 顺序；
 #          gateway 跑**前台**（Ctrl+C 停），其余后台常驻（不随本脚本退出而停）。
+#          **start 从不接管/杀已经在跑的进程**（包括 gateway）—— 要重启就先 `stop` 再 `start`。
 #   stop ：按 start 的**逆序**停；未在跑的是 no-op。
-#   status：只读，打印四个组件当前状态。
+#   status：只读，打印各组件的当前状态。
 #
 # 例：
-#   ./dev/svc.sh start                  # 全栈（日常）
+#   ./dev/svc.sh start                  # 全栈（日常；含 443 转发）
+#   ./dev/svc.sh start --no-forward     # 不想碰 sudo / 不要 agent 面
 #   ./dev/svc.sh start web              # 只重启前端（gateway 已在跑时）
 #   ./dev/svc.sh start gateway --no-build
 #   ./dev/svc.sh stop web gateway
 #   ./dev/svc.sh status
 #
 # 可覆盖 env（与旧的分散脚本同口径）：
-#   SKIP_BUILD=1 等价 --no-build
+#   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward
 #   WIST_GATEWAY_HOME（默认 ~/.wist-gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
 #   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
 #   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
+#   WIST_GATEWAY_LOCK_FILE（网关单实例锁路径；默认 /tmp/wist-gateway.lock ——
+#     同一台机器上要有意并行两套时才改它，改了就真的会有两个网关同时在跑）
+#   FORWARD_LISTEN / FORWARD_BIND / FORWARD_TARGET_PORT / FORWARD_PIDFILE / FORWARD_LOG
+#     （可选的 443→网关端口 转发，见下面 forward 组件）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,17 +65,32 @@ WPARSE_BIN="${WPARSE_BIN:-${SCRIPT_DIR}/bin/wparse}"
 WPARSE_PIDFILE="${WPARSE_WORK_ROOT}/data/logs/wparse.pid"
 export WPARSE_VM_ENDPOINT="${WPARSE_VM_ENDPOINT:-http://127.0.0.1:18429}"
 export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001}"
+# ── 可选：端口转发（补上发布态由 docker 提供的那一跳）──
+FORWARD_LISTEN="${FORWARD_LISTEN:-443}"
+FORWARD_BIND="${FORWARD_BIND:-0.0.0.0}"
+# 空 = 按网关配置的 [server] listen_addr 推导
+FORWARD_TARGET_PORT="${FORWARD_TARGET_PORT:-}"
+FORWARD_PIDFILE="${FORWARD_PIDFILE:-/tmp/wist-gateway-forward.pid}"
+FORWARD_LOG="${FORWARD_LOG:-/tmp/wist-gateway-forward.log}"
+FORWARD_SCRIPT="${SCRIPT_DIR}/forward-443.py"
 # ── 观测 VictoriaMetrics（第三方，走 docker compose）──
 VM_URL="${VM_URL:-http://127.0.0.1:18429}"
 COMPOSE=(docker compose --project-directory "${STACK_ROOT}" -f "${STACK_ROOT}/sys/docker-compose.yml")
 
 usage() {
-  sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  sed -n '3,42p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
 }
 
 die() {
   echo "错误：$*" >&2
   exit 1
+}
+
+# 进程在不在？**不用 `kill -0`**：它对**别人的**进程（典型：root 起的转发器）回 EPERM，
+# 于是“在跑”会被误判成“没跑”（2026-09-30 实撞：`svc.sh start forward` 会拿不到 pid、
+# 反复去绑 443）。`ps -p` 能看所有用户的进程。
+pid_alive() {
+  [[ -n "$1" ]] && ps -p "$1" >/dev/null 2>&1
 }
 
 require_cmd() {
@@ -320,6 +346,14 @@ gateway_cleanup() {
     wait "${GATEWAY_PID}" 2>/dev/null || true
   fi
   rm -f "${GATEWAY_PIDFILE}"
+  # 转发器**不跟着活**：443 只在网关活着时有意义。网关一退却留着一个“接受连接但连不上后端”的
+  # 443，比没有更坑 —— agent 侧看到的是 transport error，看着像证书/信任问题（2026-09-30 实撞）。
+  # 发布态也一样：容器一停，端口映射就跟着没了。
+  if [[ -n "$(forward_pid)" ]]; then
+    echo
+    echo "（网关退出）一并停掉 ${FORWARD_LISTEN} 转发：443 只在网关活着时有意义。" >&2
+    stop_forward || true
+  fi
 }
 
 build_binaries() {
@@ -360,9 +394,9 @@ ensure_gateway_config() {
     mv -f "${GW_HOME}/state/dev-ca.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem"
     [[ -f "${GW_HOME}/state/dev-ca.key.pem" ]] && mv -f "${GW_HOME}/state/dev-ca.key.pem" "${GW_HOME}/state/gateway-ca.key.pem"
   fi
-  python3 - "${GW_HOME}/state/admin-tls.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem" "${config}" <<'PY'
+  python3 - "${GW_HOME}/state/admin-tls.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem" "${config}" "${VM_URL}" <<'PY'
 import os, re, sys
-leaf, ca, path = sys.argv[1:4]
+leaf, ca, path, vm_url = sys.argv[1:5]
 anchor = ca if os.path.exists(ca) else leaf
 anchor_rel = os.path.join("state", os.path.basename(anchor))
 with open(path) as handle:
@@ -387,9 +421,23 @@ else:
     text, replaced = re.subn(r"(?m)^(\[agent\]\s*)$", lambda m: m.group(1) + "\n" + setting, text, count=1)
     if replaced != 1:
         sys.exit("配置里找不到 [agent] 段，无法写入 trust_bundle_file")
+
+# 开发态：VM 跑在 docker 但**发布**在宿主端口（VICTORIA_METRICS 的 18429）。
+# 配置里若是 compose 服务名（victoria-metrics:8428），宿主进程的网关根本解析不到 ——
+# 「数据采集」页会直接 502（failed to query pipeline metrics）。这里每次都改写成宿主可达地址，
+# 免得「复用已有配置」把错值一直带下去。
+vm_setting = f'victoria_metrics_url = "{vm_url}"'
+if re.search(r"(?m)^victoria_metrics_url\s*=", text):
+    text = re.sub(r"(?m)^victoria_metrics_url\s*=.*$", vm_setting, text, count=1)
+else:
+    text, replaced = re.subn(r"(?m)^(\[server\]\s*)$", lambda m: m.group(1) + "\n" + vm_setting, text, count=1)
+    if replaced != 1:
+        sys.exit("配置里找不到 [server] 段，无法写入 victoria_metrics_url")
+
 with open(path, "w") as handle:
     handle.write(text)
 print(f"  trust_bundle_file = {anchor_rel}")
+print(f"  victoria_metrics_url = {vm_url}")
 PY
 
   # ② 策展内容（wist-knowledge 是创作源，拷到配置目录就近引用；找不到知识库仓就跳过）
@@ -486,6 +534,36 @@ print("3000")
 PY
 }
 
+# 网关是不是已经在跑了？两种情况都算“在跑”，都**跳过**（不杀）：
+#   ① 本脚本托管的那个还在（pidfile 里的 wrapper 活着）；
+#   ② 配置的网关端口上有 `wist-gateway` 在听 —— 可能是别处起的（另一个 home / 另一个 svc 入口），
+#      也可能是上次没用 svc.sh 停的。
+# 端口上若是**别的**程序，直接报错退出：那时候再怎么起网关也只会撞 EADDRINUSE，
+# 与其让人看一句晦涩的绑定失败，不如当场说清。
+gateway_already_running() {
+  local listen_port="$1" pid running_pid
+  if [[ -f "${GATEWAY_PIDFILE}" ]]; then
+    pid="$(cat "${GATEWAY_PIDFILE}")"
+    if pid_alive "${pid}"; then
+      echo "  已在运行（本脚本托管，pid=${pid}），跳过。"
+      echo "  要重启：./dev/svc.sh stop gateway && ./dev/svc.sh start gateway"
+      return 0
+    fi
+    echo "  清理 stale pidfile（pid=${pid} 已不在）"
+    rm -f "${GATEWAY_PIDFILE}"
+  fi
+  running_pid="$(lsof -nP -ti "tcp:${listen_port}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [[ -n "${running_pid}" ]]; then
+    if lsof -p "${running_pid}" 2>/dev/null | grep -q "wist-gateway"; then
+      echo "  已有网关在 ${listen_port} 端口上跑（pid=${running_pid}），跳过。"
+      echo "  要重启：./dev/svc.sh stop gateway && ./dev/svc.sh start gateway"
+      return 0
+    fi
+    die "端口 ${listen_port} 被别的进程占着（pid=${running_pid}）：改配置里的 [server] listen_addr，或先停掉它"
+  fi
+  return 1
+}
+
 # 起 gateway（前台）。写本进程 pid 到 GATEWAY_PIDFILE，Ctrl+C 触发 trap 一并停掉 gateway。
 start_gateway() {
   echo "== 控制面 gateway =="
@@ -501,25 +579,34 @@ start_gateway() {
   listen_port="$(gateway_listen_port)"
   echo "  监听端口：${listen_port}"
 
+  # 已经在跑就**跳过**（与 vm / wparse / web 同一口径，README 也是这么写的）——
+  # 绝不"把正在跑的那个杀了再顶上"：静默接管一个健康实例，正是"那网关到底跑没跑/停的是哪个"
+  # 这类混乱的来源。要重启就显式 stop + start。
+  if gateway_already_running "${listen_port}"; then
+    return 0
+  fi
+
   trap gateway_cleanup EXIT INT TERM
   echo $$ >"${GATEWAY_PIDFILE}"
-
-  # 清掉端口上**残留的 wist-gateway**（只 kill 确认是网关的进程 —— 端口可能是别人的服务）。
-  local stale_pids stale_pid
-  stale_pids="$(lsof -nP -ti "tcp:${listen_port}" -sTCP:LISTEN 2>/dev/null || true)"
-  for stale_pid in ${stale_pids}; do
-    if lsof -p "${stale_pid}" 2>/dev/null | grep -q "wist-gateway"; then
-      echo "  清理 ${listen_port} 端口残留的 wist-gateway：${stale_pid}"
-      kill "${stale_pid}" 2>/dev/null || true
-    else
-      echo "  注意：${listen_port} 端口被别的进程占着（pid=${stale_pid}），没动它" >&2
-    fi
-  done
-  [[ -n "${stale_pids}" ]] && sleep 0.5
 
   WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml" \
     "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1 &
   GATEWAY_PID=$!
+
+  # 起来之后要**确认它真的在跑**：启动期的拒绝（单实例闸门、库/证书读不开）会立刻退出，
+  # 此时把日志尾巴摆出来 —— 否则屏幕上只剩一句“已启动”，人去浏览器里才发现服务不在。
+  local i
+  for i in {1..50}; do
+    if ! kill -0 "${GATEWAY_PID}" 2>/dev/null; then
+      echo "  网关启动失败（进程已退出）。日志尾部：" >&2
+      tail -n 5 "/tmp/wist-gateway-server.log" >&2 || true
+      exit 1
+    fi
+    if lsof -nP -ti "tcp:${listen_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
   echo "  已启动 (pid=${GATEWAY_PID})"
 
   echo
@@ -527,7 +614,11 @@ start_gateway() {
   echo "  监听    ：见配置的 [server] listen_addr"
   echo "  日志    ：/tmp/wist-gateway-server.log"
   echo "  pid     ：${GATEWAY_PIDFILE}"
-  while :; do sleep 60; done
+  # `wait` 而不是空转的 sleep 循环：下面两件事都需要它 ——
+  # ① Ctrl+C / kill 能**立刻**走到 trap（空转循环里的 sleep 会把信号拖到下一轮才处理，
+  #    于是“停了”之后 wrapper 还在，看起来像服务没停干净）；
+  # ② 网关自己死了就跟着退，不留一个假装还在托管的 wrapper。
+  wait "${GATEWAY_PID}" || true
 }
 
 stop_gateway() {
@@ -562,6 +653,146 @@ stop_gateway() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
+# 可选组件：端口转发（`FORWARD_LISTEN` → 127.0.0.1:<网关端口>）
+#
+# 为什么单独一个组件：发布态 agentd 走的 `443` 是 docker 的端口映射给的；dev 态网关是普通进程、
+# 按配置听高位端口。这一跳不补上，agent 就只能拿“域名:3000”去连 —— 那就不是发布态那个形态了。
+# 不并进默认 `start`：绑 <1024 的端口要 sudo，不能让人每次起全栈都碰权限。
+# ────────────────────────────────────────────────────────────────────────────
+
+# 转发目标端口：显式给了就用，否则取网关配置里的 `[server] listen_addr`。
+forward_target_port() {
+  if [[ -n "${FORWARD_TARGET_PORT}" ]]; then
+    echo "${FORWARD_TARGET_PORT}"
+  else
+    gateway_listen_port
+  fi
+}
+
+# 转发器的 pid（pidfile 里的进程还在才算；它一般是 root 起的，所以用 `pid_alive` 而不是 `kill -0`）。
+forward_pid() {
+  [[ -f "${FORWARD_PIDFILE}" ]] || return 0
+  local pid
+  pid="$(cat "${FORWARD_PIDFILE}")"
+  if pid_alive "${pid}"; then
+    echo "${pid}"
+  fi
+}
+
+start_forward() {
+  # $1 = 1 表示“用户点名要它”（此时要不到 sudo 是错误）；默认路径传 0（跳过并告知）。
+  local explicit="${1:-0}" target
+  target="$(forward_target_port)"
+  echo "== 端口转发（${FORWARD_BIND}:${FORWARD_LISTEN} → 127.0.0.1:${target}）=="
+  if [[ "${FORWARD_LISTEN}" == "${target}" ]]; then
+    echo "  网关本来就在 ${target} 上听，不需要转发，跳过。"
+    return 0
+  fi
+  [[ -f "${FORWARD_SCRIPT}" ]] || die "缺少转发脚本：${FORWARD_SCRIPT}"
+  require_cmd python3
+  require_cmd lsof
+
+  local pid holder sudo_cmd=""
+  pid="$(forward_pid)"
+  if [[ -n "${pid}" ]]; then
+    echo "  已在运行 (pid=${pid})，跳过。"
+    return 0
+  fi
+  # 残留 pidfile（进程已不在）清掉，否则它会一直装成“在托管”。
+  rm -f "${FORWARD_PIDFILE}" 2>/dev/null || true
+
+  holder="$(lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [[ -n "${holder}" ]]; then
+    die "${FORWARD_LISTEN} 端口已被 pid=${holder} 占着：先停掉它（或改 FORWARD_LISTEN 指到别的端口）"
+  fi
+
+  # 绑 <1024 的端口要 root。三级降级：免密 sudo → 交互终端上要一次密码 → 要不到就跳过。
+  # “跳过”而不是报错，是为了让默认的 `start` 在无 tty / 没 sudo 的环境里仍然能把栈起起来。
+  if ((FORWARD_LISTEN < 1024)) && [[ "$(id -u)" != "0" ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+      [[ "${explicit}" == "1" ]] && die "绑定 ${FORWARD_LISTEN} 需要 sudo，而这个环境里没有 sudo"
+      echo "  跳过 ${FORWARD_LISTEN} 转发：绑特权端口要 sudo，而这里没有 sudo" >&2
+      return 0
+    fi
+    if sudo -n true 2>/dev/null; then
+      sudo_cmd="sudo"
+    elif [[ -t 0 ]]; then
+      echo "  ${FORWARD_LISTEN} 是特权端口，需要 sudo（网关本身仍以 $(id -un) 跑）"
+      if sudo -v; then
+        sudo_cmd="sudo"
+      elif [[ "${explicit}" == "1" ]]; then
+        die "sudo 未通过，转发器没起"
+      else
+        echo "  跳过 ${FORWARD_LISTEN} 转发（sudo 未通过）；要它就在有终端的会话里重跑" >&2
+        return 0
+      fi
+    elif [[ "${explicit}" == "1" ]]; then
+      die "绑定 ${FORWARD_LISTEN} 需要 sudo，而当前不是交互终端"
+    else
+      echo "  跳过 ${FORWARD_LISTEN} 转发：绑特权端口要 sudo，当前不是交互终端（要它就用 ./dev/svc.sh start forward）" >&2
+      return 0
+    fi
+  fi
+
+  # 起法分两种（`-b` 是 sudo 的选项，不能无条件塞在命令前面）：
+  #   root 身份：`sudo -b`（密码已由 sudo -v 拿过）—— sudo 自己 fork 到后台并立刻返回；
+  #   用户身份：`( exec nohup … ) &` —— 与 web 同一口径，脚本退出也不影响它。
+  local fwd_args=("${FORWARD_LISTEN}" "${target}" --bind "${FORWARD_BIND}" --pidfile "${FORWARD_PIDFILE}")
+  if [[ -n "${sudo_cmd}" ]]; then
+    sudo -b python3 "${FORWARD_SCRIPT}" "${fwd_args[@]}" >"${FORWARD_LOG}" 2>&1
+  else
+    (
+      exec nohup python3 "${FORWARD_SCRIPT}" "${fwd_args[@]}" >"${FORWARD_LOG}" 2>&1
+    ) &
+  fi
+
+  local i
+  for i in {1..50}; do
+    if lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "  已启动 (pid=$(forward_pid))；agent 侧仍用 https://<域名>（不带端口）"
+      echo "  注：网关看到的对端地址会变成 127.0.0.1（要保真实源 IP 得改用 pf rdr）"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "  转发器未就绪（日志 ${FORWARD_LOG}）：" >&2
+  tail -n 5 "${FORWARD_LOG}" >&2 || true
+  return 1
+}
+
+stop_forward() {
+  echo "== 端口转发（${FORWARD_LISTEN}）=="
+  require_cmd lsof
+  local pid holder
+  pid="$(forward_pid)"
+  if [[ -z "${pid}" ]]; then
+    # pidfile 丢了也兜一下：端口上跑的确实是我们的转发脚本就收掉。
+    holder="$(lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    if [[ -n "${holder}" ]] && ps -o command= -p "${holder}" 2>/dev/null | grep -q "forward-443.py"; then
+      pid="${holder}"
+    fi
+  fi
+  rm -f "${FORWARD_PIDFILE}" 2>/dev/null || true
+  if [[ -z "${pid}" ]]; then
+    echo "  未在运行。"
+    return 0
+  fi
+  # 转发器通常是 root 起的：普通用户 kill 会 EPERM，退回 sudo。
+  if kill "${pid}" 2>/dev/null; then
+    echo "  已停 (pid=${pid})。"
+  elif command -v sudo >/dev/null 2>&1 && sudo kill "${pid}" 2>/dev/null; then
+    echo "  已停 (pid=${pid}，sudo)。"
+  else
+    # 停不掉就**只报错、不动 pidfile**：在非 root 下它是“谁在跑”的唯一线索
+    # （lsof 看不见别人的监听 socket）。删了就真找不回来了。
+    echo "  停止失败（pid=${pid} 可能是 root 起的）：请手动 sudo kill ${pid}" >&2
+    return 1
+  fi
+  rm -f "${FORWARD_PIDFILE}" 2>/dev/null || true
+  sleep 0.3
+}
+
+# ────────────────────────────────────────────────────────────────────────────
 # status
 # ────────────────────────────────────────────────────────────────────────────
 cmd_status() {
@@ -569,20 +800,57 @@ cmd_status() {
   if vm_up; then printf '  %-8s up   %s\n' "vm" "${VM_URL}"; else printf '  %-8s down\n' "vm"; fi
   if wparse_up; then printf '  %-8s up   pid=%s\n' "wparse" "$(cat "${WPARSE_PIDFILE}")"; else printf '  %-8s down\n' "wparse"; fi
   if web_up; then printf '  %-8s up   %s\n' "web" "${WEB_URL}"; else printf '  %-8s down\n' "web"; fi
-  local gw_port gw_state
+  local gw_port gw_state gw_listening=0
   gw_port="$(gateway_listen_port)"
+  if lsof -nP -ti "tcp:${gw_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    gw_listening=1
+  fi
   if [[ -f "${GATEWAY_PIDFILE}" ]] && kill -0 "$(cat "${GATEWAY_PIDFILE}")" 2>/dev/null; then
-    if lsof -nP -ti "tcp:${gw_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    if [[ "${gw_listening}" == "1" ]]; then
       gw_state="up (pid=$(cat "${GATEWAY_PIDFILE}"), 端口 ${gw_port})"
     else
       gw_state="承载进程在 (pid=$(cat "${GATEWAY_PIDFILE}"))，但端口 ${gw_port} 未监听"
     fi
-  elif lsof -nP -ti "tcp:${gw_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+  elif [[ "${gw_listening}" == "1" ]]; then
     gw_state="up (端口 ${gw_port}, 非本脚本托管)"
   else
     gw_state="down"
   fi
   printf '  %-8s %s\n' "gateway" "${gw_state}"
+
+  # 端口转发：不逼着你起，但要一眼看得出“agent 能不能真的连到网关”。
+  local fwd_target fwd_state fwd_pid fwd_holder fwd_listening=0
+  fwd_target="$(forward_target_port)"
+  if [[ "${FORWARD_LISTEN}" == "${fwd_target}" ]]; then
+    fwd_state="n/a  （网关自己就在 ${FORWARD_LISTEN} 上听）"
+    fwd_listening=1
+  else
+    # 认定“在听”优先看**pidfile**：转发器通常是 root 起的，而 lsof 在非 root 下**看不见**
+    # 别的用户的监听 socket（会把它误判成 down）。lsof 只做兵底，用来对付非本脚本托管的监听者。
+    fwd_pid="$(forward_pid)"
+    fwd_holder=""
+    if [[ -z "${fwd_pid}" ]] && lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN >/dev/null 2>&1; then
+      fwd_holder="$(lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN 2>/dev/null | head -1)"
+    fi
+    if [[ -n "${fwd_pid}" || -n "${fwd_holder}" ]]; then
+      fwd_listening=1
+      fwd_state="up   ${FORWARD_LISTEN} → 127.0.0.1:${fwd_target}"
+      if [[ -n "${fwd_pid}" ]]; then
+        fwd_state="${fwd_state} (pid=${fwd_pid})"
+      else
+        fwd_state="${fwd_state} (pid=${fwd_holder}，非本脚本托管)"
+      fi
+    else
+      fwd_state="down （agent 走 ${FORWARD_LISTEN} 靠它；默认 start 会带上）"
+    fi
+  fi
+  printf '  %-8s %s\n' "forward" "${fwd_state}"
+
+  # 最坑的组合：443 在听（转发器活着）但后端没在听。agent 侧看到的是 **transport error**
+  # （掉线/超时那类），看着像证书或信任锚的问题，而真正的原因就在上一行。直接点出来。
+  if [[ "${fwd_listening}" == "1" && "${gw_listening}" != "1" && "${FORWARD_LISTEN}" != "${fwd_target}" ]]; then
+    printf '  %-8s %s\n' "⚠" "${FORWARD_LISTEN} 在听但网关没在听：agent 会看到 transport error（不是拒连，别往证书上查）"
+  fi
 }
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -594,32 +862,44 @@ cmd="${1:-}"
 
 NO_BUILD=0
 DRY_RUN=0
+SKIP_FORWARD="${SKIP_FORWARD:-0}"
+FORWARD_EXPLICIT=0
 requested=()
 for arg in "$@"; do
   case "${arg}" in
     --no-build) NO_BUILD=1 ;;
+    --no-forward) SKIP_FORWARD=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    vm | wparse | web | gateway | all) requested+=("${arg}") ;;
+    vm | wparse | web | gateway | forward | all)
+      requested+=("${arg}")
+      [[ "${arg}" == "forward" ]] && FORWARD_EXPLICIT=1
+      ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; die "未知参数：${arg}" ;;
   esac
 done
 [[ "${SKIP_BUILD:-0}" == "1" ]] && NO_BUILD=1
 
-# 组件按固定顺序收集（不给 = 全部；顺带达成 canonical 顺序）。
+# 组件按固定顺序收集（不给 = 默认全量，**含 forward**；顺带达成 canonical 顺序）。
+# forward 排 gateway 前：gateway 是前台阻塞的，排在它后面的永远轮不到。
+# `--no-forward` / SKIP_FORWARD=1 把它整个摘掉（不需要 agent 面 / 不想碰 sudo 时用）。
+COMPONENTS=(vm wparse web forward gateway)
 selected=()
-if [[ ${#requested[@]} -eq 0 ]]; then
-  selected=(vm wparse web gateway)
-else
-  for c in vm wparse web gateway; do
-    for r in "${requested[@]}"; do
-      if [[ "${r}" == "all" || "${r}" == "${c}" ]]; then
-        selected+=("${c}")
-        break
-      fi
-    done
+for c in "${COMPONENTS[@]}"; do
+  if [[ "${SKIP_FORWARD}" == "1" && "${c}" == "forward" ]]; then
+    continue
+  fi
+  if [[ ${#requested[@]} -eq 0 ]]; then
+    selected+=("${c}")
+    continue
+  fi
+  for r in "${requested[@]}"; do
+    if [[ "${r}" == "${c}" ]] || [[ "${r}" == "all" ]]; then
+      selected+=("${c}")
+      break
+    fi
   done
-fi
+done
 [[ ${#selected[@]} -gt 0 ]] || die "没有选中任何组件"
 
 case "${cmd}" in
@@ -644,6 +924,7 @@ case "${cmd}" in
         vm) start_vm ;;
         wparse) start_wparse ;;
         web) start_web ;;
+        forward) start_forward "${FORWARD_EXPLICIT}" ;;
         gateway) start_gateway ;; # 前台，阻塞到最后
       esac
       echo
@@ -662,6 +943,7 @@ case "${cmd}" in
         vm) stop_vm ;;
         wparse) stop_wparse ;;
         web) stop_web ;;
+        forward) stop_forward ;;
         gateway) stop_gateway ;;
       esac
       echo

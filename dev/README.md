@@ -258,8 +258,9 @@ dev/
   README.md                     # 本文件
   svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/gateway）
   setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
-  tests/                        # 回归测试（开发态工具，需要 docker）
+  tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）
     align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）
+    install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位
   bin/                          # wparse 等本地二进制（不入 git）
 
 ../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）

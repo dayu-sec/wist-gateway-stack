@@ -13,6 +13,7 @@
 # 用法：scripts/install-initial-knowledge.sh
 # 环境（由 `gops sys localize` 以合并后的值注入）：
 #   KNOWLEDGE_PKG_URL     包地址（与 flow 里 gx.download 用的是同一个值）；**空 = 跳过**
+#                         （但会**显式告警**并说清网关将空载，不再静默）
 #   GATEWAY_CONFIG_DIR    网关配置目录（默认 ./configs/gateway）
 #   KNOWLEDGE_SOURCE_DIR  解到哪儿（相对网关配置目录；默认 knowledge/initial，须与 tpl 一致）
 set -euo pipefail
@@ -23,7 +24,11 @@ cd "${STACK_ROOT}"
 
 url="${KNOWLEDGE_PKG_URL:-}"
 if [[ -z "${url}" ]]; then
-  echo "跳过初始知识库：KNOWLEDGE_PKG_URL 为空（离线 / 不需要出厂初始包）"
+  # 有意跳过，但**不静默**：空载的后果要说清（它看起来像“装好了”，实际什么都不采）。
+  echo "[告警] 跳过初始知识库：KNOWLEDGE_PKG_URL 为空。" >&2
+  echo "        网关将以**空载**启动：不产「系统类型」建议 / 用途建议，也无法派采集工作。" >&2
+  echo "        需要内容就：① 设可达的 KNOWLEDGE_PKG_URL，或 ② 把包手工放进 packages/，" >&2
+  echo "        再在「知识库」页录入并激活（录入 ≠ 生效，要点激活）。" >&2
   exit 0
 fi
 
@@ -36,7 +41,10 @@ pkg="packages/${pkg_name}"
 dst="${gcd}/${sd}"
 
 if [[ ! -f "${pkg}" ]]; then
-  echo "找不到包文件 ${pkg} —— gx.download 应该先把它拉下来；核对 KNOWLEDGE_PKG_URL" >&2
+  echo "初始知识库包不在 ${pkg} —— gx.download 没能把它拉下来。" >&2
+  echo "  多半是 KNOWLEDGE_PKG_URL 在这台机器上不可达（外网 / GitHub 被墙 / 域名解析不到）：" >&2
+  echo "    ${url}" >&2
+  echo "  处置：把 ${pkg_name} 手工拷进 packages/ 后重跑本步，或把 KNOWLEDGE_PKG_URL 换成可达镜像。" >&2
   exit 1
 fi
 

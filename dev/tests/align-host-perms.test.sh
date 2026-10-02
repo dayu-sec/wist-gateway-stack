@@ -137,6 +137,26 @@ case "${out}" in
 esac
 rm -f "${ROOT}/configs/web"
 
+echo "== 9) SQLite 库：恢复搬来的放开到属组 rw；容器自建的不动 ="
+# (a) 「恢复搬过来」的库：属主=部署账号、属组不是容器、644 → 容器只能读、不能写（现场即 code 14 那类失败）
+printf x > "${ROOT}/configs/gateway/state/wist-gateway.db"
+chown "${DEPLOY_UID}:${DEPLOY_GID}" "${ROOT}/configs/gateway/state/wist-gateway.db"
+chmod 644 "${ROOT}/configs/gateway/state/wist-gateway.db"
+as "${CONT_GID}" sh -c "printf y >> ${ROOT}/configs/gateway/state/wist-gateway.db" 2>/dev/null
+chk_nz "恢复来的库：容器写不了（预期）" "$?"
+align_as_root "${ROOT}" >/dev/null || fail=1
+chk "align 后 属主:属组:权限" "1000:999:660" "$(st "${ROOT}/configs/gateway/state/wist-gateway.db")"
+as "${CONT_GID}" sh -c "printf y >> ${ROOT}/configs/gateway/state/wist-gateway.db"; chk "容器可写库" "0" "$?"
+as "${DEPLOY_UID}" cat "${ROOT}/configs/gateway/state/wist-gateway.db" >/dev/null; chk "部署账号仍可读库（备份）" "0" "$?"
+# (b) 容器自己建的库（999:999 644）：属主位已足够，**不能**算作待修 —— 否则每次 localize 都要 sudo
+rm -f "${ROOT}/configs/gateway/state/wist-gateway.db"
+printf x > "${ROOT}/configs/gateway/state/wist-gateway.db"
+chown "${CONT_GID}:${CONT_GID}" "${ROOT}/configs/gateway/state/wist-gateway.db"
+chmod 644 "${ROOT}/configs/gateway/state/wist-gateway.db"
+out="$(as "${DEPLOY_UID}" env ALIGN_NO_SUDO=1 CONTAINER_GID="${CONT_GID}" bash "${ALIGN}" "${ROOT}" 2>&1)"; rc=$?
+chk "容器自建的库不算待修（无权限也 exit 0）" "0" "${rc}"
+chk "  → 原样保留，未被改写" "999:999:644" "$(st "${ROOT}/configs/gateway/state/wist-gateway.db")"
+
 echo
 if [[ "${fail}" == "0" ]]; then echo "全部通过"; else echo "存在失败项"; fi
 exit "${fail}"

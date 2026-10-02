@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.20-alpha] - 2026-10-02
+
+### 修复
+
+- **用备份在新机器重建后网关起不来（SQLite 打不开库）**：`--level restore` 备份里带的
+  `wist-gateway-store.db` 是**部署账号**解出来的（属主/属组都不是容器身份）→ 容器只能读不能写，
+  网关报 `unable to open database file` / `readonly database` 后反复重启。
+  现在 `align-host-perms.sh` 会把「不是容器身份建的」库放开到属组可写（`660`，属组=容器 gid）；
+  容器自己建的库（`999:999`）**不碰** —— 否则每次 `localize` 都要提权。
+- 顺带把 `state/*.srl`（CA 序列号文件）也归到部署账号：它由宿主 `openssl` 在重新签叶时写入，
+  一旦曾被 root 跑过就会卡住后续非 root 的签叶（同一类「谁先创建就归谁」的残留）。
+
 ## [0.1.19-alpha] - 2026-10-02
 
 ### 修复

@@ -18,6 +18,8 @@
 #   · **需要容器写**的目录 2770（组可写 + **setgid**：目录里新建的文件/目录自动继承该组）；
 #     **容器只读**的目录 2755（组可读可进入；web 容器是 root，本不需要属组）；
 #   · 私钥与含密钥的配置 640（属组可读）。
+#   · SQLite 库（state/*.db*）容器要**读写**：容器自己建的是 999:999（属主位就够，本脚本**不动**）；
+#     但「恢复/搬过来的库」属主是部署账号 → 只剩属组这条路，需属组=容器 gid 且属组可写（660）。
 #   于是：容器读写自如；部署账号（属主）读写自如 → **备份/恢复不需要提权**；
 #   别的宿主账号连目录都进不去（2770），私钥也没有放宽到全局。
 #
@@ -28,11 +30,12 @@
 # 幂等：已是目标状态就**什么都不做、也不需要任何权限**（所以日常 `gops sys localize` 不会再要 sudo；
 # 只有目录/文件确实需要修正时才要提权）。
 #
-# 环境：CONTAINER_GID（默认 999；与 compose 里 gateway/wparse 的 user: 保持一致）
+# 环境：CONTAINER_GID（默认 999）、CONTAINER_UID（默认 999；与 compose 里 gateway/wparse 的 user: 一致）
 set -euo pipefail
 
 ROOT="${1:-.}"
 CONTAINER_GID="${CONTAINER_GID:-999}"
+CONTAINER_UID="${CONTAINER_UID:-999}"
 
 cd "${ROOT}"
 ROOT="$(pwd)"
@@ -72,10 +75,19 @@ TARGET_DIRS=(
 )
 # 目标文件（**存在才处理**，不新建）：
 #   state/*.pem        —— 容器要读（CA / 叶 / 签名私钥）；600 会让容器读不到，故 640。
+#   state/*.srl        —— CA 的序列号文件：宿主 openssl 重新签叶时会写入它，必须归部署账号
+#                         （曾被 root 跑过就会卡住下一次非 root 的签叶 —— 同一类“谁先创建就归谁”）。
 #   wist-gateway.toml  —— 容器要读，且含 admin token，故 640（不是 644）。
 #   注：`wist-gateway.value.json` 是**渲染源**，容器不读它，保持 init-gateway 的 600，这里不动。
-TARGET_FILES=(configs/gateway/state/*.pem configs/gateway/wist-gateway.toml)
+TARGET_FILES=(configs/gateway/state/*.pem configs/gateway/state/*.srl configs/gateway/wist-gateway.toml)
 TARGET_FILE_MODE=640
+
+# 另一类：**容器要读写、但属主可能不是容器自己**的文件 —— 目前只有 SQLite 库。
+#   容器建的库是 999:999（属主权限就够）→ **不能碰**，一碰就要提权，等于让每次 localize 都要 sudo；
+#   “恢复/搬过来的库”属主是部署账号 → 容器只剩属组这条路，必须属组=容器 gid 且属组可写。
+#   所以这里不比对固定目标，而是判「容器身份**实际**能否读写」，不对才修（正常态零动作）。
+TARGET_DBS=(configs/gateway/state/*.db configs/gateway/state/*.db-wal configs/gateway/state/*.db-shm)
+DB_FILE_MODE=660
 
 dir_mode_of() {
   local rel="$1" spec
@@ -111,7 +123,21 @@ for f in "${TARGET_FILES[@]}"; do
   [[ "$(state_of "${f}")" == "${OWNER_UID}:${CONTAINER_GID}:${TARGET_FILE_MODE}" ]] || files_todo+=("${f}")
 done
 
-if [[ ${#dirs_todo[@]} -eq 0 && ${#files_todo[@]} -eq 0 ]]; then
+# 库：只要求「容器身份实际能读写」，不强制属主（避免每次都去 chown 容器自己建的库）
+dbs_todo=()
+for f in "${TARGET_DBS[@]}"; do
+  [[ -f "${f}" ]] || continue
+  read -r f_uid f_gid f_mode <<<"$(stat -c '%u %g %a' "${f}")"
+  if [[ "${f_uid}" == "${CONTAINER_UID}" ]]; then
+    (( (8#${f_mode} & 0600) == 0600 )) || dbs_todo+=("${f}") # 属主位给了读写就够
+  elif [[ "${f_gid}" == "${CONTAINER_GID}" ]] && (( (8#${f_mode} & 0060) == 0060 )); then
+    : # 落进容器的组且属组可读写
+  else
+    dbs_todo+=("${f}")
+  fi
+done
+
+if [[ ${#dirs_todo[@]} -eq 0 && ${#files_todo[@]} -eq 0 && ${#dbs_todo[@]} -eq 0 ]]; then
   note "宿主属主/权限已对齐（属主 ${OWNER_UID}、属组 ${CONTAINER_GID}、目录 2770/2755、私钥 ${TARGET_FILE_MODE}），无需改动"
   exit 0
 fi
@@ -135,10 +161,11 @@ if [[ "${can_align}" != "1" ]]; then
     sudo -E "$0" "$@" && exit 0
     echo "  （sudo 重跑未成功，继续给出可执行命令）" >&2
   fi
-  # 两个数组里至少一个非空（上面已就空则退出），但仍然分开判断，避免空数组在 set -u 下展开
+  # 三个数组里至少一个非空（上面已就空则退出），但仍然分开判断，避免空数组在 set -u 下展开
   todo_show=()
   [[ ${#dirs_todo[@]} -gt 0 ]] && todo_show+=("${dirs_todo[@]}")
   [[ ${#files_todo[@]} -gt 0 ]] && todo_show+=("${files_todo[@]}")
+  [[ ${#dbs_todo[@]} -gt 0 ]] && todo_show+=("${dbs_todo[@]}")
   echo "需要修正但权限不足（目标：属主 ${OWNER_UID}、属组 ${CONTAINER_GID}）：" >&2
   for p in "${todo_show[@]}"; do
     printf '  - %s（现为 %s）\n' "${p}" "$(state_of "${p}")" >&2
@@ -171,6 +198,14 @@ for f in "${files_todo[@]}"; do
   chown "${OWNER_UID}:${CONTAINER_GID}" "${f}"
   chmod "${TARGET_FILE_MODE}" "${f}"
   printf '  文件 %s：%s → %s:%s:%s\n' "${f}" "${before}" "${OWNER_UID}" "${CONTAINER_GID}" "${TARGET_FILE_MODE}"
+done
+
+# 库：把属主收归部署账号（方便后续备份/删除）、属组交给容器并给属组读写
+for f in "${dbs_todo[@]}"; do
+  before="$(stat -c '%u:%g:%a' "${f}")"
+  chown "${OWNER_UID}:${CONTAINER_GID}" "${f}"
+  chmod "${DB_FILE_MODE}" "${f}"
+  printf '  库文件 %s：%s → %s:%s:%s（容器要读写）\n' "${f}" "${before}" "${OWNER_UID}" "${CONTAINER_GID}" "${DB_FILE_MODE}"
 done
 
 note "宿主属主/权限对齐完成：属主 ${OWNER_UID}、属组 ${CONTAINER_GID}（容器内 gateway/wparse 的运行身份）"

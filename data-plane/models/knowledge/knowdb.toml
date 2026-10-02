@@ -26,9 +26,13 @@ nets = []
 # Uncomment this block to query an external PostgreSQL database instead of
 # loading CSV files into the local authority SQLite.
 #
+# Note: placeholders are written as <password>, NOT ${...} —— the engine substitutes
+# ${VAR} over the whole file text (comments included), so a variable name that isn't
+# defined here only produces `vars not value: XXX` noise in the log.
+#
 # [provider]
 # kind = "postgres"
-# connection_uri = "postgres://demo:${SEC_PWD}@127.0.0.1:5432/demo"
+# connection_uri = "postgres://demo:<password>@127.0.0.1:5432/demo"
 # pool_size = 8
 #
 # After enabling [provider], OML lookup SQL runs against that PostgreSQL

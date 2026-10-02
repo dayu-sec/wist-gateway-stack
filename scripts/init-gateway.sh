@@ -26,6 +26,10 @@
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
 #   sys/configs/gateway/wist-gateway.toml.tpl 渲染（gx.tpl）。
 #
+# 权限/属主：本脚本按最小权限创建（私钥与值文件都是 600）。**属组和「放给容器的读权限」不在这里做**
+#   —— 那由 scripts/align-host-perms.sh 统一对齐（属主=部署账号、属组=容器 gid 999、
+#   *.pem 与 wist-gateway.toml 640）。单独跑本脚本后，记得再跑一次它，否则容器读不到私钥。
+#
 # 可覆盖 env：
 #   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时依次从已有 value.json、
 #                       已有叶证书的 SAN 推断）

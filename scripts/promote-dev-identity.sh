@@ -102,3 +102,5 @@ echo
 echo
 echo "下一步（不在本脚本职责内）：若发布态网关在跑，重启它读新证书 ——"
 echo "  docker compose --project-directory ${STACK_ROOT} -f ${STACK_ROOT}/sys/docker-compose.yml restart gateway"
+echo "  另：搬进发布态目录的身份材料还要宿主属主/权限对齐（容器以 999:999 跑）。目标是 configs/gateway 时"
+echo "      restore-gateway.sh 已自动跑过；其它目标请手动跑：${SCRIPT_DIR}/align-host-perms.sh ${STACK_ROOT}"

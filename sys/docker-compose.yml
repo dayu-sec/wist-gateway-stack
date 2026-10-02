@@ -1,10 +1,12 @@
 # wist-gateway-stack — 网关控制台 + 数据平台(WarpParse) + 观测 一站式编排
 #
-# 端口约定（宿主:容器；宿主端口的值见 sys/setting/vars.yml）：
-#   gateway          3000:3000     控制面后端（HTTPS，wist-gateway-web 的 /api 目标）
-#   web              8443:80       前端入口（静态托管 + /api 反代）
-#   victoria-metrics 18429:8428    指标（与 wist-gateway 默认 victoria_metrics_url 对齐）
-#   wparse           无对外端口    数据面（ELT，接 source/sink）
+# 端口约定（宿主:容器；宿主端口的值见 sys/setting/vars.yml，客户在 values/value.yml 覆盖）：
+#   gateway          ${GATEWAY_PORT}:3000    控制面后端（HTTPS；默认 443 —— 也是 agentd 直连的入口）
+#   web              ${WEB_PORT}:443         前端入口（静态托管 + /api 反代；默认 8443）
+#   victoria-metrics ${VM_PORT}:8428         指标（默认 18429）
+#   wparse           ${WPARSE_PORT}:9000     数据面入口（agent 上送，明文 TCP；默认 9000）
+#
+# 容器内端口是**应用契约**，写死（3000/443/8428/9000）；宿主端口才是变量 —— 两边不要写混。
 #
 # 值来源（gops 系统约定）：
 #   - 随环境/客户变化的量（镜像源与 tag、宿主端口、保留期、时区、挂载路径）统一用
@@ -12,8 +14,16 @@
 #     `gops sys update` → sys/resolved_vars.yml，`gops sys localize` → 同目录 .env。
 #     客户覆盖写 values/value.yml（该文件版本化），不要改生成物。
 #   - 容器内端口/路径/服务名是应用契约，直接写在这里。
-#   - 本栈当前无密钥；如需，用 ${SEC_xxx} 占位，由 `gops sys start` 注入、不落盘。
+#   - 本栈当前无密钥；如需，用 ${SEC_xxx} 占位，由 `gops run start` 注入、不落盘。
 
+# 运行身份（与宿主侧权限的对接口径；改这里要同时改 scripts/align-host-perms.sh 的 CONTAINER_GID）：
+#   两个业务镜像都**固定以 999:999 运行**（gateway 镜像里的 wist、wparse 镜像里的 wparse）。
+#   这里**显式钉死**而不是依赖镜像声明的用户：将来镜像重建换了 uid，宿主侧按 999 对齐的目录
+#   就会对不上，而症状只是「容器无限重启」——不如让它成为一处显式契约。
+#   bind 挂载在 Linux 上**不改变属主**，所以宿主侧要 scripts/align-host-perms.sh 对齐：
+#   属主=部署账号、属组=999、目录 2770(setgid)、私钥 640。localize 流程会自动跑它；
+#   注意 `docker compose up` 会自行把**缺失**的挂载源目录建成 root:root，所以那一步必须在 up 之前。
+#
 # 单实例保障（发布态这一半）：**一个操作系统上只允许跑一套本栈**。
 #
 # 三个服务都钉了**固定 `container_name`**（不是 compose 默认的 `<项目>-<服务>-1`）。
@@ -60,7 +70,8 @@ services:
   # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker
   # 在宿主运行目录里建出一堆空白挂载点目录；改成直接挂 /data/data 与 /data/.run 后，所有
   # 挂载点都建在容器层里，宿主运行目录保持干净。
-  # 运行态用**宿主目录 bind 挂载**（不是命名卷）：Linux 上要保证这两个目录对 uid 999 可写。
+  # 运行态用**宿主目录 bind 挂载**（不是命名卷）：属主/权限由 scripts/align-host-perms.sh 对齐
+  # （属主=部署账号、属组=999、2770 setgid）——不靠「目录是谁创建的」。
   #
   # 单实例保障：引擎自身**没有**单实例保护（同名 work root 起两个会互写 .run/ 与输出），
   # 所以 entrypoint 先用 flock 独占 /data/.run/.wparse.lock（落在宿主 WPARSE_RUN_STATE 内）再把引擎交给 PID 1：
@@ -73,6 +84,8 @@ services:
   wparse:
     container_name: wist-gateway-stack-wparse
     image: ${WPARSE_IMAGE}:${WPARSE_TAG}
+    # 运行身份显式钉死（镜像里是 wparse）；宿主侧按同一 gid 对齐权限，见文件头「运行身份」
+    user: "999:999"
     restart: unless-stopped
     entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.run/.wparse.lock", "/usr/local/bin/wparse"]
     command: ["daemon", "--work-root", "/data"]
@@ -103,6 +116,8 @@ services:
     container_name: wist-gateway-stack-gateway
     # 本地零配置联调可换成 bootstrap 镜像（image 改成 wist-gateway:bootstrap）
     image: ${IMAGE_SPC}/wist-gateway:${GATEWAY_TAG}
+    # 运行身份显式钉死（镜像里是 wist）；宿主侧按同一 gid 对齐权限，见文件头「运行身份」
+    user: "999:999"
     restart: unless-stopped
     environment:
       WIST_GATEWAY_CONFIG: /config/wist-gateway.toml

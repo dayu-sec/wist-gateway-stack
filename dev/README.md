@@ -1,7 +1,7 @@
 # dev —— 开发态启停（单一入口 `svc.sh`）
 
 本目录是 wist-gateway-stack 的**开发态**运行方式：不依赖 Docker（VictoriaMetrics 除外），
-直接用各仓**本地编译产物**把栈跑起来，对应发布态的 `gops sys start|stop|status`（见上级 [README](../README.md)）。
+直接用各仓**本地编译产物**把栈跑起来，对应发布态的 `gops run start|stop|status`（见上级 [README](../README.md)）。
 
 **入口只有一个：`./dev/svc.sh`**。9 个分散的 start/stop 脚本已合并成它一个 —— 起/停/看全在里面，
 「什么被自动执行、什么不用」只在一处定义。
@@ -246,6 +246,10 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
    只有**锚变了**（换 CA、删掉 `gateway-ca.*` 重生成）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
    （仅重新注册/enroll 不刷新它）。
 10. **`setup-domain.sh` 只改配置/证书，不重启 gateway**：改完记得 `./dev/svc.sh stop gateway && ./dev/svc.sh start gateway`。
+11. **开发态不需要宿主属主对齐**：这里跑的是本地二进制、以你自己的身份读写，没有「容器固定 999:999 +
+    bind 挂载不改属主」那套问题。`scripts/align-host-perms.sh` 只属于**发布态**（在 `gops sys localize`
+    里自动跑），且在 macOS/OrbStack 上直接跳过。要回归它的语义（setgid 继承、组权限、chgrp 的权限要求），
+    用 `dev/tests/align-host-perms.test.sh`（借一个一次性 Linux 容器换内核跑）。
 
 ## 目录
 
@@ -254,6 +258,8 @@ dev/
   README.md                     # 本文件
   svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/gateway）
   setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
+  tests/                        # 回归测试（开发态工具，需要 docker）
+    align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）
   bin/                          # wparse 等本地二进制（不入 git）
 
 ../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）

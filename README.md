@@ -6,7 +6,7 @@
 
 ## 两种运行方式
 
-- **发布态**：Docker 编排（gops 系统，`kind: docker-compose`），`gops sys start` 拉起整个栈 —— 变量定义与本地化见「发布态」。
+- **发布态**：Docker 编排（gops 系统，`kind: docker-compose`），`gops run start` 拉起整个栈 —— 变量定义与本地化见「发布态」。
 - **开发态**：不依赖 Docker，用本地编译的二进制直接跑（`dev/`）。
 
 两者共享**同一份 wparse 业务配置**（`data-plane/{conf,connectors,models,topology}`，在栈根；发布态只读挂载），环境差异（VictoriaMetrics 地址）通过 `WPARSE_VM_ENDPOINT` 注入，不产生两份配置漂移。
@@ -58,7 +58,7 @@ wist-gateway-stack/
   sys-prj.yml               # gops 项目描述
   sys/                      # gops 系统定义（声明文件；随库入库/交付）
     docker-compose.yml      # 发布态：Docker 编排（易变量用 ${VAR} 占位；gops 1.3.3+ 默认在 sys/ 查找）
-    sys_model.yml           # kind: docker-compose（gops sys 据此分发到 docker compose）
+    sys_model.yml           # kind: docker-compose（gops run 据此分发到 docker compose）
     setting/vars.yml        # 系统变量定义（改默认值改这里）
     resolved_vars.yml       # 生成：gops sys update
     workflows/operators.gxl # 系统运维流程（**本地定义**，不引外部 ops-gxl；含 localize 阶段扩展点）
@@ -80,6 +80,7 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     init-web-conf.sh        # 前端站点配置的渲染值 configs/web/nginx.value.json（幂等；域名取 WEB_DOMAIN）
+    align-host-perms.sh     # 宿主属主/权限对齐（属主=部署账号、属组=容器 gid 999、目录 2770、私钥 640；幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
     import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
     init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
@@ -96,17 +97,29 @@ wist-gateway-stack/
 
 ## 发布态（经 gops 管理）
 
-本栈是一个 gops 系统（`sys/sys_model.yml` 里 `kind: docker-compose`），起停都走 `gops sys`，它分发到对应的 `docker compose` 子命令：
+本栈是一个 gops 系统（`sys/sys_model.yml` 里 `kind: docker-compose`），起停走 `gops run`，它分发到对应的 `docker compose` 子命令：
+
+### 前置：主机要求
+
+| 项 | 要求 | 怎么验 |
+|---|---|---|
+| Docker + Compose V2 | `docker compose` 是 **CLI 插件**；只有老的 `docker-compose` v1 不够 | `docker compose version` 能打印 `v2.x` |
+| 执行账号 | 普通账号 + **已加入 `docker` 组**（等价于本机高权限，按安全要求评估）；部署目录由它拥有 | `id -nG`（输出里应含 `docker`） |
+| 端口 | 宿主 `443`（网关，agentd 直连）、`8443`（页面）、`9000`（数据面）、`18429`（指标） | 见 `sys/setting/vars.yml` |
+
+> 为什么必须 Compose V2：`gops run` 固定发 `docker compose …`，**没有 v1 回退**。缺插件时报的是
+> `unknown shorthand flag: 'f' in -f`（docker 认不出 `compose`，就继续把后面的 `-f` 当自己的全局选项），
+> 很误导。Ubuntu 上装 `docker-compose-v2`（或 Docker 官方源的 `docker-compose-plugin`）即可。
 
 | 命令 | 实际执行 |
 |---|---|
-| `gops sys download` | `docker compose pull` |
-| `gops sys install` | `docker compose create` |
-| `gops sys start` | `docker compose up -d` |
-| `gops sys stop` | `docker compose stop` |
-| `gops sys uninstall` | `docker compose down` |
-| `gops sys status` | `docker compose ps` |
-| `gops sys diagnose` | `docker compose config` |
+| `gops run download` | `docker compose pull` |
+| `gops run install` | `docker compose create` |
+| `gops run start` | `docker compose up -d` |
+| `gops run stop` | `docker compose stop` |
+| `gops run uninstall` | `docker compose down` |
+| `gops run status` | `docker compose ps` |
+| `gops run diagnose` | `docker compose config` |
 
 ### 变量与本地化
 
@@ -130,17 +143,21 @@ gops sys localize
 > 只在它缺失时才自动补跑 update）。所以改了 `vars.yml` 不跑 `update` 不生效 —— 而覆盖值是在
 > localize 的合并阶段生效的，一条命令就够。
 
-**`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做五件**幂等**的事：
+**`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做六件**幂等**的事：
 
 1. 备料 `configs/gateway/`：Ed25519 签名密钥、网关 TLS 证书、渲染值 `wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
 2. 渲染 `configs/gateway/wist-gateway.toml`（模板在 `sys/configs/gateway/wist-gateway.toml.tpl`）；
 3. 生成前端站点 TLS 证书（`scripts/init-web-tls.sh`，存在即跳过；域名取 `WEB_DOMAIN`）；
 4. 写前端站点配置的**渲染值** `configs/web/nginx.value.json`（`scripts/init-web-conf.sh`；域名取 `WEB_DOMAIN`）；
-5. 渲染前端站点配置 `configs/web/nginx.conf`（模板 `sys/configs/web/nginx.conf.tpl`，注入 `WEB_DOMAIN`）。
+5. 渲染前端站点配置 `configs/web/nginx.conf`（模板 `sys/configs/web/nginx.conf.tpl`，注入 `WEB_DOMAIN`）；
+6. **宿主属主/权限对齐**（`scripts/align-host-perms.sh`，见下「权限与运行身份」；非 Linux 自动跳过）。
+
+> 第 6 步必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录自行建成 `root:root`，
+> 属主一旦是 root，之后的部署账号就写不动了（见「权限与运行身份」）。
 
 `gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过。
 
-> 本栈当前无密钥；将来若需要，compose 里用 `${SEC_xxx}` 占位，由 `gops sys start` 从 `~/.galaxy/sec_value.yml` 注入，不落盘。
+> 本栈当前无密钥；将来若需要，compose 里用 `${SEC_xxx}` 占位，由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入，不落盘。
 
 ### 前置：挂载文件
 
@@ -151,21 +168,46 @@ compose 还挂这些路径：
 3. `configs/web/tls/` —— 前端站点 TLS 证书/私钥（**页面自己的**，与网关分开）。用 `scripts/init-web-tls.sh <域名>` 在目标机现场生成。
 4. `packages/`（`${PACKAGE_DIR}`）—— 安装包**投放目录**，只读挂到网关容器 `/packages`。用 `scripts/import-package.sh` 导入（见下 A）；界面「本地来源」填 **`/packages/<文件名>`**（容器读不到宿主任意路径；或改用 `https://...` URL）。
 
+### 权限与运行身份（Linux 必读）
+
+两个业务镜像**固定以 `999:999` 运行**（`gateway` 镜像里的 `wist`、`wparse` 镜像里的 `wparse`；compose 里 `user:` 已显式钉死）。bind 挂载在 Linux 上**不改变属主**，所以宿主侧必须显式对齐，否则必然出现两个稳定故障：
+
+| 症状 | 现场表现 | 根因 |
+|---|---|---|
+| wparse 无限重启 | `flock: cannot open lock file /data/.run/.wparse.lock: Permission denied`，容器 `Exited (75)` | `data-plane-run/{data,.run}` 对 uid 999 不可写 |
+| gateway 无限重启 | `failed to read install script signing key …: Permission denied (os error 13)` | `configs/gateway/state/*.pem`（600 且属主不是 999）容器读不到 |
+
+（web 跟着起不来、报 `host not found in upstream "gateway"` 只是被网关拖累，网关一好它自愈。）
+
+**唯一入口是 `scripts/align-host-perms.sh`**（`gops sys localize` 会自动跑，也可单独跑）：
+
+- **属主 = 部署账号**（取 `SUDO_UID`/`SUDO_GID`）：它要改配置、跑备份/恢复 —— 所以 `backup-gateway.sh` / `restore-gateway.sh` **不需要提权**；
+- **属组 = 容器 gid `999`**：容器进程天然在这个组里；
+- 挂载目录分两档：**需要容器写**的 `2770`（组可写 + **setgid**，目录里新建的文件/目录自动继承该组）、**容器只读**的 `2755`；私钥与含密钥的 `wist-gateway.toml` 为 `640`（不放宽到全局：其它宿主账号连 `2770` 目录都进不去）；
+- **不依赖「目录是谁创建的」**：`docker compose up` 会把缺失的挂载源目录建成 `root:root`，本脚本把属主/属组一并纠回来；
+- **幂等**：已对齐时不写盘、也不要任何权限（所以日常 `localize` 不会再要 sudo）；确需修正而当前没权限时会失败，并打印那一行 `sudo` 命令 —— **全新主机第一次 `localize` 通常就属这种情况**（要把属组改成 999），免密 sudo 时脚本会自己重跑；
+- **边界**：只对齐**挂载根与私钥**，不递归内容树（`configs/gateway/knowledge/`、`packages/` 里的文件由打包/投放侧保证 644/755 可读）；
+- **非 Linux 自动跳过**（macOS / OrbStack 的 bind 挂载不校验属主）—— 这也是「macOS 上一直好好的、上 Linux 才炸」的原因。
+
+> 新机器用备份重建：`restore-gateway.sh` 解包出的文件属组是「解包账号」的（tar 以非 root 解包保不住属主），
+> 所以它在目标为 `configs/gateway` 时会**自动**再跑一次对齐。
+
 ### A. 宿主机显式初始化（推荐生产）
 
 ```bash
 # 备料 + 渲染 + 生成页面证书，一步到位（就是 localize 的阶段流程）
 gops sys update && gops sys localize
 
-# 它做五件事（都幂等）：
+# 它做六件事（都幂等）：
 #   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) + Ed25519 签名密钥 + value.json
 #   gx.tpl 渲染 sys/configs/gateway/wist-gateway.toml.tpl → configs/gateway/wist-gateway.toml
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
 #   scripts/init-web-conf.sh $WEB_DOMAIN      # 前端站点配置的渲染值 nginx.value.json
 #   渲染 configs/web/nginx.conf               # 前端站点配置（注入域名）
+#   scripts/align-host-perms.sh               # 宿主属主/权限对齐（容器 999:999；须在 start 之前）
 
 # 起服务（安装包不是配置项：要发安装命令就先录入来源，见下一条；没录也不阻断启动）
-gops sys start
+gops run start
 
 # 投放 agent 安装包并设为分发来源（容器读**不到**宿主机路径 → 统一走 /packages）：
 #   --latest 取 ../wist-agentd/target/package 最新；也可传具体文件/目录
@@ -205,7 +247,7 @@ docker build -t wist-gateway:bootstrap -f Dockerfile.bootstrap .
 # 把 compose 里 gateway 的 image 改成 wist-gateway:bootstrap（本地联调用），然后
 cd ../../wist-gateway-stack
 gops sys update && gops sys localize
-gops sys start
+gops run start
 ```
 
 生成物落在挂载卷 `configs/gateway/` 里，所以能复用；**不挂卷就会每次重启换一套**（新证书 + 新 admin token + 新签名密钥，已发出的安装命令和 agent 凭据全部失效）。
@@ -213,10 +255,10 @@ gops sys start
 ### 起停与排查
 
 ```bash
-gops sys status       # 容器状态
-gops sys stop         # 停
-gops sys uninstall    # 停并删容器（不删卷）
-gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
+gops run status       # 容器状态
+gops run stop         # 停
+gops run uninstall    # 停并删容器（不删卷）
+gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ```
 
 ### 起来之后
@@ -241,7 +283,7 @@ gops sys diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ./dev/setup-domain.sh <域名>     # 换域名（改配置 + 重签证书；改完需重启 gateway）
 ```
 
-> `svc.sh` 与发布态的 `gops sys start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
+> `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
 > 且已在跑则跳过，最后把 gateway 跑在前台；退出时后台组件不会一起停，整栈停止用 `./dev/svc.sh stop`。
 
 `svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
@@ -282,10 +324,11 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
 2. **信任锚走文件，且是 CA 根**。配置用 `agent.trust_bundle_file = state/gateway-ca.crt.pem`（相对配置目录），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
 3. **叶证书必须带 `basicConstraints=CA:FALSE`（叶形态）、且由网关 CA 签**。`openssl req -x509` 的旧默认会打 `CA:TRUE`，rustls/webpki 会以 `CaUsedAsEndEntity` 拒收；`scripts/init-gateway.sh` 生成的叶证书是 `CA:FALSE` + `serverAuth`，并由网关 CA 签发。**轮换叶证书（换域名 / 续期）是安全的**——锚 = CA 根不变，agent 无感；只有当**锚本身**变了（换 CA / 删掉 `gateway-ca.*` 重生成）才需要**重跑安装**（仅重新注册不刷新锚）。
-4. **改证书/配置后要重启网关容器**：`gops sys start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。
+4. **改证书/配置后要重启网关容器**：`gops run start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。
 5. **镜像 tag 是浮动 `:latest`**。同一份 compose 在不同时间拉到的镜像可能不同，升级也对不齐；生产建议钉到固定版本（必要时加 `@sha256:` 摘要），做法就是改 `sys/docker-compose.yml` 里 `gateway` / `web` 的 `image`。
 6. **容器读不到宿主路径**（设置安装包来源时最常见）。网关对**以 `/` 开头的来源**是在**它自己的**文件系统里 `fs::read`；compose 下只有被挂进来的目录可见。所以「本地来源」只能是**容器内路径**：`/packages/<文件名>`（投放目录，见 `scripts/import-package.sh`）或 `/config/<文件名>`（配置目录），否则报 `failed to read package from <宿主路径>: No such file or directory`（界面表现为 502）。拉取成功后网关会把包缓存到 `configs/gateway/state/install-package/`（在挂载卷里，可备份）。
    > 提醒：**别删 `packages/` 目录本身**（容器正挂载它）——删了会让挂载失效、容器内 `/packages` 直接消失；重建容器才恢复（`docker compose --project-directory . -f sys/docker-compose.yml up -d --force-recreate gateway`）。
+7. **宿主属主/权限没对齐 → 容器无限重启**（Linux 上最常见的部署事故）。症状与处置见「权限与运行身份」：跑一次 `scripts/align-host-perms.sh`（需要时加 `sudo`），或在恢复备份后重跑一次（`restore-gateway.sh` 会自动跑）。**别用 `docker compose up` 顺手建目录** —— 它建出来的是 `root:root`。
 
 ## 备份与恢复
 

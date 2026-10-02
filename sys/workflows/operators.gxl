@@ -39,6 +39,14 @@ mod operators {
       dst  : "./configs/web/nginx.conf",
       file : "./configs/web/nginx.value.json"
     );
+    // ④b 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
+    //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
+    //     **不改属主** —— 未对齐就是两个稳定故障：wparse 写不出 /data/.run 的锁（以 75 无限重启）、
+    //     网关读不到 state/ 下的私钥（拒绝启动）。
+    //     还必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录建成 root:root，
+    //     属主一旦是 root，之后的部署账号就写不动了。
+    //     幂等：已对齐时不写盘、也不要任何权限；确需修正而当前没权限时本步失败，并给出那一行 sudo 命令。
+    gx.cmd ( "./scripts/align-host-perms.sh" );
     // ⑤ 初始知识库内容包（出厂自带）：把合并后的 KNOWLEDGE_PKG_URL 拉到投放目录 packages/。
     //     该目录只读挂给网关的 /packages，界面「知识库」页「本地来源」填 /packages/<文件名> 即可录入
     //     —— 录入 ≠ 生效，还要点激活。置空 = 跳过（离线 / 不需要初始包）。

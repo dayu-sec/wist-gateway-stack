@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 开发态统一入口：把本地全栈的「起 / 停 / 看」收在一处。
 #
-# 对应发布态的 `gops sys start|stop|status`（docker compose 起全栈）；开发态用本地二进制，
+# 对应发布态的 `gops run start|stop|status`（docker compose 起全栈）；开发态用本地二进制，
 # 网关持久数据在 `~/.wist-gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
 #
 # 用法：
@@ -165,7 +165,7 @@ try:
 except BlockingIOError:
     sys.stderr.write(
         "[wparse] 另一个 wparse 引擎正持有 " + lock + "：同一 work root 只能起一份\n"
-        "[wparse] 排查：pgrep -fl 'wparse daemon'；gops sys status\n"
+        "[wparse] 排查：pgrep -fl 'wparse daemon'；gops run status\n"
     )
     sys.exit(75)
 os.execv(cmd[0], cmd)
@@ -192,7 +192,7 @@ start_wparse() {
     work_abs="$(cd "${WPARSE_WORK_ROOT}" 2>/dev/null && pwd || printf '%s' "${WPARSE_WORK_ROOT}")"
     busy="$(docker ps --filter "volume=${work_abs}" --format '{{.Names}}' 2>/dev/null | head -3 | tr '\n' ' ')"
     if [[ -n "${busy}" ]]; then
-      die "已有容器挂着这个 work root（${busy}）—— 同一 work root 只能一个引擎；要停容器：gops sys stop"
+      die "已有容器挂着这个 work root（${busy}）—— 同一 work root 只能一个引擎；要停容器：gops run stop"
     fi
   fi
 

@@ -3,6 +3,36 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.19-alpha] - 2026-10-02
+
+### 修复
+
+- **全新 Linux 主机上的部署不再需要手工 `chown`** —— 修掉两个「干净机器必踩、容器无限重启」的阻断：
+  - 数据面：`flock: cannot open lock file /data/.run/.wparse.lock: Permission denied`（容器以 75 退出、反复重启）；
+  - 网关：`failed to read install script signing key …: Permission denied (os error 13)`。
+
+  根因相同：业务镜像固定以 `999:999` 运行，而 Linux 的 bind 挂载**不改属主** —— 目录/私钥归「谁先创建就归谁」
+  （`docker compose up` 会先把缺失的挂载源目录建成 `root:root`），容器于是写不了、读不到。
+  现在由 `scripts/align-host-perms.sh` 在 `gops sys localize` 里自动对齐：
+  **属主 = 部署账号、属组 = 容器 gid、挂载目录 2770(setgid)、私钥与含 token 的 `wist-gateway.toml` 为 640**。
+  由此：容器读写自如，**备份/恢复仍以部署账号身份工作（不需要提权）**，其它宿主账号连目录都进不去；
+  对齐是幂等的（已对齐就不写盘、不要权限），非 Linux 自动跳过。
+
+### 变更
+
+- `gateway` / `wparse` 的**运行身份显式钉死**为 `user: "999:999"`（不再依赖镜像声明的用户 —— 镜像重建
+  换了 uid，宿主侧按 999 对齐的目录就会错位，而症状只是「容器无限重启」）。
+- 端口注释与实际编排对齐（原来写 `3000:3000` / `8443:80`，实际是变量宿主端口 + 容器内 `3000`/`443`）。
+- 文档里的运行时命令改成 gops 2.x 的正确写法（`gops sys start|stop|…` → `gops run …`，2.0.4 起已拆分），
+  并补上「前置：Docker + Compose V2 + 执行账号在 docker 组」与「权限与运行身份」两节。
+
+### 其它
+
+- 去掉 wparse 知识库配置注释示例里的 `${SEC_PWD}`：引擎对**整份文本**做变量替换（注释也算），
+  会白打 `vars not value: SEC_PWD` 的噪音。
+- 新增 `dev/tests/align-host-perms.test.sh`：在一次 Linux 容器里回归宿主属主/权限语义（27 项断言，
+  `docker` 即可跑；开发机多是 macOS，那里验证不了这类内核行为）。
+
 ## [0.1.18-alpha] - 2026-10-02
 
 ### 修复

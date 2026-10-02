@@ -9,7 +9,7 @@
 #
 # 说明：
 #   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
-#   - 密钥不要写在这里：compose 里用 ${SEC_xxx} 占位，运行时由 `gops sys start`
+#   - 密钥不要写在这里：compose 里用 ${SEC_xxx} 占位，运行时由 `gops run start`
 #     从 ~/.galaxy/sec_value.yml 注入，不落盘（本栈当前无密钥）；
 #   - 容器内端口/路径/服务名是应用契约，直接写在 sys/docker-compose.yml 里。
 system:
@@ -81,7 +81,8 @@ system:
   #   data/：输出（logs / out_dat / in_dat / rescue）
   #   .run/：引擎状态（pid / authority.sqlite / rule_mapping.dat）
   # 与开发态的 data-plane/{data,.run} 分开，避免两个引擎同写一份运行态。
-  # 注意：Linux 上要保证这两个目录对容器用户（uid 999 = wparse）可写。
+  # 注意：Linux 上这两个目录必须对容器用户（uid 999 = wparse）可写 —— **不要手工 chown**，
+  # 由 scripts/align-host-perms.sh 统一对齐（属主=部署账号、属组=999、2770 setgid；localize 会自动跑）。
   - name: WPARSE_RUN_DATA
     value: ./data-plane-run/data
   - name: WPARSE_RUN_STATE

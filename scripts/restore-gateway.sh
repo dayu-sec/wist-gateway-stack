@@ -142,6 +142,16 @@ else
   echo "  agent 身份：库里有 agent 的凭据，老 agent 重连即可（无需重装）。"
 fi
 
+# 恢复出来的文件属主/属组是「解包账号」，**不是**容器 gid（tar 以非 root 解包无法保留属主）——
+# 不对齐的话，发布态网关读不到私钥（症状与首次安装的 Permission denied 一模一样）。
+# 这一步幂等，且只动属主/属组/权限，不碰内容。
+if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}/configs/gateway" && -x "${SCRIPT_DIR}/align-host-perms.sh" ]]; then
+  echo
+  echo "  对齐宿主属主/权限（容器以 999:999 运行）："
+  "${SCRIPT_DIR}/align-host-perms.sh" "${STACK_ROOT}" ||
+    echo "  提示：属主对齐未完成，网关可能读不到私钥，请执行：sudo ${SCRIPT_DIR}/align-host-perms.sh ${STACK_ROOT}" >&2
+fi
+
 if [[ "${RESTART}" == "1" ]]; then
   if [[ -f "${STACK_ROOT}/sys/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     echo "  重启发布态网关（${COMPOSE[*]} restart gateway）…"

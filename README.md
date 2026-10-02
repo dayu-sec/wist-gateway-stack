@@ -79,6 +79,7 @@ wist-gateway-stack/
   scripts/                  # 发布态初始化脚本
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
+    init-web-conf.sh        # 前端站点配置的渲染值 configs/web/nginx.value.json（幂等；域名取 WEB_DOMAIN）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
     import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
     init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
@@ -129,12 +130,13 @@ gops sys localize
 > 只在它缺失时才自动补跑 update）。所以改了 `vars.yml` 不跑 `update` 不生效 —— 而覆盖值是在
 > localize 的合并阶段生效的，一条命令就够。
 
-**`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做三件**幂等**的事：
+**`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做五件**幂等**的事：
 
 1. 备料 `configs/gateway/`：Ed25519 签名密钥、网关 TLS 证书、渲染值 `wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
 2. 渲染 `configs/gateway/wist-gateway.toml`（模板在 `sys/configs/gateway/wist-gateway.toml.tpl`）；
 3. 生成前端站点 TLS 证书（`scripts/init-web-tls.sh`，存在即跳过；域名取 `WEB_DOMAIN`）；
-4. 渲染前端站点配置 `configs/web/nginx.conf`（模板 `sys/configs/web/nginx.conf.tpl`，注入 `WEB_DOMAIN`）。
+4. 写前端站点配置的**渲染值** `configs/web/nginx.value.json`（`scripts/init-web-conf.sh`；域名取 `WEB_DOMAIN`）；
+5. 渲染前端站点配置 `configs/web/nginx.conf`（模板 `sys/configs/web/nginx.conf.tpl`，注入 `WEB_DOMAIN`）。
 
 `gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过。
 
@@ -155,10 +157,11 @@ compose 还挂这些路径：
 # 备料 + 渲染 + 生成页面证书，一步到位（就是 localize 的阶段流程）
 gops sys update && gops sys localize
 
-# 它做四件事（都幂等）：
+# 它做五件事（都幂等）：
 #   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) + Ed25519 签名密钥 + value.json
 #   gx.tpl 渲染 sys/configs/gateway/wist-gateway.toml.tpl → configs/gateway/wist-gateway.toml
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
+#   scripts/init-web-conf.sh $WEB_DOMAIN      # 前端站点配置的渲染值 nginx.value.json
 #   渲染 configs/web/nginx.conf               # 前端站点配置（注入域名）
 
 # 起服务（安装包不是配置项：要发安装命令就先录入来源，见下一条；没录也不阻断启动）

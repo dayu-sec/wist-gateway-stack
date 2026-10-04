@@ -271,13 +271,13 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ## 开发态（本地二进制）
 
 ```bash
-# 唯一入口：构建一次 → VictoriaMetrics/wparse/web 后台 → gateway 前台（Ctrl+C 停）
+# 唯一入口：构建一次 → 五个组件（VM/wparse/web/forward/gateway）全部后台常驻
 ./dev/svc.sh start
 ./dev/svc.sh start --dry-run     # 先看会起哪些/跳过哪些（不启动）
-./dev/svc.sh status              # 看四个组件当前状态
+./dev/svc.sh status              # 看各组件当前状态
 ./dev/svc.sh stop                # 逆序停全栈
 
-# 只操作某个组件（组件：vm | wparse | web | gateway）
+# 只操作某个组件（组件：vm | wparse | web | forward | gateway）
 ./dev/svc.sh start web           # 只重启前端（gateway 已在跑时）
 ./dev/svc.sh stop gateway
 
@@ -285,8 +285,8 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ./dev/setup-domain.sh <域名>     # 换域名（改配置 + 重签证书；改完需重启 gateway）
 ```
 
-> `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把 vm/wparse/web 后台常驻拉起
-> 且已在跑则跳过，最后把 gateway 跑在前台；退出时后台组件不会一起停，整栈停止用 `./dev/svc.sh stop`。
+> `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把五个组件（vm/wparse/web/forward/gateway）
+> 全部**后台常驻**拉起、已在跑则跳过，**起完即返回**（不占终端）；整栈停止用 `./dev/svc.sh stop`。
 
 `svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 

@@ -28,7 +28,7 @@ x-topology/wist/                  <- $WIST
 ## 快速开始
 
 ```bash
-# 起全栈（日常）：构建一次 → VM/wparse/web 后台 → gateway 前台
+# 起全栈（日常）：构建一次 → 五个组件全部后台常驻（VM/wparse/web/forward/gateway）
 ./dev/svc.sh start
 
 # 只看计划，不启动
@@ -37,7 +37,7 @@ x-topology/wist/                  <- $WIST
 # 看各组件当前状态
 ./dev/svc.sh status
 
-# 停全栈（逆序：gateway → web → wparse → VM）
+# 停全栈（逆序：gateway → forward → web → wparse → VM）
 ./dev/svc.sh stop
 ```
 
@@ -67,11 +67,11 @@ x-topology/wist/                  <- $WIST
 | `vm` | VictoriaMetrics（`18429`） | 后台（**Docker 容器**） | 第三方依赖，无本地二进制；走 `sys/docker-compose.yml` |
 | `wparse` | 数据面 ELT 引擎 | 后台常驻 | 本地 `dev/bin/wparse`；工程在 `../data-plane` |
 | `web` | 前端 vite dev server（`5174`） | 后台常驻 | `npm run dev`，工作目录 `$WIST/wist-gateway-web` |
-| `gateway` | 控制面后端（HTTPS `:3000`） | **前台**（Ctrl+C 停） | 跑在最后；其余组件不随其退出而停 |
+| `gateway` | 控制面后端（HTTPS `:3000`） | 后台常驻 | 跑在最后；`./dev/svc.sh stop gateway` 停 |
 | `forward` | `443 → 网关端口` 纯 TCP 转发 | 后台常驻 | **在默认 `start` 里**（绑 443 要 sudo；`--no-forward` 摘掉）；见下面「组件 forward」一节 |
 
-**没有单独的 `stop-gateway.sh`**：gateway 前台运行、`Ctrl+C` 停；后台跑时用 `svc.sh stop gateway`
-（靠 pidfile + 端口兜底停）。
+**五个组件都是后台常驻**：`./dev/svc.sh start` 起完就返回，不会占住终端；停用 `./dev/svc.sh stop`
+（`stop gateway` 会一并停掉 443 转发 —— 网关都停了，那个 443 只会让人看到 transport error）。
 
 ## 二进制与路径（开发态实际运行的东西）
 
@@ -110,7 +110,7 @@ graph TD
     BUILD --> VM["VictoriaMetrics :18429<br/>docker, 已在跑则跳过"]
     VM --> WP["wparse 数据面<br/>已在跑则跳过"]
     WP --> WEB["web :5174<br/>已在跑则跳过"]
-    WEB --> GW["gateway :3000 前台<br/>Ctrl+C 停"]
+    WEB --> GW["gateway :3000<br/>后台常驻"]
     WP -. 指标写入 .-> VM
     WEB -. /api 反代 .-> GW
     GW -. victoria_metrics_url 查询 .-> VM
@@ -118,19 +118,19 @@ graph TD
 
 `wparse` 与 `gateway` 都依赖 VictoriaMetrics，`web` 依赖 `gateway`。这些是**运行期**依赖，**都不是启动前置**。
 `start` **不把就绪检查当硬门槛**：任一后台组件起不来只 **WARN、不中止整栈**（慢/坏的前端不该挡住网关）；
-`web` 更完全不等待（pull：只有人开浏览器才用），就绪交给 `status`。`gateway` 是前台，单独留到最后起。
+`web` 更完全不等待（pull：只有人开浏览器才用），就绪交给 `status`。`gateway` 也后台，排在最后起。
 
 ## 日志 / pidfile 速查
 
 | 组件 | 日志 | pidfile |
 |---|---|---|
-| gateway | `/tmp/wist-gateway-server.log` | `/tmp/wist-gateway.pid`（**承载进程** `svc.sh start gateway` 的 pid） |
+| gateway | `/tmp/wist-gateway-server.log` | `/tmp/wist-gateway.pid`（**网关进程自身**的 pid） |
 | web | `/tmp/wist-gateway-web.log` | `/tmp/wist-gateway-web.pid`（npm 的 pid） |
 | wparse | `data-plane/data/logs/wparse-daemon.log`、`wparse.log` | `data-plane/data/logs/wparse.pid` |
 | wist-agentd | `~/.wist-agentd/log/agentd.out` | `~/.wist-agentd/log/agentd.pid` |
 
-gateway 的 pidfile 记的是**前台承载进程**（`svc.sh`）而不是 gateway 进程本身：`svc.sh stop gateway`
-杀这个进程，靠它的 EXIT trap 把 gateway 一起带走；再加端口兜底（只 kill 确认是 `wist-gateway` 的进程）。
+gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 web/wparse 同一口径）：`svc.sh stop gateway`
+直接 `kill` 它，再加端口兜底（只 kill 确认是 `wist-gateway` 的进程）。
 
 ## 状态与配置目录
 
@@ -160,7 +160,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 | `SKIP_BUILD` | 等价 `--no-build`（跳过 `cargo build`） | 每次都构建 |
 | `SKIP_FORWARD` | 等价 `--no-forward`（整个摘掉 `forward`） | 不摘 |
 | `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `~/.wist-gateway`（发布态另用 `configs/gateway`） |
-| `GATEWAY_PIDFILE` | 网关承载进程 pidfile | `/tmp/wist-gateway.pid` |
+| `GATEWAY_PIDFILE` | 网关进程 pidfile | `/tmp/wist-gateway.pid` |
 | `GATEWAY_PORT` | `stop gateway` 端口兜底用的端口 | `3000` |
 | `WEB_URL` | 前端地址（起停两侧必须一致） | `http://127.0.0.1:5174` |
 | `WEB_DIR` | 前端目录 | `$WIST/wist-gateway-web` |

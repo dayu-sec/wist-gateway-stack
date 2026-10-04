@@ -19,7 +19,7 @@
 # 同一口径（不再有「有的跳过、有的报错」）：
 #   start：先 `cargo build` 一次（wist-gateway + wist-agentd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
 #          每个组件**已在运行则跳过**；按 vm → wparse → web → forward → gateway 顺序；
-#          gateway 跑**前台**（Ctrl+C 停），其余后台常驻（不随本脚本退出而停）。
+#          五个组件**全部后台常驻**（不随本脚本退出/关终端而停）；起完就返回。
 #          **start 从不接管/杀已经在跑的进程**（包括 gateway）—— 要重启就先 `stop` 再 `start`。
 #   stop ：按 start 的**逆序**停；未在跑的是 no-op。
 #   status：只读，打印各组件的当前状态。
@@ -340,25 +340,8 @@ stop_web() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# 控制面 gateway（前台；写 pidfile 供 stop 精确停止）
+# 控制面 gateway（后台常驻；写 pidfile 供 stop 精确停止）
 # ────────────────────────────────────────────────────────────────────────────
-GATEWAY_PID=""
-
-gateway_cleanup() {
-  if [[ -n "${GATEWAY_PID}" ]] && kill -0 "${GATEWAY_PID}" 2>/dev/null; then
-    kill "${GATEWAY_PID}" 2>/dev/null || true
-    wait "${GATEWAY_PID}" 2>/dev/null || true
-  fi
-  rm -f "${GATEWAY_PIDFILE}"
-  # 转发器**不跟着活**：443 只在网关活着时有意义。网关一退却留着一个“接受连接但连不上后端”的
-  # 443，比没有更坑 —— agent 侧看到的是 transport error，看着像证书/信任问题（2026-09-30 实撞）。
-  # 发布态也一样：容器一停，端口映射就跟着没了。
-  if [[ -n "$(forward_pid)" ]]; then
-    echo
-    echo "（网关退出）一并停掉 ${FORWARD_LISTEN} 转发：443 只在网关活着时有意义。" >&2
-    stop_forward || true
-  fi
-}
 
 build_binaries() {
   echo "== 构建 Rust 二进制（wist-gateway / wist-agentd）=="
@@ -568,7 +551,7 @@ gateway_already_running() {
   return 1
 }
 
-# 起 gateway（前台）。写本进程 pid 到 GATEWAY_PIDFILE，Ctrl+C 触发 trap 一并停掉 gateway。
+# 起 gateway（**后台常驻**）。写**网关自身**的 pid 到 GATEWAY_PIDFILE；脚本退返、终端关闭都不影响它。
 start_gateway() {
   echo "== 控制面 gateway =="
   local gw_bin="${GW_CRATE}/target/debug/wist-gateway"
@@ -590,54 +573,59 @@ start_gateway() {
     return 0
   fi
 
-  trap gateway_cleanup EXIT INT TERM
-  echo $$ >"${GATEWAY_PIDFILE}"
-
-  WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml" \
-    "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1 &
-  GATEWAY_PID=$!
+  # 后台常驻（与 web/wparse 同一口径）：`nohup` 分离，脚本退出/关终端都不影响它。
+  # pidfile 记**网关自身**的 pid（不再记承载进程 —— 没有承载进程了）；两处 `exec` 保证 `$!` 就是它。
+  (
+    export WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml"
+    exec nohup "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1
+  ) &
+  local pid=$!
+  echo "${pid}" >"${GATEWAY_PIDFILE}"
 
   # 起来之后要**确认它真的在跑**：启动期的拒绝（单实例闸门、库/证书读不开）会立刻退出，
   # 此时把日志尾巴摆出来 —— 否则屏幕上只剩一句“已启动”，人去浏览器里才发现服务不在。
-  local i
+  local i listening=0
   for i in {1..50}; do
-    if ! kill -0 "${GATEWAY_PID}" 2>/dev/null; then
+    if ! pid_alive "${pid}"; then
       echo "  网关启动失败（进程已退出）。日志尾部：" >&2
       tail -n 5 "/tmp/wist-gateway-server.log" >&2 || true
-      exit 1
+      rm -f "${GATEWAY_PIDFILE}"
+      return 1
     fi
     if lsof -nP -ti "tcp:${listen_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      listening=1
       break
     fi
     sleep 0.2
   done
-  echo "  已启动 (pid=${GATEWAY_PID})"
+  if [[ "${listening}" != "1" ]]; then
+    echo "  网关进程在，但 ${listen_port} 未监听（可能仍在启动）。日志尾部：" >&2
+    tail -n 5 "/tmp/wist-gateway-server.log" >&2 || true
+    return 1
+  fi
 
+  echo "  已启动 (pid=${pid})"
   echo
-  echo "gateway 跑在前台，Ctrl+C 停止。"
+  echo "gateway 在后台运行。"
   echo "  监听    ：见配置的 [server] listen_addr"
   echo "  日志    ：/tmp/wist-gateway-server.log"
   echo "  pid     ：${GATEWAY_PIDFILE}"
-  # `wait` 而不是空转的 sleep 循环：下面两件事都需要它 ——
-  # ① Ctrl+C / kill 能**立刻**走到 trap（空转循环里的 sleep 会把信号拖到下一轮才处理，
-  #    于是“停了”之后 wrapper 还在，看起来像服务没停干净）；
-  # ② 网关自己死了就跟着退，不留一个假装还在托管的 wrapper。
-  wait "${GATEWAY_PID}" || true
+  echo "  停止    ：./dev/svc.sh stop gateway"
 }
 
 stop_gateway() {
   echo "== 控制面 gateway =="
   require_cmd lsof
-  local stopped=0 wrapper port pids
+  local stopped=0 pid_in_file port pids
   if [[ -f "${GATEWAY_PIDFILE}" ]]; then
-    wrapper="$(cat "${GATEWAY_PIDFILE}")"
-    if kill -0 "${wrapper}" 2>/dev/null; then
-      echo "  停止网关承载进程（pid=${wrapper}）"
-      kill "${wrapper}" 2>/dev/null || true
+    pid_in_file="$(cat "${GATEWAY_PIDFILE}")"
+    if pid_alive "${pid_in_file}"; then
+      echo "  停止网关（pid=${pid_in_file}）"
+      kill "${pid_in_file}" 2>/dev/null || true
       sleep 1
       stopped=1
     else
-      echo "  清理 stale pidfile（pid=${wrapper} 已不在）"
+      echo "  清理 stale pidfile（pid=${pid_in_file} 已不在）"
     fi
     rm -f "${GATEWAY_PIDFILE}"
   fi
@@ -653,6 +641,14 @@ stop_gateway() {
     fi
   done
   [[ "${stopped}" == "0" ]] && echo "  未在运行。"
+  # 转发器**不跟着活**：443 只在网关活着时有意义。网关一退却留着一个“接受连接但连不上后端”的
+  # 443，比没有更坑 —— agent 侧看到的是 transport error，看着像证书/信任问题（2026-09-30 实撞）。
+  # （以前靠前台网关退出时的 EXIT trap 做到；现在网关后台常驻，就把它放在 stop 里。）
+  if [[ -n "$(forward_pid)" ]]; then
+    echo
+    echo "（网关已停）一并停掉 ${FORWARD_LISTEN} 转发：443 只在网关活着时有意义。"
+    stop_forward || true
+  fi
   return 0
 }
 
@@ -812,11 +808,11 @@ cmd_status() {
   if lsof -nP -ti "tcp:${gw_port}" -sTCP:LISTEN >/dev/null 2>&1; then
     gw_listening=1
   fi
-  if [[ -f "${GATEWAY_PIDFILE}" ]] && kill -0 "$(cat "${GATEWAY_PIDFILE}")" 2>/dev/null; then
+  if [[ -f "${GATEWAY_PIDFILE}" ]] && pid_alive "$(cat "${GATEWAY_PIDFILE}")"; then
     if [[ "${gw_listening}" == "1" ]]; then
       gw_state="up (pid=$(cat "${GATEWAY_PIDFILE}"), 端口 ${gw_port})"
     else
-      gw_state="承载进程在 (pid=$(cat "${GATEWAY_PIDFILE}"))，但端口 ${gw_port} 未监听"
+      gw_state="进程在 (pid=$(cat "${GATEWAY_PIDFILE}"))，但端口 ${gw_port} 未监听"
     fi
   elif [[ "${gw_listening}" == "1" ]]; then
     gw_state="up (端口 ${gw_port}, 非本脚本托管)"
@@ -888,7 +884,7 @@ done
 [[ "${SKIP_BUILD:-0}" == "1" ]] && NO_BUILD=1
 
 # 组件按固定顺序收集（不给 = 默认全量，**含 forward**；顺带达成 canonical 顺序）。
-# forward 排 gateway 前：gateway 是前台阻塞的，排在它后面的永远轮不到。
+# gateway 排最后（主服务；它起来时其余依赖已在）。全部后台常驻，顺序只是启动先后。
 # `--no-forward` / SKIP_FORWARD=1 把它整个摘掉（不需要 agent 面 / 不想碰 sudo 时用）。
 COMPONENTS=(vm wparse web forward gateway)
 selected=()
@@ -922,17 +918,12 @@ case "${cmd}" in
       build_binaries
     fi
     echo
-    # 后台组件彼此独立、且**都不是「网关启动的前置」**：起不来只 WARN、不中止整栈
-    # （绑到一起会让一个慢/坏的前端挡住网关，是结构性耦合）。gateway 是前台，留到最后单独起。
-    gateway_selected=0
+    # 全部组件后台常驻、彼此独立：任一组件起不来只 WARN、不中止整栈
+    # （绑到一起会让一个慢/坏的前端挡住网关，是结构性耦合）。
     failed=()
     for c in "${selected[@]}"; do
       if [[ "${DRY_RUN}" == "1" ]]; then
         echo "  将要启动：${c}"
-        continue
-      fi
-      if [[ "${c}" == "gateway" ]]; then
-        gateway_selected=1
         continue
       fi
       # 子 shell：组件函数里的 `die`（exit 1）只结束子 shell，不会掀翻整栈。
@@ -941,6 +932,7 @@ case "${cmd}" in
              wparse) start_wparse ;;
              web) start_web ;;
              forward) start_forward "${FORWARD_EXPLICIT}" ;;
+             gateway) start_gateway ;;
            esac ); then
         :
       else
@@ -949,14 +941,12 @@ case "${cmd}" in
       fi
       echo
     done
-    if [[ "${DRY_RUN}" != "1" && ${#failed[@]} -gt 0 ]]; then
-      echo "启动小结：未就绪 = ${failed[*]}；其余已起。复核：./dev/svc.sh status" >&2
-      echo
-    fi
-    if [[ "${DRY_RUN}" != "1" && "${gateway_selected}" == "1" ]]; then
-      start_gateway # 前台，阻塞到最后
-    elif [[ "${DRY_RUN}" != "1" ]]; then
-      echo "完成。停止：./dev/svc.sh stop ${selected[*]}"
+    if [[ "${DRY_RUN}" != "1" ]]; then
+      if [[ ${#failed[@]} -gt 0 ]]; then
+        echo "启动小结：未就绪 = ${failed[*]}；其余已起。复核：./dev/svc.sh status" >&2
+        echo
+      fi
+      echo "完成。全部后台运行。停止：./dev/svc.sh stop ${selected[*]}"
       # 有未就绪组件时以非 0 退，便于脚本/CI 察觉（但整栈已经起来了）。
       [[ ${#failed[@]} -eq 0 ]] || exit 1
     fi

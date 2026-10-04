@@ -751,15 +751,18 @@ start_forward() {
   fi
 
   local i
+  # 就绪判据用**进程存活**（pidfile + `ps`），**不用 lsof 看 443 监听**：转发器是 root 起的，
+  # 非 root 的 lsof 看不见别人的监听 socket（stop_forward 早有同款注释），拿它当判据会**永远误报未就绪**。
+  # 另：此刻网关往往还没起（forward 排在 gateway 前），后端不可达是正常的，不该算失败。
   for i in {1..50}; do
-    if lsof -nP -ti "tcp:${FORWARD_LISTEN}" -sTCP:LISTEN >/dev/null 2>&1; then
+    if pid_alive "$(forward_pid)"; then
       echo "  已启动 (pid=$(forward_pid))；agent 侧仍用 https://<域名>（不带端口）"
       echo "  注：网关看到的对端地址会变成 127.0.0.1（要保真实源 IP 得改用 pf rdr）"
       return 0
     fi
     sleep 0.2
   done
-  echo "  转发器未就绪（日志 ${FORWARD_LOG}）：" >&2
+  echo "  转发器进程未起（日志 ${FORWARD_LOG}）：" >&2
   tail -n 5 "${FORWARD_LOG}" >&2 || true
   return 1
 }

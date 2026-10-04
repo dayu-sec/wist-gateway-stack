@@ -191,10 +191,11 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
 ```bash
 ./dev/svc.sh start              # 含 forward：443 → 网关监听端口
 ./dev/svc.sh start forward      # 只要它（网关已在跑、只补这一跳）
-./dev/svc.sh start --no-forward # 不要 agent 面 / 不想碰 sudo
-./dev/svc.sh status             # 多一行 forward：看清 agent 能不能走 443
 ./dev/svc.sh stop  forward      # 只停它（root 起的会自己退回 sudo）
 ```
+
+> 起没起的判据是**进程存活**（pidfile + `ps`），**不是**`lsof` 看 443 在没在听 —— 转发器是 root 起的，
+> 非 root 的 `lsof` 看不见别人的监听 socket，拿它当就绪判据会永远误报。
 
 **sudo 怎么处理**（绑 <1024 的端口要 root，但这件事不该把整次 `start` 拖死）：三级降级 ——
 免密 sudo → 交互终端上要一次密码（会明确告知为什么）→ 实在要不到就**跳过并告诉你**，

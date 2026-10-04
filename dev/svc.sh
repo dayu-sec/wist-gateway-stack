@@ -297,23 +297,18 @@ start_web() {
   ) &
   echo $! >"${WEB_PIDFILE}"
 
-  local i pid
-  # 等待窗口 60s（不是 20s）：冷启动时 vite 首次依赖预打包常超 20s，20s 会把「慢」误判成「坏」，
-  # 而 `set -e` 下一失败就中止整栈（后面的 forward/gateway 都起不来）。进程已死则立即报错，不空等。
-  for i in {1..300}; do
-    if web_up; then
-      echo "  已启动 (pid=$(cat "${WEB_PIDFILE}"))；/api → ${WARP_INSIGHT_WEB_PROXY_TARGET}"
-      return 0
-    fi
-    pid="$(cat "${WEB_PIDFILE}" 2>/dev/null || true)"
-    if [[ -n "${pid}" ]] && ! pid_alive "${pid}"; then
-      echo "  前端进程已退出（pid=${pid}）。日志尾部：" >&2
-      tail -n 20 "${WEB_LOG}" >&2 || true
-      return 1
-    fi
-    sleep 0.2
-  done
-  echo "  前端 60s 内未就绪。日志尾部：" >&2
+  local pid
+  pid="$(cat "${WEB_PIDFILE}")"
+  # launch-and-forget：web 是 **pull** 组件（只有人开浏览器才用），栈里没有下游依赖它，
+  # 所以**不等就绪** —— 就绪与否交给 `./dev/svc.sh status`。只做一个 1s 存活确认，抓
+  # 「--strictPort 端口被占 / 依赖缺失」这类秒退；即便未就绪也不影响整栈。
+  sleep 1
+  if pid_alive "${pid}"; then
+    echo "  已启动 (pid=${pid})；/api → ${WARP_INSIGHT_WEB_PROXY_TARGET}"
+    echo "  （不等就绪：自查 ./dev/svc.sh status）"
+    return 0
+  fi
+  echo "  前端进程秒退（pid=${pid}）。日志尾部：" >&2
   tail -n 20 "${WEB_LOG}" >&2 || true
   return 1
 }
@@ -917,29 +912,50 @@ case "${cmd}" in
     echo "启动开发态组件：${selected[*]}"
     [[ "${DRY_RUN}" == "1" ]] && echo "  [dry-run] 只打印计划，不实际启动"
     echo
-    # 先构建一次（失败即中止，不留半栈）；再按序起。
+    # 先构建一次（**只有构建失败才中止**：没二进制后面无从谈起）；再按序起。
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "  将要构建：cargo build（wist-gateway / wist-agentd）"
     else
       build_binaries
     fi
     echo
+    # 后台组件彼此独立、且**都不是「网关启动的前置」**：起不来只 WARN、不中止整栈
+    # （绑到一起会让一个慢/坏的前端挡住网关，是结构性耦合）。gateway 是前台，留到最后单独起。
+    gateway_selected=0
+    failed=()
     for c in "${selected[@]}"; do
       if [[ "${DRY_RUN}" == "1" ]]; then
         echo "  将要启动：${c}"
         continue
       fi
-      case "${c}" in
-        vm) start_vm ;;
-        wparse) start_wparse ;;
-        web) start_web ;;
-        forward) start_forward "${FORWARD_EXPLICIT}" ;;
-        gateway) start_gateway ;; # 前台，阻塞到最后
-      esac
+      if [[ "${c}" == "gateway" ]]; then
+        gateway_selected=1
+        continue
+      fi
+      # 子 shell：组件函数里的 `die`（exit 1）只结束子 shell，不会掀翻整栈。
+      if ( case "${c}" in
+             vm) start_vm ;;
+             wparse) start_wparse ;;
+             web) start_web ;;
+             forward) start_forward "${FORWARD_EXPLICIT}" ;;
+           esac ); then
+        :
+      else
+        failed+=("${c}")
+        echo "  [warn] ${c} 未就绪/未成功，继续（不影响其它组件）。" >&2
+      fi
       echo
     done
-    if [[ "${DRY_RUN}" != "1" && " ${selected[*]} " != *" gateway "* ]]; then
+    if [[ "${DRY_RUN}" != "1" && ${#failed[@]} -gt 0 ]]; then
+      echo "启动小结：未就绪 = ${failed[*]}；其余已起。复核：./dev/svc.sh status" >&2
+      echo
+    fi
+    if [[ "${DRY_RUN}" != "1" && "${gateway_selected}" == "1" ]]; then
+      start_gateway # 前台，阻塞到最后
+    elif [[ "${DRY_RUN}" != "1" ]]; then
       echo "完成。停止：./dev/svc.sh stop ${selected[*]}"
+      # 有未就绪组件时以非 0 退，便于脚本/CI 察觉（但整栈已经起来了）。
+      [[ ${#failed[@]} -eq 0 ]] || exit 1
     fi
     ;;
   stop)

@@ -297,15 +297,24 @@ start_web() {
   ) &
   echo $! >"${WEB_PIDFILE}"
 
-  local i
-  for i in {1..100}; do
+  local i pid
+  # 等待窗口 60s（不是 20s）：冷启动时 vite 首次依赖预打包常超 20s，20s 会把「慢」误判成「坏」，
+  # 而 `set -e` 下一失败就中止整栈（后面的 forward/gateway 都起不来）。进程已死则立即报错，不空等。
+  for i in {1..300}; do
     if web_up; then
       echo "  已启动 (pid=$(cat "${WEB_PIDFILE}"))；/api → ${WARP_INSIGHT_WEB_PROXY_TARGET}"
       return 0
     fi
+    pid="$(cat "${WEB_PIDFILE}" 2>/dev/null || true)"
+    if [[ -n "${pid}" ]] && ! pid_alive "${pid}"; then
+      echo "  前端进程已退出（pid=${pid}）。日志尾部：" >&2
+      tail -n 20 "${WEB_LOG}" >&2 || true
+      return 1
+    fi
     sleep 0.2
   done
-  echo "  前端未就绪（日志 ${WEB_LOG}）" >&2
+  echo "  前端 60s 内未就绪。日志尾部：" >&2
+  tail -n 20 "${WEB_LOG}" >&2 || true
   return 1
 }
 

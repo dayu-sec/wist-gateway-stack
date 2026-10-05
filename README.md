@@ -300,10 +300,17 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 
 # 按需一次性工具（不属于 start 流程）
 ./dev/setup-domain.sh <域名>     # 换域名（改配置 + 重签证书；改完需重启 gateway）
+./dev/link_local_center.sh       # 快速路：把本机网关接入本机中心（免页面、免手写 gwlinkd.toml）
 ```
 
 > `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把五个组件（vm/wparse/web/forward/gateway）
 > 全部**后台常驻**拉起、已在跑则跳过，**起完即返回**（不占终端）；整栈停止用 `./dev/svc.sh stop`。
+
+`./dev/link_local_center.sh` 是**接入上级（控制中心）的快速路**：gwlinkd 是网关**宿主侧**的容器外常驻
+（随网关走，所以脚本在本仓 `dev/` 而非 center-stack），除了页面「链接上级」，dev 还多这条命令行捷径 ——
+自动建/复用中心实例、取一次性接入券、写 `gwlinkd.toml`、后台跑 gwlinkd（link-upstream → register
+→ 周期 status，此后走 mTLS）。前提是本机中心已在跑（`wist-center-stack` 的 `./dev/svc.sh start`）；
+停用 `./dev/link_local_center.sh --stop`。
 
 `svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `dev/configs/gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 

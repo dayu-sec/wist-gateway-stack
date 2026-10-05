@@ -52,6 +52,7 @@ x-topology/wist/                  <- $WIST
 | 只停/起某个组件 | `./dev/svc.sh stop web` / `./dev/svc.sh start gateway --no-build` |
 | 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完需重启 gateway**） |
 | 不要 agent 面 / 不想碰 sudo | `./dev/svc.sh start --no-forward` |
+| 把本机网关接入本机中心（dev 快速路） | `./dev/link_local_center.sh`（见「接入上级」一节） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
@@ -219,6 +220,43 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
 源 IP，但网关会以 **root** 跑，它写的 `state/*`（库、`knowledge/`、日志）都变成 root 所有，
 之后普通用户的 dev 会踩权限。
 
+## 接入上级（控制中心）：快速路 `link_local_center.sh`
+
+`svc.sh` 管的是**本机网关栈自己**；把网关**接入上级（控制中心）**是另一件事，由 `gwlinkd` 承担：
+它是网关**宿主侧**的容器外常驻（设计 `gateway-secure-registration.md`，CR-003），**随网关走**，
+所以脚本在本仓 `dev/`（不是 center-stack）。日常路径是页面「链接上级」提交接入物 → 落网关库 →
+`gwlinkd` 环回拉取；`dev` 态则给一条命令行快速路：
+
+```bash
+# 前提：本机中心已在跑（wist-center-stack 的 ./dev/svc.sh start，默认 https://127.0.0.1:3100）
+./dev/link_local_center.sh          # 建/复用中心实例 + 取一次性接入券 + 写 gwlinkd.toml + 后台跑
+./dev/link_local_center.sh --stop   # 停 gwlinkd
+```
+
+它做的事：构建本仓 `wist-gwlinkd` → 调中心 admin API 建/复用实例并取接入券 → 写
+`<home>/gwlinkd.toml`（中心端点 + CA-S + `state_dir` + `gateway_id`）→ 后台跑 gwlinkd：
+`link-upstream` → `register`（换客户端证书）→ 周期 `status`，此后走 **mTLS**。
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `WIST_CENTER_ADDR` | 中心地址 | `https://127.0.0.1:3100` |
+| `WIST_CENTER_CONFIG` | 读 admin token 的中心配置 | `~/.wist-center/wist-center.toml` |
+| `WIST_CENTER_TLS_DIR` | 读 CA-S（信任锚）的目录 | `~/.wist-center/tls` |
+| `WIST_GWLINKD_HOME` | gwlinkd 配置 + 状态目录 | `<栈根>/.run/gwlinkd` |
+| `GATEWAY_ID` | 中心侧实例名（派生 `gateway_id`） | `gw-local` |
+
+幂等与边界：
+
+- **已注册**（`gwlinkd.toml` + `state/credential.json` 都在、中心端点一致）→ 直接复用、不新建实例；
+  重启后 gwlinkd 走**已存的客户端证书**（不再需要接入券）。
+- **换了中心**，或上次注册半途（配置写了、凭据没换到）→ 重置本地身份、重走接入。
+- **实例在中心已置备**（lifecycle 非 `Provisioned`）而本地身份又不在 → **拒绝并提示换 `GATEWAY_ID`**：
+  已置备实例的 `link-upstream` 已从接入券切到**客户端证书**认人，中心又**没有重置实例的接口**，
+  用同一名字是续不上的（这也是为什么默认名字被占用时换一个 `GATEWAY_ID` 最省事）。
+
+> gwlinkd **不是** `svc.sh` 的组件（它随网关生命周期、由平台/宿主侧管理，不是本地“起个进程”那么简单），
+> 所以入口是独立的 `link_local_center.sh`，而不是 `./dev/svc.sh start gwlinkd`。
+
 ## 注意事项
 
 1. **gateway 是 HTTPS**。排查时用 `https://` + `curl -k`；用 `http://` 会得到 TLS 握手失败
@@ -264,8 +302,10 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
 ```
 dev/
   README.md                     # 本文件
-  svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/gateway）
+  svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/forward/gateway）
   setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
+  link_local_center.sh          # 快速路：把本机网关接入本机中心（建/复用实例 + 取券 + 起 gwlinkd）
+  forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
   tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）
     align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）
     install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位

@@ -18,7 +18,7 @@
 #     ./dev/setup-domain.sh c-dev02.test.gw.jingang.cloud c-dev01.test.gw.jingang.cloud
 #
 # 可覆盖 env：
-#   WIST_GATEWAY_HOME  网关持久目录（默认 ~/.wist-gateway；发布态另用 <栈根>/configs/gateway）
+#   WIST_GATEWAY_HOME  网关持久目录（默认 <栈根>/dev/configs/gateway；发布态另用 <栈根>/configs/gateway）
 #   GATEWAY_LISTEN     监听地址（默认 0.0.0.0:443；443 是特权端口，起服务要 root）
 #   GATEWAY_URL_PORT   对外基址里的端口；未设置时按 GATEWAY_LISTEN 推导（443 就不带端口）；
 #                      显式设成空串（GATEWAY_URL_PORT=）＝ 一定不带端口（前面挂反代时用）
@@ -31,7 +31,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
+GW_HOME="${WIST_GATEWAY_HOME:-${SCRIPT_DIR}/configs/gateway}"
 CONFIG="${GW_HOME}/wist-gateway.toml"
 STATE_DIR="${GW_HOME}/state"
 GATEWAY_LISTEN="${GATEWAY_LISTEN:-0.0.0.0:443}"

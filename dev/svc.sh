@@ -2,12 +2,13 @@
 # 开发态统一入口：把本地全栈的「起 / 停 / 看」收在一处。
 #
 # 对应发布态的 `gops run start|stop|status`（docker compose 起全栈）；开发态用本地二进制，
-# 网关持久数据在 `~/.wist-gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
+# 网关持久数据在 `<栈根>/dev/configs/gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
 #
 # 用法：
 #   ./dev/svc.sh start [组件…] [--no-build] [--no-forward] [--dry-run]
 #   ./dev/svc.sh stop  [组件…]
 #   ./dev/svc.sh status
+#   ./dev/svc.sh token    # 打印**开发态**网关的 admin token 与出处（登录/管理 API 用）
 #
 #   组件（不给 = vm|wparse|web|forward|gateway）：vm | wparse | web | gateway | forward（也可写 all）
 #     forward = `FORWARD_LISTEN （默认 443）→ 网关监听端口` 的纯 TCP 转发。它就一件事：把发布态由
@@ -34,7 +35,7 @@
 #
 # 可覆盖 env（与旧的分散脚本同口径）：
 #   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward
-#   WIST_GATEWAY_HOME（默认 ~/.wist-gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
+#   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
 #   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
 #   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
@@ -52,7 +53,7 @@ AGENTD_CRATE="${ROOT_DIR}/wist-agentd"
 WIST_KNOWLEDGE_DIR="${WIST_KNOWLEDGE_DIR:-${ROOT_DIR}/wist-knowledge}"
 
 # ── 控制面 gateway ──
-GW_HOME="${WIST_GATEWAY_HOME:-${HOME}/.wist-gateway}"
+GW_HOME="${WIST_GATEWAY_HOME:-${STACK_ROOT}/dev/configs/gateway}"
 GATEWAY_PIDFILE="${GATEWAY_PIDFILE:-/tmp/wist-gateway.pid}"
 # ── 前端 web ──
 WEB_URL="${WEB_URL:-http://127.0.0.1:5174}"
@@ -854,6 +855,38 @@ cmd_status() {
   if [[ "${fwd_listening}" == "1" && "${gw_listening}" != "1" && "${FORWARD_LISTEN}" != "${fwd_target}" ]]; then
     printf '  %-8s %s\n' "⚠" "${FORWARD_LISTEN} 在听但网关没在听：agent 会看到 transport error（不是拒连，别往证书上查）"
   fi
+
+  # 登录/管理 API 的 token 常被翻错地方（仓库里还有一份发布态配置）。这里只指个路。
+  printf '  %-8s %s\n' "token" "登录管理员界面用的 token：./dev/svc.sh token"
+}
+
+# 打印**开发态**网关的 admin token 与出处。存在的意义：仓库里还有一份长得一样的
+# 发布态配置（<栈根>/configs/gateway/wist-gateway.toml，是 .gitignore 的本地渲染生成物），
+# 它的 token 是**另一个**；人很容易照错那份去登录。本命令只认开发态 home。
+cmd_token() {
+  local config="${GW_HOME}/wist-gateway.toml"
+  if [[ ! -f "${config}" ]]; then
+    die "找不到开发态网关配置：${config}（还没起过网关？先 ./dev/svc.sh start gateway）"
+  fi
+  local token listen base
+  token="$(sed -n 's/^[[:space:]]*admin_api_token[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  listen="$(sed -n 's/^[[:space:]]*listen_addr[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  base="$(sed -n 's/^[[:space:]]*public_base_url[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  [[ -n "${token}" ]] || die "在 ${config} 里没找到 admin_api_token"
+  cat <<EOF
+开发态网关 admin Bearer token（登录「${WEB_URL}」/ 直接打管理 API 都用它）：
+
+  ${token}
+
+  读取自： ${config}
+           ← 开发态（本机进程）的配置；网关 home = ${GW_HOME}
+  监听：   ${listen:-?}
+  对外基址： ${base:-?}
+
+提示：仓库里的 <栈根>/configs/gateway/wist-gateway.toml 是**发布态（容器）**配置
+      （本地渲染生成、已被 .gitignore 忽略），token 与上面这份**不同** ——
+      本机跑的是开发态，请用上面这个。
+EOF
 }
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -970,11 +1003,14 @@ case "${cmd}" in
   status)
     cmd_status
     ;;
+  token)
+    cmd_token
+    ;;
   -h | --help)
     usage
     ;;
   *)
     usage >&2
-    die "未知子命令：${cmd}（可用：start | stop | status）"
+    die "未知子命令：${cmd}（可用：start | stop | status | token）"
     ;;
 esac

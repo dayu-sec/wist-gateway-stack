@@ -18,7 +18,7 @@
 #
 # 参数：
 #   --level <级别>   rebuild（可重建级，默认）| restore（可还原级）
-#   --from <目录>    备份的**源目录**（默认 configs/gateway；开发态传 ~/.wist-gateway）
+#   --from <目录>    备份的**源目录**（默认 configs/gateway；开发态传 <栈根>/dev/configs/gateway）
 #   --to <文件>      输出文件（默认 ./wist-gateway-backup-<时间戳>.tar.gz）
 #
 # 恢复用独立脚本：scripts/restore-gateway.sh <备份文件> [--to <目标目录>] [--force] [--restart]
@@ -77,7 +77,7 @@ collect_files() {
 
 do_backup() {
   local dir="$1" out="$2"
-  [[ -d "${dir}" ]] || die "找不到源目录：${dir}（先跑 init-gateway / 起一次网关生成；开发态传 --from ~/.wist-gateway）"
+  [[ -d "${dir}" ]] || die "找不到源目录：${dir}（先跑 init-gateway / 起一次网关生成；开发态传 --from <栈根>/dev/configs/gateway）"
   local files=() f
   while IFS= read -r f; do [[ -n "${f}" ]] && files+=("${f}"); done < <(collect_files "${dir}")
   [[ ${#files[@]} -gt 0 ]] || die "${dir} 下没有任何可备份的身份/配置文件"

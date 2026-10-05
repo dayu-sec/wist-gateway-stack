@@ -136,12 +136,17 @@ gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 
 
 | 组件 | 位置 | 内容 |
 |---|---|---|
-| gateway | `~/.wist-gateway/` | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`gateway-ca.crt.pem`）、Ed25519 签名密钥、`install-package/` |
+| gateway | `dev/configs/gateway/`（= `$WIST_GATEWAY_HOME`，默认） | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`gateway-ca.crt.pem`）、Ed25519 签名密钥、`install-package/` |
 | wist-agentd | `~/.wist-agentd/` | `agentd.toml`、`tasks/`、`state/agent_runtime.json`（`wic_` 凭据）、`log/` |
 | wparse | `data-plane/{data,.run}/` | 运行期数据与临时产物 |
 
-**开发态与发布态的网关持久数据是分开两个目录**：开发态在 `~/.wist-gateway`，发布态挂
+**开发态与发布态的网关持久数据是分开两个目录**：开发态在 `<栈根>/dev/configs/gateway`，发布态挂
 `configs/gateway/`（两边 `victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等不同，分开才各自自洽）。
+
+> ⚠️ 两边的 `admin_api_token` **不同**：登录开发态页面（`web`，默认 `:5174`）要用
+> **开发态** `dev/configs/gateway/wist-gateway.toml` 里那个，**不是**发布态容器用的
+> `configs/gateway/wist-gateway.toml`（两份同名、都是 `.gitignore` 的本地生成物，容易拿错）。
+> 别翻文件：`./dev/svc.sh token`（只认开发态 home，顺带打印 token 出处）。
 wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf,connectors,models,topology}`（发布态只读挂载），
 运行态开发态在 `data-plane/{data,.run}`、发布态在 `../data-plane-run/`。
 
@@ -151,7 +156,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 
 > **备份/恢复**：身份 PEM 不可再生，必备；**库**里存着 agent 的**凭据**（bearer token）—— 要让老 agent
 > 无感回来必须连库一起搬（`--level restore` + `--no-config`，或直接用 `scripts/promote-dev-identity.sh`）。
-> `./scripts/backup-gateway.sh --from ~/.wist-gateway`；详见根 README「备份与恢复」。
+> `./scripts/backup-gateway.sh --from <栈根>/dev/configs/gateway`；详见根 README「备份与恢复」。
 
 ## 环境变量覆盖
 
@@ -159,7 +164,7 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 |---|---|---|
 | `SKIP_BUILD` | 等价 `--no-build`（跳过 `cargo build`） | 每次都构建 |
 | `SKIP_FORWARD` | 等价 `--no-forward`（整个摘掉 `forward`） | 不摘 |
-| `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `~/.wist-gateway`（发布态另用 `configs/gateway`） |
+| `WIST_GATEWAY_HOME` | 网关配置 + state 目录 | `<栈根>/dev/configs/gateway`（发布态另用 `configs/gateway`） |
 | `GATEWAY_PIDFILE` | 网关进程 pidfile | `/tmp/wist-gateway.pid` |
 | `GATEWAY_PORT` | `stop gateway` 端口兜底用的端口 | `3000` |
 | `WEB_URL` | 前端地址（起停两侧必须一致） | `http://127.0.0.1:5174` |

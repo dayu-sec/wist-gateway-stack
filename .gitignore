@@ -17,6 +17,8 @@ dev/bin/
 /configs/
 # 同类目录的任何副本（`configs_x/` 等：同样是运行物，含 CA 私钥 / store，绝不入库）
 /configs*/
+# 开发态网关 home（`dev/svc.sh` 生成：含 admin token / TLS 私钥 / CA / store —— 同发布态，绝不入库）
+/dev/configs/
 # 安装包投放目录（现场放 agent 安装包，只读挂给网关容器）
 /packages/
 

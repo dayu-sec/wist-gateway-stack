@@ -12,6 +12,21 @@
 两者共享**同一份 wparse 业务配置**（`data-plane/{conf,connectors,models,topology}`，在栈根；发布态只读挂载），环境差异（VictoriaMetrics 地址）通过 `WPARSE_VM_ENDPOINT` 注入，不产生两份配置漂移。
 **运行态各自独立**：发布态落 `data-plane-run/data`（`WPARSE_RUN_DATA`）与 `data-plane-run/.run`（`WPARSE_RUN_STATE`），开发态落 `data-plane/{data,.run}` —— 两个引擎可以同时跑，不会互踩。
 
+### 配置与运行态：谁分、谁不分
+
+一条判据：**这份东西「每个环境是否不同」**。
+
+- **`configs/` —— 必须分开**：分开发态 `dev/configs/*` 与发布态 `configs/*`。里面是**每环境不同**的量
+  （`admin_api_token`、`public_base_url`、TLS/CA、`victoria_metrics_url`、`[content]` …）且含**密钥**，
+  两套无法共用，也**绝不入库**。两份同名 `wist-gateway.toml` 因此长得一模一样 —— 别照着翻错，
+  开发态用哪个认准 `./dev/svc.sh token`。
+- **`data-plane/` —— 不用分开**：`data-plane/{conf,connectors,models,topology}` 是 warp-parse 的
+  **业务配置**，开发态与发布态**共用同一份**（发布态只读挂载）；环境差异靠
+  `WPARSE_VM_ENDPOINT` / `WPARSE_GATEWAY_ENDPOINT` 注入，不复制配置、也就不产生漂移。
+
+其中**运行态一律各自独立**（运行态不是配置）：网关 `dev/configs/gateway/state` ↔ `configs/gateway/state`；
+wparse `data-plane/{data,.run}` ↔ `data-plane-run/{data,.run}` —— 两侧可同时跑、不互踩。
+
 ## 组件
 
 | 服务 | 作用 | 端口（宿主:容器） | 镜像来源 |
@@ -72,6 +87,8 @@ wist-gateway-stack/
     svc.sh                  # 起/停/看 全栈（vm | wparse | web | gateway）
     setup-domain.sh         # 按需：切域名（建/复用 dev CA + 签叶证书 + 改配置）
     bin/                    # wparse 本地二进制
+    configs/                # 开发态：网关运行期配置/密钥（同 configs/ 的形状，但**开发态专用**；不入 git）
+      gateway/              # 开发态 wist-gateway.toml + state/（含 admin token，`./dev/svc.sh token` 可取）
   configs/                  # 运行期配置/密钥（现场生成，不入 git / 不入包）
     gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ state/（证书/密钥/store/包缓存）
     web/                    # 发布态：nginx.conf（由模板渲染）+ nginx.value.json + tls/（证书）
@@ -91,7 +108,7 @@ wist-gateway-stack/
   README.md
 ```
 
-> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `~/.wist-gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
+> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `dev/configs/gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
 
 > **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动；schema 在启动时自动迁移。**这个库不用备份**：库丢了，持有效客户端证书的 agent 会在重连时自动重新登记（mTLS 自愈）——真正不可再生的只有 PEM（见「备份与恢复」）。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
 
@@ -288,7 +305,7 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 > `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把五个组件（vm/wparse/web/forward/gateway）
 > 全部**后台常驻**拉起、已在跑则跳过，**起完即返回**（不占终端）；整栈停止用 `./dev/svc.sh stop`。
 
-`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `~/.wist-gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
+`svc.sh start gateway` 会自动做这几件事：**启动时 `cargo build` 一次 `wist-gateway` 与 `wist-agentd`**（保证跑的是当前源码，`--no-build` / `SKIP_BUILD=1` 可跳过）；缺配置就调 `wist-gateway init-config` 生成到 `dev/configs/gateway/`；缺 TLS 证书就 `openssl` 签一张叶证书；**并把信任锚写进 `[agent] trust_bundle_file`**（跑过 `dev/setup-domain.sh` 就有 `gateway-ca.crt.pem`，锚 = CA 根；没有就退回叶证书自身；供 install.sh 内嵌 `--cacert` 用）。
 
 前置：本地有 Rust 工具链（脚本会 `cargo build` `wist-gateway` / `wist-agentd`）、`wist-gateway-web/node_modules`（先 `npm install`）、`dev/bin/` 里有 wparse 二进制。日志：`/tmp/wist-gateway-server.log`、`/tmp/wist-gateway-web.log`。
 
@@ -350,7 +367,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 - **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
 - **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
 - **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
-- **一步搬身份（+ 库）**：`scripts/promote-dev-identity.sh`（默认 `--from ~/.wist-gateway --to <栈根>/configs/gateway`）—— 把开发态的**身份 + 管理面状态（SQLite 库）**搬成发布态的（`--level restore` 出包 + `--no-config` 恢复，**配置不动**）。**只搬文件、不碰容器**；`--dry-run` 可先预演。要让老 agent **无感**回来，用这个（只搬 PEM 不够）。
+- **一步搬身份（+ 库）**：`scripts/promote-dev-identity.sh`（默认 `--from <栈根>/dev/configs/gateway --to <栈根>/configs/gateway`）—— 把开发态的**身份 + 管理面状态（SQLite 库）**搬成发布态的（`--level restore` 出包 + `--no-config` 恢复，**配置不动**）。**只搬文件、不碰容器**；`--dry-run` 可先预演。要让老 agent **无感**回来，用这个（只搬 PEM 不够）。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
-- 开发态同样可用：`./scripts/backup-gateway.sh --from ~/.wist-gateway`。
+- 开发态同样可用：`./scripts/backup-gateway.sh --from dev/configs/gateway`。

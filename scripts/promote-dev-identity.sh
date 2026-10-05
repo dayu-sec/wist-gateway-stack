@@ -9,7 +9,7 @@
 # 用法：
 #   scripts/promote-dev-identity.sh [--from <源目录>] [--to <目标目录>] [--dry-run]
 #
-#   --from <目录>  来源（默认 ~/.wist-gateway，即开发态）
+#   --from <目录>  来源（默认 <栈根>/dev/configs/gateway，即开发态）
 #   --to <目录>    发布态网关目录（默认 <栈根>/configs/gateway）；**必须已存在**
 #   --dry-run      只打印要做的事，不写文件
 #
@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-FROM="${HOME}/.wist-gateway"
+FROM="${STACK_ROOT}/dev/configs/gateway"
 TO="${STACK_ROOT}/configs/gateway"
 DRY_RUN=0
 
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 护栏：源/目标都要对得上，且不能是同一个目录。
-[[ -d "${FROM}" ]] || die "源目录不存在：${FROM}（开发态默认 ~/.wist-gateway）"
+[[ -d "${FROM}" ]] || die "源目录不存在：${FROM}（开发态默认 <栈根>/dev/configs/gateway）"
 [[ -d "${TO}" ]] || die "目标目录不存在：${TO}
 发布态网关目录应先初始化/起过一次。本脚本**不新建目录**，免得把东西写到错的位置。"
 [[ -d "${TO}/state" || -f "${TO}/wist-gateway.toml" ]] || die "目标不像网关配置目录：${TO}（既无 state/ 也无 wist-gateway.toml）"

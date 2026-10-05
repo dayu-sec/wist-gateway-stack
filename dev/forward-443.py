@@ -4,7 +4,7 @@
 **为什么需要它**：发布态那条 `443 → 容器:3000` 是 docker 的端口映射给的（compose 里
 `${GATEWAY_PORT}:3000`）；dev 态网关是个普通进程、按配置听高位端口（默认 3000），于是
 agentd 的 endpoint（不带端口的域名，隐式 443）连不上。macOS 上绑 443 要 root，所以这里用
-**一个 root 起的转发器**顶上 —— 网关本身仍以普通用户跑，`~/.wist-gateway` 的属主不受影响。
+**一个 root 起的转发器**顶上 —— 网关本身仍以普通用户跑，`dev/configs/gateway` 的属主不受影响。
 
 **只搬字节，不碰 TLS**：证书、信任锚、SNI 全部原样透传给网关，agent 侧地址也不必带端口，
 所以 dev 与发布态在 agent 眼里是同一种形态。由 `dev/svc.sh start forward` 负责起停。

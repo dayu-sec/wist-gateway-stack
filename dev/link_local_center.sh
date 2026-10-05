@@ -34,6 +34,8 @@ GWLINKD_CRATE="${WIST_GWLINKD_CRATE:-${ROOT_DIR}/wist-gwlinkd}"
 CENTER_ADDR="${WIST_CENTER_ADDR:-https://127.0.0.1:3100}"
 CENTER_CONFIG="${WIST_CENTER_CONFIG:-${HOME}/.wist-center/wist-center.toml}"
 CA_CERT="${WIST_CENTER_CA_CERT:-${WIST_CENTER_TLS_DIR:-${HOME}/.wist-center/tls}/ca.crt.pem}"
+GATEWAY_ID_EXPLICIT=0
+[[ -n "${GATEWAY_ID:-}" ]] && GATEWAY_ID_EXPLICIT=1
 GATEWAY_ID="${GATEWAY_ID:-gw-local}"
 GATEWAY_SELF_ENDPOINT="${WIST_GATEWAY_SELF_ENDPOINT:-https://127.0.0.1:3000}"
 GATEWAY_SELF_CA="${WIST_GATEWAY_SELF_CA:-${STACK_ROOT}/dev/configs/gateway/state/gateway-ca.crt.pem}"
@@ -97,6 +99,9 @@ stop_gwlinkd() {
 }
 
 build_gwlinkd() {
+  if [[ "${WIST_GWLINKD_NO_BUILD:-0}" == "1" ]]; then
+    return 0
+  fi
   if command -v cargo >/dev/null 2>&1; then
     echo "== 构建 wist-gwlinkd（增量）=="
     cargo build --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
@@ -207,11 +212,14 @@ start_gateway_mode() {
   [[ -f "${GATEWAY_SELF_CA}" ]] || die "找不到网关环回面信任锚：${GATEWAY_SELF_CA}（网关先跑过 dev/setup-domain.sh）"
   build_gwlinkd
 
-  # 换实例（gateway_id 变了）→ 自动重置：页面路只在未注册（首跑）时拉，留着旧身份反而挡住。
+  # 页面路只在未注册（首跑）时拉，留着旧身份反而挡住。
   if [[ -f "${GWLINKD_CONFIG}" ]]; then
     local have
     have="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_CONFIG}" | head -1)"
-    if [[ -n "${have}" && "${have}" != "${GATEWAY_ID}" ]]; then
+    if [[ "${GATEWAY_ID_EXPLICIT}" == "0" && -n "${have}" ]]; then
+      # 没显式指定 id → 沿用已配置的身份（已接入的 id 是权威，别用默认值把它冲掉）。
+      GATEWAY_ID="${have}"
+    elif [[ -n "${have}" && "${have}" != "${GATEWAY_ID}" ]]; then
       echo "页面路 gwlinkd 之前是 ${have}，本次要接 ${GATEWAY_ID} → 重置本地身份"
       rm -rf "${GWLINKD_STATE}" "${GWLINKD_CONFIG}"
     fi

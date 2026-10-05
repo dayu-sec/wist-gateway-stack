@@ -28,7 +28,7 @@ x-topology/wist/                  <- $WIST
 ## 快速开始
 
 ```bash
-# 起全栈（日常）：构建一次 → 五个组件全部后台常驻（VM/wparse/web/forward/gateway）
+# 起全栈（日常）：构建一次 → 六个组件全部后台常驻（VM/wparse/web/forward/gateway/gwlinkd）
 ./dev/svc.sh start
 
 # 只看计划，不启动
@@ -37,7 +37,7 @@ x-topology/wist/                  <- $WIST
 # 看各组件当前状态
 ./dev/svc.sh status
 
-# 停全栈（逆序：gateway → forward → web → wparse → VM）
+# 停全栈（逆序：gwlinkd → gateway → forward → web → wparse → VM）
 ./dev/svc.sh stop
 ```
 
@@ -61,7 +61,8 @@ x-topology/wist/                  <- $WIST
 
 ## 组件与脚本
 
-`svc.sh` 日常管四个组件（顺序 = 依赖序），另有一个可选组件 `forward`：
+`svc.sh` 管六个组件（顺序 = 依赖序）；`forward` 与 `gwlinkd` 在默认 `start` 里，可分别用
+`--no-forward` / `--no-gwlinkd` 摘掉：
 
 | 组件 | 是什么 | 前台/后台 | 说明 |
 |---|---|---|---|
@@ -70,8 +71,9 @@ x-topology/wist/                  <- $WIST
 | `web` | 前端 vite dev server（`5174`） | 后台常驻 | `npm run dev`，工作目录 `$WIST/wist-gateway-web` |
 | `gateway` | 控制面后端（HTTPS `:3000`） | 后台常驻 | 跑在最后；`./dev/svc.sh stop gateway` 停 |
 | `forward` | `443 → 网关端口` 纯 TCP 转发 | 后台常驻 | **在默认 `start` 里**（绑 443 要 sudo；`--no-forward` 摘掉）；见下面「组件 forward」一节 |
+| `gwlinkd` | 网关**宿主侧**常驻：接入上级控制中心 | 后台常驻 | **在默认 `start` 里**（轮询网关、消费「链接上级」页请求；`--no-gwlinkd` 摘掉）；委托 `dev/link_local_center.sh --via-gateway`；见「接入上级」一节 |
 
-**五个组件都是后台常驻**：`./dev/svc.sh start` 起完就返回，不会占住终端；停用 `./dev/svc.sh stop`
+**六个组件都是后台常驻**：`./dev/svc.sh start` 起完就返回，不会占住终端；停用 `./dev/svc.sh stop`
 （`stop gateway` 会一并停掉 443 转发 —— 网关都停了，那个 443 只会让人看到 transport error）。
 
 ## 二进制与路径（开发态实际运行的东西）
@@ -220,7 +222,10 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
 源 IP，但网关会以 **root** 跑，它写的 `state/*`（库、`knowledge/`、日志）都变成 root 所有，
 之后普通用户的 dev 会踩权限。
 
-## 接入上级（控制中心）：`link_local_center.sh`
+## 接入上级（控制中心）：`svc.sh` 的 `gwlinkd` 组件 + `link_local_center.sh`
+
+> **默认 `./dev/svc.sh start` 已经把页面路 gwlinkd 带起来了** —— 日常不用再手跑下面的命令；
+> 只想单独起/停它就 `./dev/svc.sh start gwlinkd` / `./dev/svc.sh stop gwlinkd`。
 
 `svc.sh` 管的是**本机网关栈自己**；把网关**接入上级（控制中心）**是另一件事，由 `gwlinkd` 承担：
 它是网关**宿主侧**的容器外常驻（设计 `gateway-secure-registration.md`，CR-003），**随网关走**，
@@ -323,7 +328,7 @@ GATEWAY_ID=gw-002 ./dev/link_local_center.sh --via-gateway
 ```
 dev/
   README.md                     # 本文件
-  svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/forward/gateway）
+  svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/forward/gateway/gwlinkd）
   setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
   link_local_center.sh          # 把本机网关接入本机中心：快速路（默认）/ 页面路 --via-gateway
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）

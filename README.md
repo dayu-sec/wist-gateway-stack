@@ -288,13 +288,13 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ## 开发态（本地二进制）
 
 ```bash
-# 唯一入口：构建一次 → 五个组件（VM/wparse/web/forward/gateway）全部后台常驻
+# 唯一入口：构建一次 → 六个组件（VM/wparse/web/forward/gateway/gwlinkd）全部后台常驻
 ./dev/svc.sh start
 ./dev/svc.sh start --dry-run     # 先看会起哪些/跳过哪些（不启动）
 ./dev/svc.sh status              # 看各组件当前状态
 ./dev/svc.sh stop                # 逆序停全栈
 
-# 只操作某个组件（组件：vm | wparse | web | forward | gateway）
+# 只操作某个组件（组件：vm | wparse | web | forward | gateway | gwlinkd）
 ./dev/svc.sh start web           # 只重启前端（gateway 已在跑时）
 ./dev/svc.sh stop gateway
 
@@ -303,7 +303,7 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 ./dev/link_local_center.sh       # 快速路：把本机网关接入本机中心（免页面、免手写 gwlinkd.toml）
 ```
 
-> `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把五个组件（vm/wparse/web/forward/gateway）
+> `svc.sh` 与发布态的 `gops run start|stop|status` 对应：`start` 把六个组件（vm/wparse/web/forward/gateway/gwlinkd）
 > 全部**后台常驻**拉起、已在跑则跳过，**起完即返回**（不占终端）；整栈停止用 `./dev/svc.sh stop`。
 
 `./dev/link_local_center.sh` 是**接入上级（控制中心）的快速路**：gwlinkd 是网关**宿主侧**的容器外常驻

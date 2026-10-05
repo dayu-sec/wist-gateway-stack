@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.24-alpha] - 2026-10-05
+
+### 变更
+
+- **开发态网关 home 迁到仓库内**：`./dev/svc.sh start gateway` 的默认 home 从 `~/.wist-gateway`
+  改为 `<栈根>/dev/configs/gateway`（对称发布态 `configs/gateway`，且 `.gitignore` 忽略）——
+  不必再记「配置在哪个家目录」。已有 `~/.wist-gateway` 的机器把该目录搬到 `dev/configs/gateway` 即可，
+  agent 注册表随库一起走、无需重装。
+- 新增 `./dev/svc.sh token`：打印**开发态**网关的 admin token 与出处（只认开发态 home），
+  避免与发布态 `configs/gateway/wist-gateway.toml` 的同名配置混拿。
+
 ## [0.1.23-alpha] - 2026-10-03
 
 ### 变更

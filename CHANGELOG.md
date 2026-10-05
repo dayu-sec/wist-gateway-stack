@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.25-alpha] - 2026-10-05
+
+### 变更
+
+- **镜像 tag 跟进**：网关 `v0.1.19-alpha`、前端 `v0.1.15-alpha`。
+- 本轮网关侧带来：自述面富化（进程 / 机队 / 存储 / 数据面 / 主机资源）、gwlinkd 状态通道、
+  接入请求 CA 按 scheme 条件必需；依赖版本对齐（`wist-control` 0.6 / `wist-contracts` 0.2）。
+  前端「链接上级」接入状态置顶 + gwlinkd 状态 / 中心地址展示。
+
 ## [0.1.24-alpha] - 2026-10-05
 
 ### 变更

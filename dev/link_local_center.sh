@@ -206,12 +206,22 @@ start_gateway_mode() {
   [[ -f "${CA_CERT}" ]] || die "找不到中心 CA：${CA_CERT}（中心以 TLS 起时才有）"
   [[ -f "${GATEWAY_SELF_CA}" ]] || die "找不到网关环回面信任锚：${GATEWAY_SELF_CA}（网关先跑过 dev/setup-domain.sh）"
   build_gwlinkd
-  mkdir -p "${GWLINKD_STATE}"
 
+  # 换实例（gateway_id 变了）→ 自动重置：页面路只在未注册（首跑）时拉，留着旧身份反而挡住。
+  if [[ -f "${GWLINKD_CONFIG}" ]]; then
+    local have
+    have="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_CONFIG}" | head -1)"
+    if [[ -n "${have}" && "${have}" != "${GATEWAY_ID}" ]]; then
+      echo "页面路 gwlinkd 之前是 ${have}，本次要接 ${GATEWAY_ID} → 重置本地身份"
+      rm -rf "${GWLINKD_STATE}" "${GWLINKD_CONFIG}"
+    fi
+  fi
+
+  mkdir -p "${GWLINKD_STATE}"
   if [[ -f "${GWLINKD_STATE}/credential.json" ]]; then
-    echo "提示：${GWLINKD_HOME} 已有客户端证书（已注册）—— gwlinkd 只在**未注册（首跑）**时拉页面请求，"
+    echo "提示：${GWLINKD_HOME} 对 ${GATEWAY_ID} 已注册 —— gwlinkd 只在**未注册（首跑）**时拉页面请求，"
     echo "      不会再消费网关页的新提交。要重走页面接入："
-    echo "      rm -rf ${GWLINKD_STATE} ${GWLINKD_CONFIG} && GATEWAY_ID=<id> ./dev/link_local_center.sh --via-gateway"
+    echo "      rm -rf ${GWLINKD_STATE} ${GWLINKD_CONFIG} && GATEWAY_ID=${GATEWAY_ID} ./dev/link_local_center.sh --via-gateway"
     echo
   fi
 

@@ -248,6 +248,7 @@ GATEWAY_ID=gw-002 ./dev/link_local_center.sh --via-gateway
 **只在未注册（首跑）时拉**（拉取发生在 `first_run`）。所以页面路：
 
 - 用**独立 home**（`.run/gwlinkd-gateway`），并要求它是**未注册**状态（已注册就跑不到拉取那步）；
+  **换实例**（`GATEWAY_ID` 变了）时脚本会自动重置这个 home（不用手删）。
 - 配置里加 `gateway_self_endpoint`（网关环回面）+ `gateway_self_ca`（其信任锚；网关自签 HTTPS 必需）；
 - **不注入接入券**（券来自网关页那次提交，gwlinkd 拉取时拿到）；
 - `GATEWAY_ID` 必须与页面接入物里的 `gateway_id` 一致。

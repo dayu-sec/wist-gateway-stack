@@ -270,6 +270,8 @@ GATEWAY_ID=gw-002 ./dev/link_local_center.sh --via-gateway
 | `GATEWAY_ID` | 中心侧实例名（派生 `gateway_id`） | `gw-local`（页面路须与接入物一致） |
 | `WIST_GATEWAY_SELF_ENDPOINT` | 页面路：网关环回面 | `https://127.0.0.1:3000` |
 | `WIST_GATEWAY_SELF_CA` | 页面路：环回面信任锚 | `<栈根>/dev/configs/gateway/state/gateway-ca.crt.pem` |
+| `UPGRADE_PROJECT_DIR` | gops 工程根（含 `ops-prj.yml`；gops 从 cwd 解析，缺了升级会前置失败） | 本仓旁的联调工程 `gateway-tx-01`（存在才用） |
+| `UPGRADER_PROGRAM` | 升级执行器程序名/路径 | 空（用 gwlinkd 内置的 `gops`） |
 
 幂等与边界：
 

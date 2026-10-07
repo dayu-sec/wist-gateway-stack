@@ -24,6 +24,8 @@
 #   GATEWAY_ID                  中心侧实例名（快速路默认 gw-local；页面路须与页面接入物里的一致）
 #   WIST_GATEWAY_SELF_ENDPOINT  页面路：网关环回面（默认 https://127.0.0.1:3000）
 #   WIST_GATEWAY_SELF_CA        页面路：环回面信任锚（默认 dev/configs/gateway/state/gateway-ca.crt.pem）
+#   UPGRADE_PROJECT_DIR         gops 工程根（含 ops-prj.yml）；默认取本仓旁的联调工程 gateway-tx-01（存在才用）
+#   UPGRADER_PROGRAM            升级执行器（默认空 = gwlinkd 内置的 gops）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,8 +42,29 @@ GATEWAY_ID="${GATEWAY_ID:-gw-local}"
 GATEWAY_SELF_ENDPOINT="${WIST_GATEWAY_SELF_ENDPOINT:-https://127.0.0.1:3000}"
 GATEWAY_SELF_CA="${WIST_GATEWAY_SELF_CA:-${STACK_ROOT}/dev/configs/gateway/state/gateway-ca.crt.pem}"
 
+# gops 工程根（含 ops-prj.yml）：gops 从 **cwd** 解析工程，缺了会让升级**前置失败**（gwlinkd 的 preflight）。
+# 未显式设置时，默认取本仓旁的联调工程 `gateway-tx-01`（存在才用）；显式设空可关掉（不落该键）。
+if [[ -z "${UPGRADE_PROJECT_DIR+x}" ]]; then
+  sibling_project="${ROOT_DIR}/../gateway-tx-01"
+  if [[ -f "${sibling_project}/ops-prj.yml" ]]; then
+    UPGRADE_PROJECT_DIR="${sibling_project}"
+  fi
+fi
+UPGRADE_PROJECT_DIR="${UPGRADE_PROJECT_DIR:-}"
+UPGRADER_PROGRAM="${UPGRADER_PROGRAM:-}"
+
 die() { echo "错误：$*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; }
+
+# 升级执行器（gops）的可选配置行：设了才写（空 program 会让执行器起不来，故整行不落）。
+upgrade_knob_lines() {
+  if [[ -n "${UPGRADE_PROJECT_DIR:-}" ]]; then
+    printf 'upgrade_project_dir = "%s"\n' "${UPGRADE_PROJECT_DIR}"
+  fi
+  if [[ -n "${UPGRADER_PROGRAM:-}" ]]; then
+    printf 'upgrader_program = "%s"\n' "${UPGRADER_PROGRAM}"
+  fi
+}
 
 MODE=fast
 case "${1:-}" in
@@ -64,7 +87,7 @@ GWLINKD_LOG="${GWLINKD_HOME}/gwlinkd.log"
 GWLINKD_STATE="${GWLINKD_HOME}/state"
 GWLINKD_PID_FILE="${GWLINKD_HOME}/gwlinkd.pid"
 
-help() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+help() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # 读中心配置里的 `admin_token = "..."`。
 admin_token() {
@@ -198,6 +221,7 @@ control_center_endpoint = "${CENTER_ADDR}"
 trust_bundle = "${CA_CERT}"
 state_dir = "${GWLINKD_STATE}"
 gateway_id = "${gw}"
+$(upgrade_knob_lines)
 EOF
     GWLINKD_LINK="${boot}"
     echo "  gwlinkd 配置：${GWLINKD_CONFIG}"
@@ -240,6 +264,7 @@ state_dir = "${GWLINKD_STATE}"
 gateway_id = "${GATEWAY_ID}"
 gateway_self_endpoint = "${GATEWAY_SELF_ENDPOINT}"
 gateway_self_ca = "${GATEWAY_SELF_CA}"
+$(upgrade_knob_lines)
 EOF
   echo "  gwlinkd 配置：${GWLINKD_CONFIG}（页面路：轮询 ${GATEWAY_SELF_ENDPOINT}）"
   echo "  在网关「链接上级」页粘贴接入链接（其 gateway_id 须为 ${GATEWAY_ID}）；gwlinkd 会拉取并接入。"

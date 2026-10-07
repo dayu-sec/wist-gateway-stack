@@ -98,11 +98,11 @@ fi
 [[ -n "$token" ]] || { echo "需要 ADMIN_TOKEN（或 value.json 的 admin_api_token）" >&2; exit 1; }
 
 if [[ "$DRY_RUN" == 1 ]]; then
-  echo "[dry-run] POST ${url%/}/api/v1/admin/agent/install-package {\"package_url\":\"${container_path}\"}"
+  echo "[dry-run] POST ${url%/}/api/v1/admin/agent/install-package {\"package_url\":\"${container_path}\",\"package_sha256\":\"sha256:${sha}\"}"
   exit 0
 fi
 code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "${url%/}/api/v1/admin/agent/install-package" \
   -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" \
-  -d "{\"package_url\":\"${container_path}\"}")"
+  -d "{\"package_url\":\"${container_path}\",\"package_sha256\":\"sha256:${sha}\"}")"
 echo "  设置来源 → HTTP ${code}"
 [[ "$code" == "200" ]] || exit 1

@@ -26,6 +26,7 @@
 #   WIST_GATEWAY_SELF_CA        页面路：环回面信任锚（默认 dev/configs/gateway/state/gateway-ca.crt.pem）
 #   UPGRADE_PROJECT_DIR         gops 工程根（含 ops-prj.yml）；默认取本仓旁的联调工程 gateway-tx-01（存在才用）
 #   UPGRADER_PROGRAM            升级执行器（默认空 = gwlinkd 内置的 gops）
+#   UPGRADE_TOOL_COMPONENTS     无状态工具组件（`name=binary` 空格分隔；默认 galaxy-ops=gops galaxy-flow=gx；设空关掉）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,10 +53,14 @@ if [[ -z "${UPGRADE_PROJECT_DIR+x}" ]]; then
 fi
 UPGRADE_PROJECT_DIR="${UPGRADE_PROJECT_DIR:-}"
 UPGRADER_PROGRAM="${UPGRADER_PROGRAM:-}"
+# 无状态工具（`install = "tool-copy"`）：解包制品后把二进制**就地覆盖**到它在 PATH 上的原位置，不经 gops 工程。
+# 这两件是联调栈要升级的工具（galaxy-ops → gops，galaxy-flow → gx）；设 `UPGRADE_TOOL_COMPONENTS=` 可关掉。
+UPGRADE_TOOL_COMPONENTS="${UPGRADE_TOOL_COMPONENTS-galaxy-ops=gops galaxy-flow=gx}"
 
 die() { echo "错误：$*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; }
 
+# ── 升级旋钮 ─────────────────────────────────────────────────────────────────
 # 升级执行器（gops）的可选配置行：设了才写（空 program 会让执行器起不来，故整行不落）。
 upgrade_knob_lines() {
   if [[ -n "${UPGRADE_PROJECT_DIR:-}" ]]; then
@@ -64,6 +69,34 @@ upgrade_knob_lines() {
   if [[ -n "${UPGRADER_PROGRAM:-}" ]]; then
     printf 'upgrader_program = "%s"\n' "${UPGRADER_PROGRAM}"
   fi
+  # 无状态工具组件：`[[upgrade.component]]` + `install = "tool-copy"`（组件名=二进制名）。
+  # word-split 是故意的（串本身就是空格分隔的 `name=binary` 列表）。
+  local pair name binary
+  for pair in ${UPGRADE_TOOL_COMPONENTS}; do
+    name="${pair%%=*}"
+    binary="${pair#*=}"
+    [[ -n "${name}" && -n "${binary}" && "${binary}" != "${pair}" ]] || continue
+    printf '\n[[upgrade.component]]\nname = "%s"\ninstall = "tool-copy"\nbinary = "%s"\n' "${name}" "${binary}"
+  done
+}
+
+# 复用**已存在**的配置时，补齐缺失的无状态工具组件（tool-copy）。
+#
+# 权威在**生成器**（`upgrade_knob_lines`），不在配置文件：手改会被下次重写冲掉。
+# 但快速路在「已注册且端点一致」时**不重写**配置，旧配置可能没有目录 → gwlinkd 路由回退到 gops。
+# 故这里按组件名**幂等追加**（缺哪个补哪个），免得依赖手工维护的 [[upgrade.component]]。
+ensure_tool_components() {
+  local config="$1" pair name binary
+  [[ -f "${config}" ]] || return 0
+  for pair in ${UPGRADE_TOOL_COMPONENTS}; do
+    name="${pair%%=*}"
+    binary="${pair#*=}"
+    [[ -n "${name}" && -n "${binary}" && "${binary}" != "${pair}" ]] || continue
+    if ! grep -q "^name = \"${name}\"$" "${config}" 2>/dev/null; then
+      printf '\n[[upgrade.component]]\nname = "%s"\ninstall = "tool-copy"\nbinary = "%s"\n' "${name}" "${binary}" >>"${config}"
+      echo "  已补上无状态工具组件 ${name}（install=tool-copy，binary=${binary}）"
+    fi
+  done
 }
 
 MODE=fast
@@ -87,7 +120,7 @@ GWLINKD_LOG="${GWLINKD_HOME}/gwlinkd.log"
 GWLINKD_STATE="${GWLINKD_HOME}/state"
 GWLINKD_PID_FILE="${GWLINKD_HOME}/gwlinkd.pid"
 
-help() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+help() { sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # 读中心配置里的 `admin_token = "..."`。
 admin_token() {
@@ -171,6 +204,8 @@ start_fast() {
     have="$(sed -n 's/^control_center_endpoint[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_CONFIG}" | head -1)"
     if [[ -f "${GWLINKD_STATE}/credential.json" && "${have}" == "${CENTER_ADDR}" ]]; then
       echo "gwlinkd 已注册，复用 ${GWLINKD_CONFIG}（不新建实例）"
+      # 复用不重写配置：确保无状态工具目录在（权威在生成器，别依赖手工加的行）。
+      ensure_tool_components "${GWLINKD_CONFIG}"
     else
       local why
       [[ -f "${GWLINKD_STATE}/credential.json" ]] && why="中心端点 ${have:-?} ≠ ${CENTER_ADDR}" || why="上次注册未完成（无客户端证书）"

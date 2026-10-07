@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.26-alpha] - 2026-10-07
+
+### 变更
+
+- **镜像 tag 跟进**：网关 `v0.3.0-alpha`、前端 `v0.2.0-alpha`。
+- 本轮带来：网关侧**主机指标带上机器身份**（`node_id` / `hostname` / `ip_addresses`，由网关 join 注册表
+  补齐，不往指标标签里塞）；安装包 / 知识库包摘要改为必填。前端主机指标页显示主机名与主地址
+  （多网卡不再铺十几条 IPv6 链路本地地址）。
+
 ## [0.1.25-alpha] - 2026-10-05
 
 ### 变更

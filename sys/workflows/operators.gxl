@@ -24,6 +24,14 @@ mod operators {
       dst  : "./configs/gateway/wist-gateway.toml",
       file : "./configs/gateway/wist-gateway.value.json"
     );
+    // ①c gwlinkd（网关**宿主侧**常驻）的运行配置：备料渲染值 → gx.tpl 渲染。
+    //     与网关同一套机制；**接入券不进渲染值**（由「链接上级」页/gwlinkd 自联时写回 rendered 配置）。
+    gx.cmd ( "./scripts/init-gwlinkd.sh configs/gwlinkd" );
+    gx.tpl (
+      tpl  : "./sys/configs/gwlinkd/gwlinkd.toml.tpl",
+      dst  : "./configs/gwlinkd/gwlinkd.toml",
+      file : "./configs/gwlinkd/gwlinkd.value.json"
+    );
     // ② 前端站点 TLS 证书（页面自己的）：web CA + 由它签的叶。
     //     **不再用 `test -f … ||` 挡住** —— 幂等由脚本自己判（缺 / 换了域名 / 与当前 CA 不对应才重签）；
     //     如果这里短路，改了 WEB_DOMAIN 就永远不会重签（叶的 SAN 里没有新域名，浏览器报域名不匹配）。

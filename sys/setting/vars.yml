@@ -100,3 +100,25 @@ system:
   #   - 包本身的完整性由网关把关（manifest.json 摘要 + 配了验签公钥就验签），下载只保证不残缺
   - name: KNOWLEDGE_PKG_URL
     value: https://github.com/dayu-sec/wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
+
+  # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
+  #    由 sys/configs/gwlinkd/gwlinkd.toml.tpl 在 localize 时渲染到 configs/gwlinkd/gwlinkd.toml
+  #    （运行物，不入库）；渲染值由 scripts/init-gwlinkd.sh 写。
+  #    一次性接入券 `link_token` **不进渲染值**：由「链接上级」页/gwlinkd 自联时写回 rendered 配置。
+  #    center 端点默认空：现场在 values/value.yml 覆盖后跑 `gops sys localize` 即生效。
+  - name: CENTER_ENDPOINT
+    value: ""
+  - name: GWLINKD_GATEWAY_ID
+    value: gw-local
+  # 中心 CA-S 信任锚路径（自签中心必需；公网中心可置空 → gwlinkd 回落系统根）
+  - name: GWLINKD_TRUST_BUNDLE
+    value: ./configs/gwlinkd/control-center.pem
+  # gwlinkd 状态/身份目录（含客户端证书与私钥；**要备份**）
+  - name: GWLINKD_STATE_DIR
+    value: ./configs/gwlinkd/state
+  # 本机网关环回面（页面路才需要；空 = 不渲染该项）
+  - name: GATEWAY_SELF_ENDPOINT
+    value: ""
+  # 环回面信任锚（网关自签 HTTPS 必需；空 = 不渲染该项，用系统根）
+  - name: GATEWAY_SELF_CA
+    value: ""

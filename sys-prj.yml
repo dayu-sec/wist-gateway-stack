@@ -41,6 +41,7 @@ backup:
     - configs/gateway/state/wist-gateway-store.db*
     - configs/gateway/wist-gateway.toml
     - configs/gateway/wist-gateway.value.json
+    - configs/gwlinkd/state
     - configs/web/tls
   rebuild:
     - packages

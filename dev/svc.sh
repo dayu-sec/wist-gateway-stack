@@ -17,9 +17,8 @@
 #     绑 <1024 的端口要 sudo：能免密就用、交互终端上要一次密码、实在要不到就**跳过并告知**
 #     （不拖垮整次 start）。不想碰权限/不需要 agent 面就走 `--no-forward`。
 #     gwlinkd = 网关**宿主侧**常驻（把网关接入上级控制中心）。**轮询网关**、消费「链接上级」页提交的接入请求，
-#     完成 link-upstream/register（此后 mTLS）；委托 `dev/link_local_center.sh --via-gateway`。
-#     它在**默认 start 里**（页面接入靠它拉取）。前提：`GATEWAY_ID` 与中心实例名一致、网关跑过
-#     `dev/setup-domain.sh`（有环回面信任锚）。不想起就走 `--no-gwlinkd`。
+#     完成 link-upstream/register（此后 mTLS）。**配置驱动**：读 <home>/gwlinkd.toml（缺了就生成一份模板）。
+#     它在**默认 start 里**（页面接入靠它拉取）。不想起就走 `--no-gwlinkd`。
 #
 # 同一口径（不再有「有的跳过、有的报错」）：
 #   start：先 `cargo build` 一次（wist-gateway + wist-agentd + wist-gwlinkd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
@@ -39,7 +38,7 @@
 #
 # 可覆盖 env（与旧的分散脚本同口径）：
 #   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward；SKIP_GWLINKD=1 等价 --no-gwlinkd
-#   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
+#   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  WIST_GWLINKD_HOME（默认 <栈根>/dev/configs/gwlinkd）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
 #   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
 #   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
@@ -47,7 +46,6 @@
 #     同一台机器上要有意并行两套时才改它，改了就真的会有两个网关同时在跑）
 #   FORWARD_LISTEN / FORWARD_BIND / FORWARD_TARGET_PORT / FORWARD_PIDFILE / FORWARD_LOG
 #     （可选的 443→网关端口 转发，见下面 forward 组件）
-#   GATEWAY_ID（gwlinkd 在中心侧的实例名；默认 gw-local）  WIST_GWLINKD_HOME（默认 <栈根>/.run/gwlinkd-gateway）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,16 +69,14 @@ WPARSE_BIN="${WPARSE_BIN:-${SCRIPT_DIR}/bin/wparse}"
 WPARSE_PIDFILE="${WPARSE_WORK_ROOT}/data/logs/wparse.pid"
 export WPARSE_VM_ENDPOINT="${WPARSE_VM_ENDPOINT:-http://127.0.0.1:18429}"
 export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001}"
-# ── gwlinkd（页面路：接入上级控制中心的**宿主侧常驻**；随网关走）──
-# 配置/状态在 <栈根>/.run/gwlinkd-gateway（细节见 link_local_center.sh）。它**轮询网关**、
+# ── gwlinkd（接入上级控制中心的**宿主侧常驻**；随网关走）──
+# **配置驱动**：读 <home>/gwlinkd.toml（缺了就生成一份带注释的模板），轮询网关、
 # 消费「链接上级」页提交的接入请求并完成 link-upstream/register，所以排在 gateway 之后起。
 GWLINKD_CRATE="${ROOT_DIR}/wist-gwlinkd"
-GWLINKD_HOME="${WIST_GWLINKD_HOME:-${STACK_ROOT}/.run/gwlinkd-gateway}"
+GWLINKD_HOME="${WIST_GWLINKD_HOME:-${STACK_ROOT}/dev/configs/gwlinkd}"
+GWLINKD_CONFIG="${GWLINKD_HOME}/gwlinkd.toml"
+GWLINKD_LOG="${GWLINKD_HOME}/gwlinkd.log"
 GWLINKD_PIDFILE="${GWLINKD_HOME}/gwlinkd.pid"
-GWLINKD_SCRIPT="${SCRIPT_DIR}/link_local_center.sh"
-# 本网关在中心侧的实例名（= 页面接入物里的 gateway_id）。**不设默认**：留空时由 link_local_center.sh
-# 沿用已配置的身份（首跑才用默认 gw-local）；**显式设了** GATEWAY_ID 才切换/重置。
-GATEWAY_ID="${GATEWAY_ID:-}"
 # ── 可选：端口转发（补上发布态由 docker 提供的那一跳）──
 FORWARD_LISTEN="${FORWARD_LISTEN:-443}"
 FORWARD_BIND="${FORWARD_BIND:-0.0.0.0}"
@@ -669,16 +665,13 @@ stop_gateway() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# 组件：gwlinkd（页面路：把网关接入上级控制中心）
+# 组件：gwlinkd（把网关接入上级控制中心）
 #
 # gwlinkd 是网关**宿主侧**的容器外常驻（CR-003），随网关走 —— 所以它是**本栈**的组件（不是 center-stack）。
 # 它**轮询网关**、消费「链接上级」页提交的接入请求，完成 link-upstream/register，再回报结果（此后走 mTLS）。
-# 真正干活的都在 link_local_center.sh：这里只做「委托 + 已在跑就跳过」。
 #
-# 前提（页面路只在**未注册/首跑**时拉，且 gateway_id 要对得上）：
-#   - GATEWAY_ID 与你在中心建的实例名（= 页面接入物里的 gateway_id）一致（默认 gw-local）；
-#   - 换 GATEWAY_ID 时 link_local_center.sh 会**自动重置**本地身份；
-#   - 网关跑过 `dev/setup-domain.sh`（才有 gateway-ca.crt.pem 作环回面信任锚）。
+# **配置驱动**：读 `${GWLINKD_CONFIG}`（缺了就 `wist-gwlinkd init-config` 生成带注释的模板）。
+# 页面路要在配置里设 `gateway_self_endpoint` + `gateway_self_ca`（否则它不去拉网关）。
 gwlinkd_pid() {
   local pid=""
   if [[ -f "${GWLINKD_PIDFILE}" ]]; then
@@ -694,32 +687,46 @@ gwlinkd_pid() {
 gwlinkd_up() { [[ -n "$(gwlinkd_pid)" ]]; }
 
 start_gwlinkd() {
-  echo "== gwlinkd（页面路：接入上级 / 轮询网关）=="
+  echo "== gwlinkd（接入上级：轮询网关「链接上级」页）=="
   if gwlinkd_up; then
     echo "  已在运行（pid=$(gwlinkd_pid)），跳过。"
     return 0
   fi
-  [[ -x "${GWLINKD_SCRIPT}" ]] || die "缺少 ${GWLINKD_SCRIPT}"
-  # 委托 link_local_center.sh --via-gateway（写配置 + 起常驻）。GATEWAY_ID 只在**显式设了**时才传：
-  # 否则让脚本沿用已配置的身份（免得默认值把已接入的 id 冲掉、误触重置）。
-  if [[ -n "${GATEWAY_ID}" ]]; then
-    WIST_GWLINKD_NO_BUILD=1 GATEWAY_ID="${GATEWAY_ID}" "${GWLINKD_SCRIPT}" --via-gateway
-  else
-    WIST_GWLINKD_NO_BUILD=1 "${GWLINKD_SCRIPT}" --via-gateway
+  local bin="${GWLINKD_CRATE}/target/debug/wist-gwlinkd"
+  [[ -x "${bin}" ]] || die "缺 gwlinkd 二进制：${bin}"
+  mkdir -p "${GWLINKD_HOME}"
+  # 配置驱动：缺配置就生成一份带注释的模板（不含密钥），由运维/页面填入中心地址等。
+  if [[ ! -f "${GWLINKD_CONFIG}" ]]; then
+    "${bin}" init-config "${GWLINKD_CONFIG}"
+    echo "  已生成 gwlinkd 配置模板：${GWLINKD_CONFIG}"
+    echo "  → 接入中心：填 control_center_endpoint（自签中心再填 trust_bundle）；"
+    echo "    页面路再设 gateway_self_endpoint / gateway_self_ca，改完重启本组件。"
   fi
+  WIST_GWLINKD_CONFIG="${GWLINKD_CONFIG}" \
+    nohup "${bin}" run >"${GWLINKD_LOG}" 2>&1 &
+  local pid=$!
+  echo "${pid}" >"${GWLINKD_PIDFILE}"
+  sleep 2
+  if ! pid_alive "${pid}"; then
+    echo "  [warn] gwlinkd 未起来，见 ${GWLINKD_LOG}" >&2
+    rm -f "${GWLINKD_PIDFILE}"
+    return 1
+  fi
+  echo "  gwlinkd 在跑（pid=${pid}）。最近日志："
+  tail -n 2 "${GWLINKD_LOG}" 2>/dev/null || true
 }
 
 stop_gwlinkd() {
   echo "== gwlinkd =="
-  if [[ -x "${GWLINKD_SCRIPT}" ]]; then
-    "${GWLINKD_SCRIPT}" --stop
-    return 0
-  fi
   local pid
   pid="$(gwlinkd_pid)"
-  if [[ -n "${pid}" ]]; then kill "${pid}" 2>/dev/null || true; fi
+  if [[ -n "${pid}" ]]; then
+    kill "${pid}" 2>/dev/null || true
+    echo "  已停止（pid=${pid}）。"
+  else
+    echo "  未在运行。"
+  fi
   rm -f "${GWLINKD_PIDFILE}"
-  echo "  已停。"
 }
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -930,7 +937,7 @@ cmd_status() {
   gwlinkd_pid_val="$(gwlinkd_pid)"
   if [[ -n "${gwlinkd_pid_val}" ]]; then
     gwid="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_HOME}/gwlinkd.toml" 2>/dev/null | head -1)"
-    gwlinkd_state="up   pid=${gwlinkd_pid_val}（页面路 · gateway_id=${gwid:-?}）"
+    gwlinkd_state="up   pid=${gwlinkd_pid_val}（gateway_id=${gwid:-?}）"
   else
     gwlinkd_state="down （页面接入靠它拉取；默认 start 会带上）"
   fi

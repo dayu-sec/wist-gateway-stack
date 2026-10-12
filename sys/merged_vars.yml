@@ -2,9 +2,9 @@ system:
 - name: IMAGE_SPC
   value: ghcr.io/dayu-sec
 - name: GATEWAY_TAG
-  value: v0.3.0-alpha
+  value: v0.9.0-alpha
 - name: WEB_TAG
-  value: v0.2.0-alpha
+  value: v0.6.0-alpha
 - name: VM_TAG
   value: v1.153.0
 - name: WPARSE_IMAGE
@@ -31,8 +31,6 @@ system:
   value: ./configs/gateway
 - name: WEB_NGINX_CONF
   value: ./configs/web/nginx.conf
-- name: WEB_TLS_DIR
-  value: ./configs/web/tls
 - name: WPARSE_WORK_DIR
   value: ./data-plane
 - name: WPARSE_RUN_DATA
@@ -41,6 +39,8 @@ system:
   value: ./data-plane-run/.run
 - name: PACKAGE_DIR
   value: ./packages
+- name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR
+  value: /packages
 - name: KNOWLEDGE_PKG_URL
   value: https://github.com/dayu-sec/wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
 - name: CENTER_ENDPOINT
@@ -54,4 +54,8 @@ system:
 - name: GATEWAY_SELF_ENDPOINT
   value: ''
 - name: GATEWAY_SELF_CA
+  value: ''
+- name: GWLINKD_UPGRADER_PROGRAM
+  value: ''
+- name: GWLINKD_UPGRADE_PROJECT_DIR
   value: ''

@@ -57,8 +57,10 @@ OWNER_GID="${SUDO_GID:-$(id -g)}"
 
 # 目标目录：<相对路径>:<权限>（组统一为 CONTAINER_GID）。
 #   data-plane-run/*：wparse 写运行态与锁；packages：安装包投放目录（容器只读挂载，部署账号写入）；
-#   configs/*：整套现场态（网关读写 store 库/日志、前端渲染产物与页面证书）——全部归部署账号，
+#   configs/*：发布态资源（网关读写 store 库/日志、前端渲染产物）——全部归部署账号，
 #     免得 Docker 先建出 root 属主的目录后部署账号自己都写不动。
+#   identity/*：站点身份（dev/prod 共用，容器只读挂载）—— 证书公开（2755）、私钥目录 2750
+#     （setgid 让宿主 openssl 新签的叶/密钥自动归容器组，否则容器读不到）。
 #   需要容器写的目录 2770（组可写 + setgid）；容器只读的 2755（web 容器是 root，不需要属组）。
 # 边界：只对齐**挂载根与私钥**，不递归内容树 —— `configs/gateway/knowledge/`、`packages/` 里的
 #   文件由打包/投放侧保证可读（644/755），递归 chmod 一个内容树既不安全也没必要。
@@ -71,16 +73,35 @@ TARGET_DIRS=(
   "configs/gateway:2770"
   "configs/gateway/state:2770"
   "configs/web:2755"
-  "configs/web/tls:2755"
+  "identity:2755"
+  "identity/gateway:2755"
+  "identity/gateway/public:2755"
+  "identity/gateway/private:2750"
+  "identity/web:2755"
+  "identity/web/public:2755"
+  "identity/web/private:2750"
 )
 # 目标文件（**存在才处理**，不新建）：
-#   state/*.pem        —— 容器要读（CA / 叶 / 签名私钥）；600 会让容器读不到，故 640。
-#   state/*.srl        —— CA 的序列号文件：宿主 openssl 重新签叶时会写入它，必须归部署账号
-#                         （曾被 root 跑过就会卡住下一次非 root 的签叶 —— 同一类“谁先创建就归谁”）。
-#   wist-gateway.toml  —— 容器要读，且含 admin token，故 640（不是 644）。
+#   私钥 / 签名密钥 / CA 序列号（identity/**/private、configs/gateway/wist-gateway.toml）—— 容器要读，
+#     且含密钥，故 640（不是 644）；宿主 openssl 重签叶时会往 private 写、`.srl` 也归部署账号
+#     （曾被 root 跑过就会卡住下一次非 root 的签叶 —— 同一类“谁先创建就归谁”）。
+#   公开证书（identity/**/public）—— 公开信息，644。
 #   注：`wist-gateway.value.json` 是**渲染源**，容器不读它，保持 init-gateway 的 600，这里不动。
-TARGET_FILES=(configs/gateway/state/*.pem configs/gateway/state/*.srl configs/gateway/wist-gateway.toml)
+TARGET_FILES_SECRET=(
+  identity/gateway/private/*.key.pem
+  identity/gateway/private/*.pkcs8.pem
+  identity/gateway/private/*.srl
+  identity/web/private/*.key.pem
+  identity/web/private/*.srl
+  configs/gateway/wist-gateway.toml
+)
+TARGET_FILES_PUBLIC=(
+  identity/gateway/public/*.crt.pem
+  identity/gateway/public/*.pub.pem
+  identity/web/public/*.crt.pem
+)
 TARGET_FILE_MODE=640
+PUBLIC_FILE_MODE=644
 
 # 另一类：**容器要读写、但属主可能不是容器自己**的文件 —— 目前只有 SQLite 库。
 #   容器建的库是 999:999（属主权限就够）→ **不能碰**，一碰就要提权，等于让每次 localize 都要 sudo；
@@ -117,10 +138,16 @@ for spec in "${TARGET_DIRS[@]}"; do
 done
 
 files_todo=()
-for f in "${TARGET_FILES[@]}"; do
+files_todo_mode=()
+for f in "${TARGET_FILES_SECRET[@]}"; do
   [[ -e "${f}" ]] || continue # glob 不匹配时是字面量，跳过
   [[ -f "${f}" ]] || { echo "  跳过 ${f}（存在但不是普通文件）" >&2; continue; }
-  [[ "$(state_of "${f}")" == "${OWNER_UID}:${CONTAINER_GID}:${TARGET_FILE_MODE}" ]] || files_todo+=("${f}")
+  [[ "$(state_of "${f}")" == "${OWNER_UID}:${CONTAINER_GID}:${TARGET_FILE_MODE}" ]] || { files_todo+=("${f}"); files_todo_mode+=("${TARGET_FILE_MODE}"); }
+done
+for f in "${TARGET_FILES_PUBLIC[@]}"; do
+  [[ -e "${f}" ]] || continue
+  [[ -f "${f}" ]] || { echo "  跳过 ${f}（存在但不是普通文件）" >&2; continue; }
+  [[ "$(state_of "${f}")" == "${OWNER_UID}:${CONTAINER_GID}:${PUBLIC_FILE_MODE}" ]] || { files_todo+=("${f}"); files_todo_mode+=("${PUBLIC_FILE_MODE}"); }
 done
 
 # 库：只要求「容器身份实际能读写」，不强制属主（避免每次都去 chown 容器自己建的库）
@@ -193,11 +220,12 @@ for rel in "${dirs_todo[@]}"; do
   printf '  目录 %s：%s → %s:%s:%s\n' "${rel}" "${before}" "${OWNER_UID}" "${CONTAINER_GID}" "${mode}"
 done
 
-for f in "${files_todo[@]}"; do
+for i in "${!files_todo[@]}"; do
+  f="${files_todo[$i]}"; fmode="${files_todo_mode[$i]}"
   before="$(state_of "${f}")"
   chown "${OWNER_UID}:${CONTAINER_GID}" "${f}"
-  chmod "${TARGET_FILE_MODE}" "${f}"
-  printf '  文件 %s：%s → %s:%s:%s\n' "${f}" "${before}" "${OWNER_UID}" "${CONTAINER_GID}" "${TARGET_FILE_MODE}"
+  chmod "${fmode}" "${f}"
+  printf '  文件 %s：%s → %s:%s:%s\n' "${f}" "${before}" "${OWNER_UID}" "${CONTAINER_GID}" "${fmode}"
 done
 
 # 库：把属主收归部署账号（方便后续备份/删除）、属组交给容器并给属组读写

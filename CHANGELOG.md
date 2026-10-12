@@ -3,6 +3,56 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 变更
+
+- **镜像 tag 跟进**：网关 `v0.9.0-alpha`（新增**接口层配置** `wist-gateway-pub.toml` 支持 —— 本栈配置拆两层依赖它；
+  并新增公开 `GET /api/v1/version` 供页面显示后端版本）。前端 `v0.6.0-alpha`（左下角新增前后端版本块；
+  前端版本 = 发布 tag 注入，后端版本读同一公开端点）。
+- **身份与资源分离：站点身份（CA / 证书 / 私钥 / 对外域名）提到栈根 `identity/`，dev 与发布态共用一份**：
+  - 以前证书/私钥与 store 混在 `configs/gateway/state/`；现在：
+    - `identity/gateway/{public,private}/` —— 证书（公开）/ 私钥（私密）+ `wist-gateway-pub.toml`（对外域名 / 归属）；
+    - `identity/web/{public,private}/` —— 前端站点证书 / 私钥；
+    - `configs/gateway/state/` —— **只剩**每部署一份的 store 库。
+  - 好处：资源树（`configs` / `dev/configs`）在 `sys-prj.yml` 里可**整目录**声明；身份独立且**整体**（含私钥）作 `contract`——可 `gops prj contract export/import`；
+    身份不再各态一份 —— 避免 dev / 发布态各建一套 CA、agent 信任分叉。
+  - **`sys-prj.yml: contract` = 整个 `identity/`（含私钥）**：身份是「证书 + 私钥」一对，**只留公开半不自足**（丢私钥 = 签不出新叶/客户端证书 = 换锚），
+    故让 `contract export` 的归档**独立复原站点身份**。代价：该归档**含私钥 → 按密件处理**（落点要安全 / 离机）。
+  - 网关容器多挂一个只读卷 `identity/gateway → /config/identity`，tpl 里证书路径改 `identity/public|private/...`；
+    web 容器挂 `identity/web → /certs`（nginx 走 `/certs/public|private/...`）。
+  - **升级 / 迁移注意**：老现场的 `configs/gateway/state/*.pem`、`configs/web/tls/*` 需搬到 `identity/` 下对应的 `public|private`
+    子目录；dev 侧 `dev/configs/gateway/identity` 改为指向栈根共享身份的 symlink、`wist-gateway-pub.toml` 同样 symlink。**搬前先备份。**
+  - `scripts/promote-dev-identity.sh` **移除**：身份已共用，无需再从 dev 搬身份（要搬 dev 的 store 库，直接拷 `state/`）。
+- **网关配置拆两层：`wist-gateway.toml`（impl，交付物）+ `wist-gateway-pub.toml`（接口层，现场态）**：
+  “这台网关**对外是什么**”的三个键（`public_base_url` / `tenant_id` / `environment_id`）**移出**主配置模板，
+  改由新增的 `scripts/init-gateway-pub.sh` 写到同目录的 `wist-gateway-pub.toml`（localize 里的 ①'' 步）。
+  该脚本**按缺补齐、已有值一律保留**（可每次 localize 跑，**永不覆盖现场值**）。
+  网关加载时读**两份**（段可重合、**叶子键不许重复**；见 wist-gateway 的 `load_from_path`）。
+  好处：主配置成了**纯渲染物**（升级/重渲可覆盖），对外基址与归属有了**唯一对象** —— `wist-gateway-pub.toml`
+  随之声明进 `sys-prj.yml: contract`（对外契约，见下条；主配置 `wist-gateway.toml` 是渲染物，不入备份）。
+  **升级注意**：已有现场需跑一次 `gops sys localize`（或单独跑该脚本）补出 `wist-gateway-pub.toml`，
+  否则网关会以“缺 `public_base_url`”拒绝启动。dev 侧配置不走这条（仍是单文件），不受影响。
+- **`sys-prj.yml` 跟进 gops 2.3.0**：`preserve:` 更名为 `protect:`；`backup:` 由分级 `{restore, rebuild}`
+  改为**扁平列表**（`packages` 属可重投的“可重建”，不再入表）；新增 `contract:` 声明**不可重建的公开现场事实**：
+  `wist-gateway-pub.toml`（对外域名）+ `configs/gateway/state/*.crt.pem`（与 agentd 的信任契约：
+  `gateway-ca.crt.pem` 是 agent 的信任锚、`agent-ca.crt.pem` 是给 agent 签客户端证书的根）+ `*.pub.pem`
+  （公开验签公钥）+ `configs/web/tls/*.crt.pem`（前端/浏览器的公开证书）。
+  语义自足（声明即自动 `protect` + `backup`），可 `gops prj contract export/import`
+  单独做**可公开携带**的归档。**私钥**（`*.key.pem` / `*.pkcs8.pem`）是私密身份，只走 `backup`，**绝不进 `contract`**。
+  注意：`contract` 路径**不与 `ignore`/`protect` 交叠**，故 `configs/`、`configs/gateway/state`、`configs/web`
+  由“整目录”改为**逐项列出**（私钥材料仍逐条被挡，`--full` 护栏不降级）。`gops prj diagnose` 全绿。
+- **网关配置模板键名精简**：`sys/configs/gateway/wist-gateway.toml.tpl` 的 `[agent]` 段改名为
+  `ca_cert_file` / `ca_key_file` / `bootstrap_ttl_seconds` / `signing_key_file`
+  （与网关新版配置结构同口径）；`scripts/init-gateway.sh` 注释同步。
+- **网关模板补 `[log]`（本进程运行日志）**：模板原先未暴露该段；现给出**活跃**的 `[log]`
+  （`level` / `format` + `file` 与轮转），落文件到已挂载持久化的 `<config>/logs/wist-gateway.log`。
+  注意：网关给了 `file` 就不写 stderr（打开失败才回落 stderr）—— 需要 `docker logs` 看网关自身日志就别配 `file`。
+- **管理 token 从配置里拆出，走密钥文件**：模板的 `admin_api_token` 不再渲染明文，改写
+  `${SEC_ADMIN_TOKEN}`；token 落**栈根 `.wist/sec-value.yml`**（键 `admin_token`，`scripts/init-gateway.sh`
+  缺则生成），compose 把该文件只读挂进容器并 `WIST_GATEWAY_SEC_FILE=/secrets/sec-value.yml`，
+  网关加载时解析。`.wist/` 已 `.gitignore`。（网关侧见 wist-gateway 的 orion-sec 接入。）
+
 ## [0.1.26-alpha] - 2026-10-07
 
 ### 变更

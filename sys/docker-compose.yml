@@ -14,7 +14,8 @@
 #     `gops sys update` → sys/resolved_vars.yml，`gops sys localize` → 同目录 .env。
 #     客户覆盖写 values/value.yml（该文件版本化），不要改生成物。
 #   - 容器内端口/路径/服务名是应用契约，直接写在这里。
-#   - 本栈当前无密钥；如需，用 ${SEC_xxx} 占位，由 `gops run start` 注入、不落盘。
+#   - 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，只读挂进网关容器）；
+#     其它密钥如需，仍可用 `${SEC_xxx}` 占位、由 `gops run start` 注入、不落盘。
 
 # 运行身份（与宿主侧权限的对接口径；改这里要同时改 scripts/align-host-perms.sh 的 CONTAINER_GID）：
 #   两个业务镜像都**固定以 999:999 运行**（gateway 镜像里的 wist、wparse 镜像里的 wparse）。
@@ -121,8 +122,19 @@ services:
     restart: unless-stopped
     environment:
       WIST_GATEWAY_CONFIG: /config/wist-gateway.toml
+      # 管理 token 从密钥文件读（不落配置）：文件里的 `admin_token` → `${SEC_ADMIN_TOKEN}`。
+      WIST_GATEWAY_SEC_FILE: /secrets/sec-value.yml
+      # 接口层（现场态，dev/prod 共用）：对外基址 / 归属。不在主配置旁，故显式指定。
+      WIST_GATEWAY_PUB_CONFIG: /config/identity/public/wist-gateway-pub.toml
     volumes:
       - ${GATEWAY_CONFIG_DIR}:/config
+      # 站点身份（dev/prod 共用，只读）：证书 / 私钥 / 信任锚 / 签名密钥 / 对外配置。
+      # 从资源树拆出（见 sys-prj.yml 的 contract / backup）—— 不可重建，不该跟渲染物一起被升级覆盖。
+      - ./identity/gateway:/config/identity:ro
+      # 密钥目录（只读）：网关用 WIST_GATEWAY_SEC_FILE 读里面的 `sec-value.yml` 解析 `${SEC_...}`。
+      # 挂**目录**而非文件：源缺失时 Docker 只是建出 `.wist/` 目录（本就 gitignore），
+      # 不会把 `sec-value.yml` 建成同名目录让报错变得难懂。文件由 scripts/init-gateway.sh 生成。
+      - ./.wist:/secrets:ro
       # 安装包投放目录（只读）：界面「本地来源」填 /packages/<文件名>。
       # 容器读不到宿主任意路径，本地包必须先落到这个被挂进来的目录。
       - ${PACKAGE_DIR}:/packages:ro
@@ -139,8 +151,8 @@ services:
     restart: unless-stopped
     volumes:
       - ${WEB_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
-      # 页面自己的 TLS 证书（与网关证书分开；由 scripts/init-web-tls.sh 生成）
-      - ${WEB_TLS_DIR}:/certs:ro
+      # 站点身份（dev/prod 共用，只读）：前端公开证书在 /certs/public、私钥在 /certs/private。
+      - ./identity/web:/certs:ro
     ports:
       - "${WEB_PORT}:443"
     depends_on:

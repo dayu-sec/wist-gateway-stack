@@ -37,6 +37,9 @@ x-topology/wist/                  <- $WIST
 # 看各组件当前状态
 ./dev/svc.sh status
 
+# 重启（停 → 起）：改了配置/代码要生效时用（如 setup-domain 后重启 gateway）
+./dev/svc.sh restart gateway
+
 # 停全栈（逆序：gwlinkd → gateway → forward → web → wparse → VM）
 ./dev/svc.sh stop
 ```
@@ -48,11 +51,12 @@ x-topology/wist/                  <- $WIST
 | 起全栈（日常） | `./dev/svc.sh start` |
 | 停全栈 | `./dev/svc.sh stop` |
 | 看状态 | `./dev/svc.sh status` |
-| 只重启前端（gateway 已在跑） | `./dev/svc.sh start web` |
+| 重启某组件 / 全栈（改了配置/代码要生效） | `./dev/svc.sh restart [组件…]`（如 `restart gateway`、`restart web`） |
 | 只停/起某个组件 | `./dev/svc.sh stop web` / `./dev/svc.sh start gateway --no-build` |
-| 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完需重启 gateway**） |
+| 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完 `./dev/svc.sh restart gateway`**） |
 | 不要 agent 面 / 不想碰 sudo | `./dev/svc.sh start --no-forward` |
 | 把本机网关接入本机中心 | 网关页「链接上级」提交接入链接；`./dev/svc.sh start gwlinkd` 把它起起来（见「接入上级」一节） |
+| 断开与中心的连接（回到未接入） | `./dev/unlink-center.sh`（停 gwlinkd → 调 `wist-gwlinkd unlink` → **再起回** gwlinkd；可 `--dry-run`／`--no-restart`；加 `--forget-center` 连中心 CA 也清） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
@@ -139,12 +143,18 @@ gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 
 
 | 组件 | 位置 | 内容 |
 |---|---|---|
-| gateway | `dev/configs/gateway/`（= `$WIST_GATEWAY_HOME`，默认） | `wist-gateway.toml`；`state/`：SQLite 库、TLS 叶证书与信任锚（`gateway-ca.crt.pem`）、Ed25519 签名密钥、`install-package/` |
+| gateway | `dev/configs/gateway/`（= `$WIST_GATEWAY_HOME`，默认） | `wist-gateway.toml`；`state/`：SQLite 库、`install-package/`；证书/私钥/信任锚/签名密钥在**共享身份**（见下） |
 | wist-agentd | `~/.wist-agentd/` | `agentd.toml`、`tasks/`、`state/agent_runtime.json`（`wic_` 凭据）、`log/` |
 | wparse | `data-plane/{data,.run}/` | 运行期数据与临时产物 |
 
 **开发态与发布态的网关持久数据是分开两个目录**：开发态在 `<栈根>/dev/configs/gateway`，发布态挂
 `configs/gateway/`（两边 `victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等不同，分开才各自自洽）。
+
+**但「站点身份」是共享的、不分两态**：CA/证书/私钥/对外域名放**栈根** `identity/gateway/{public,private}/`，
+开发态与发布态**共用同一份** —— 这样换域名/重签叶证书只动共享身份一次，两边看到的是同一张 CA 与信任锚。
+网关配置里对证书/私钥/信任锚/签名密钥的引用是相对配置目录的 `identity/public/…`、`identity/private/…`，
+靠 `dev/configs/gateway/identity` 这个 **symlink**（指向 `<栈根>/identity/gateway`）解析过去；
+`svc.sh start gateway` 与 `setup-domain.sh` 都会确保该 symlink 存在。资源（库/日志/渲染配置/运行态）仍每态一份。
 
 > ⚠️ 两边的 `admin_api_token` **不同**：登录开发态页面（`web`，默认 `:5174`）要用
 > **开发态** `dev/configs/gateway/wist-gateway.toml` 里那个，**不是**发布态容器用的
@@ -157,9 +167,8 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 改后缀而来），启动时自动迁移。若库中**既无 Agent 也无注册 token**，会一次性导入遗留的
 `wist-gateway-store.json` 并改名为 `*.imported`；导入失败只告警，不阻断启动。
 
-> **备份/恢复**：身份 PEM 不可再生，必备；**库**里存着 agent 的**凭据**（bearer token）—— 要让老 agent
-> 无感回来必须连库一起搬（`--level restore` + `--no-config`，或直接用 `scripts/promote-dev-identity.sh`）。
-> `./scripts/backup-gateway.sh --from <栈根>/dev/configs/gateway`；详见根 README「备份与恢复」。
+> **备份/恢复**：身份（`identity/gateway/{public,private}`）是**站点级、dev/prod 共用**的唯一一份，随栈根走；dev 自己的**运行态**是 `dev/configs/gateway/state/` 下的 **store 库** —— 库里有 agent 的**凭据**（bearer token），要让老 agent 无感回来就把它一起带上。
+> `./scripts/backup-gateway.sh --from .`（身份 + 发布态渲染配置）；dev 的库（`dev/configs/gateway/state/`）按需另拷。详见根 README「备份与恢复」。
 
 ## 环境变量覆盖
 
@@ -236,8 +245,8 @@ gwlinkd 是网关**宿主侧**的容器外常驻（设计 `gateway-secure-regist
 
 - `control_center_endpoint`：中心地址（自签中心再填 `trust_bundle` 指向它的 CA）；
 - 页面路还要设 `gateway_self_endpoint`（网关环回面，如 `https://127.0.0.1:3000`）+ `gateway_self_ca`
-  （环回面信任锚；网关自签 HTTPS 必需，通常是 `state/gateway-ca.crt.pem`，没跑过 `setup-domain.sh`
-  时可退回自签叶证书 `state/admin-tls.crt.pem`）。
+  （环回面信任锚；网关自签 HTTPS 必需，通常是 `identity/public/gateway-ca.crt.pem`，没跑过 `setup-domain.sh`
+  时可退回自签叶证书 `identity/public/admin-tls.crt.pem`）。
 
 gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `first_run`）。所以：
 
@@ -247,8 +256,36 @@ gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `fir
 
 可覆盖 env：仅 `WIST_GWLINKD_HOME`（gwlinkd 配置 + 状态目录，默认 `<栈根>/dev/configs/gwlinkd`）。
 
+**发布 ②（中心下发 agent 包）还要配两项**（dev 网关跑在**宿主**上，没有容器 —— 两项填**同一个绝对目录**即可）：
+`agent_package_drop_dir = "<绝对路径，如 <栈根>/packages>"` + `agent_package_container_dir = "<同一个绝对路径>"`。
+这两项指向 gwlinkd 取包后落地、再交给网关的目录；未配则 ② 计划会 fail-closed。交付成功后按
+`agent_package_drop_keep`（缺省 12）保留最新若干份。
+
 > 现象对照：页面「待 wist-gwlinkd 拉取」一直不动 → 没有 gwlinkd 在轮询这个网关（没配
 > `gateway_self_endpoint`，或那个 gwlinkd 已注册、不在首跑）。
+
+**断开连接**：`./dev/unlink-center.sh`。与 Center 的连接就是 gwlinkd 手里的**注册态**（客户端证书 / 链接
+配置 / 注册券 / 身份 / 实例）加 `gwlinkd.toml` 的 `link_token`。这个清理**归 gwlinkd 自己**（`wist-gwlinkd
+unlink`，与 link/`onboard` 同一个 owner），dev 脚本只负责**停进程 + 调它**，不做文件手术：
+
+```bash
+./dev/svc.sh stop gwlinkd                     # 运行中的常驻会拒绝 unlink（它会不停写回凭据）
+WIST_GWLINKD_CONFIG=dev/configs/gwlinkd/gwlinkd.toml \
+  ../wist-gwlinkd/target/debug/wist-gwlinkd unlink
+```
+
+`./dev/unlink-center.sh [--dry-run] [--forget-center] [--no-restart]` 把三步包在一起：**停 gwlinkd →
+unlink → 再起回 gwlinkd**（起回后回到「等待页面接入请求」，组件不断档；要它就那样停着加 `--no-restart`）。
+它**不**在 Center 侧注销（那是 center-stack 的事）：同一 `gateway_id` **无法**再接入 —— 中心没有「重置
+实例」，而且这是**有意**的安全边界（不把「初始化后可再置备」的口子开出来）。要再接入就在 Center **新建
+实例**、用它的**新 `gateway_id`**（gwlinkd 按新接入链接自动切过去）。**不做备份**：要留底就自己先拷
+`state/`（在 dev，重接即可，备份意义有限）。
+
+**中心信任锚（`trust_bundle` 指向的 PEM）默认保留** —— 它不是连接（是中心的公开证书），换接时页面会再给。
+unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以页面接入把 CA 写进 `state/`（并把 `trust_bundle`
+重指进去）时也**不需要搬动**它。要连这张 CA 也一起清（真正「忘掉这个中心」）就加 `--forget-center`：
+它删**已知的每一份**中心 CA（`trust_bundle` 指向的、`state/` 里的副本、配置目录下的旧副本，去重）
+（之后 gwlinkd 会 WARN 回落公共根，重接时写回新 CA 即恢复）。
 
 ## 注意事项
 
@@ -278,8 +315,8 @@ gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `fir
 8. **`setup-domain.sh` 要求 gateway 已起过**（需配置存在）；它是**按需一次性工具**，不属于 `svc.sh start` 流程。
    本机 agentd 的重新注册**不需要专门脚本**：持有效客户端证书的 agent 会在网关库丢失/换域名时**自动**重新登记（mTLS 自愈）；真要手动重注册，用 `wist-agentd` 自带的 `enroll`。
 9. **信任锚走文件，且通常是 CA 根**：配置里是 `[agent] trust_bundle_file`（相对配置目录）。`svc.sh`
-   每次启动把它指向 `state/gateway-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），没有 CA 时才退回叶证书
-   自身 `state/admin-tls.crt.pem`。旧的 `trust_bundle = """…"""` 内联写法已迁移（新配置不认它，留着会以
+   每次启动把它指向共享身份里的 `identity/public/gateway-ca.crt.pem`（跑过 `setup-domain.sh` 就有这张小 CA），没有 CA 时才退回叶证书
+   自身 `identity/public/admin-tls.crt.pem`。旧的 `trust_bundle = """…"""` 内联写法已迁移（新配置不认它，留着会以
    `missing field trust_bundle_file` 起不来）。叶证书是 `CA:FALSE` 形态（`CA:TRUE` 会被 rustls 以
    `CaUsedAsEndEntity` 拒收）。**只要锚（CA）不变，轮换叶证书 / 换域名是安全的**，agent 无感；
    只有**锚变了**（换 CA、删掉 `gateway-ca.*` 重生成）才需要**重跑安装**刷新 agentd 内嵌的 `trust_bundle`
@@ -295,8 +332,9 @@ gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `fir
 ```
 dev/
   README.md                     # 本文件
-  svc.sh                        # 唯一入口：start / stop / status（管 vm/wparse/web/forward/gateway/gwlinkd）
-  setup-domain.sh               # 按需：把网关切到某域名（建/复用 dev CA + 签叶证书 + 改配置）
+  svc.sh                        # 唯一入口：start / stop / restart / status（管 vm/wparse/web/forward/gateway/gwlinkd）
+  setup-domain.sh               # 按需：把网关切到某域名（在共享身份 identity/gateway 建/复用 CA + 签叶证书 + 改配置）
+  unlink-center.sh              # 按需：断开与 Center 的连接（停 gwlinkd → unlink → 起回；见「接入上级」小节）
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
   tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）
     align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）
@@ -305,4 +343,5 @@ dev/
 
 ../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）
   conf/ connectors/ topology/ models/
+../identity/gateway/{public,private}/  # 站点身份（CA/证书/私钥）—— dev 与发布态共用；dev home 的 identity 是它的 symlink
 ```

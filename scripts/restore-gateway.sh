@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # 恢复网关的**身份与（按需的）管理面状态**到目标目录 —— 典型场景：**在新机器**上用别处带来的备份重建。
 #
+# 备份条目相对**栈根**（见 `backup-gateway.sh`）：身份 PEM 在 `identity/gateway/{public,private}`，
+# 资源（配置 / 库）在 `configs/gateway/` —— 所以解包目标也应给**栈根**（默认 `.`），条目按原相对路径落回。
+#
 # 解包内容取决于备份级别（见 `backup-gateway.sh --level`）：可重建级 = 身份 PEM + 渲染好的
 # `wist-gateway.toml`；可还原级再带 `wist-gateway.value.json` 与 SQLite 库。库里存着 agent 的
 # **凭据**（bearer token / 客户端证书）——要「老 agent 无感连上」就得把它带上（见 `--no-config`）。
 #
 # 用法：
-#   scripts/restore-gateway.sh <备份文件> [--to <配置目录>] [--pem-only|--no-config] [--force] [--restart]
+#   scripts/restore-gateway.sh <备份文件> [--to <栈根>] [--pem-only|--no-config] [--force] [--restart]
 #
 #   <备份文件>   scripts/backup-gateway.sh 产出的 .tar.gz
-#   --to <目录>  解包目标（默认 configs/gateway；开发态传 ~/.wist-gateway）
-#   --pem-only   只恢复 **PEM**（CA / 叶证书 / 签名私钥）；跳过 toml / value.json / 库
-#   --no-config  恢复除**配置**（toml / value.json）外的一切 = 身份 PEM + SQLite 库；配置保留目标的
+#   --to <栈根>  解包目标（默认 `.`，即栈根；条目相对栈根，别给 `configs/gateway`）
+#   --pem-only   只恢复 **PEM**（CA / 叶证书 / 签名私钥，即 `identity/**/*.pem`）；跳过 toml / value.json / 库
+#   --no-config  恢复除**配置**（`configs/gateway/wist-gateway.{toml,value.json}`）外的一切 = 身份 PEM + SQLite 库
 #   --force      覆盖目标里已存在的同名文件（默认拒绝）
 #   --restart    解包后重启网关（走 stack 根的 compose：docker compose … restart gateway）
 set -euo pipefail
@@ -20,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 COMPOSE=(docker compose --project-directory "${STACK_ROOT}" -f "${STACK_ROOT}/sys/docker-compose.yml")
 
-DEFAULT_DIR="configs/gateway"
+DEFAULT_DIR="."   # 默认解包到栈根：条目相对栈根（见头注释）
 FILE=""
 TO=""
 FORCE=0
@@ -36,7 +39,8 @@ die() {
 abspath() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")") || printf '%s\n' "$1"; }
 
 usage() {
-  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  # 打印文件头的**注释块**（第 2 行起，到首个非注释行为止）：加/删注释行都不用改行号。
+  awk 'NR>=2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 positional=()
@@ -80,17 +84,18 @@ done
 FILE="${positional[0]:-}"
 [[ -n "${FILE}" ]] || {
   usage >&2
-  die "用法：$0 <备份文件> [--to <配置目录>] [--pem-only|--no-config] [--force] [--restart]"
+  die "用法：$0 <备份文件> [--to <栈根>] [--pem-only|--no-config] [--force] [--restart]"
 }
 [[ "${PEM_ONLY}" == "1" && "${NO_CONFIG}" == "1" ]] && die "--pem-only 与 --no-config 只能二选一"
 [[ -f "${FILE}" ]] || die "找不到备份文件：${FILE}"
 DEST="${TO:-${positional[1]:-${DEFAULT_DIR}}}"
 
-mkdir -p "${DEST}/state"
+# 目标根不存在就先建；`identity/...`、`configs/gateway/...` 的中间目录由 tar 解包时自建。
+mkdir -p "${DEST}"
 
 # 选取要恢复的条目（跳过目录项）。两种过滤：
-#   --pem-only  只留 `.pem`（身份材料）；
-#   --no-config 丢掉**配置**（toml / value.json），其余（身份 PEM + SQLite 库）全要。
+#   --pem-only  只留 `.pem`（身份材料；条目形如 `identity/gateway/private/*.pem`，按后缀判即可）；
+#   --no-config 丢掉**配置**（`configs/gateway/wist-gateway.toml` 与 `.value.json`），其余（身份 PEM + SQLite 库）全要。
 entries=()
 skipped=()
 entry=""
@@ -100,9 +105,13 @@ while IFS= read -r entry; do
     skipped+=("${entry}")
     continue
   fi
-  if [[ "${NO_CONFIG}" == "1" && ( "${entry}" == "wist-gateway.toml" || "${entry}" == "wist-gateway.value.json" ) ]]; then
-    skipped+=("${entry}")
-    continue
+  if [[ "${NO_CONFIG}" == "1" ]]; then
+    case "${entry}" in
+      configs/gateway/wist-gateway.toml | configs/gateway/wist-gateway.value.json | */configs/gateway/wist-gateway.toml | */configs/gateway/wist-gateway.value.json)
+        skipped+=("${entry}")
+        continue
+        ;;
+    esac
   fi
   entries+=("${entry}")
 done < <(tar -tzf "${FILE}")
@@ -144,8 +153,8 @@ fi
 
 # 恢复出来的文件属主/属组是「解包账号」，**不是**容器 gid（tar 以非 root 解包无法保留属主）——
 # 不对齐的话，发布态网关读不到私钥（症状与首次安装的 Permission denied 一模一样）。
-# 这一步幂等，且只动属主/属组/权限，不碰内容。
-if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}/configs/gateway" && -x "${SCRIPT_DIR}/align-host-perms.sh" ]]; then
+# 这一步幂等，且只动属主/属组/权限，不碰内容。只在目标是**栈根**时自动跑（对齐脚本以栈根为参数）。
+if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}" && -x "${SCRIPT_DIR}/align-host-perms.sh" ]]; then
   echo
   echo "  对齐宿主属主/权限（容器以 999:999 运行）："
   "${SCRIPT_DIR}/align-host-perms.sh" "${STACK_ROOT}" ||

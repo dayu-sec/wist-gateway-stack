@@ -15,6 +15,10 @@
 #   GWLINKD_STATE_DIR      gwlinkd 状态/身份目录
 #   GATEWAY_SELF_ENDPOINT  本机网关环回面（页面路用；空 = 不配）
 #   GATEWAY_SELF_CA        环回面信任锚（空 = 系统根）
+#   PACKAGE_DIR            发布 ② 投放目录（宿主侧；渲染为**绝对路径**给 gwlinkd；空 = 不渲染）
+#   GWLINKD_AGENT_PACKAGE_CONTAINER_DIR  该目录在网关容器里的路径（缺省 /packages，与 compose 挂载一致）
+#   GWLINKD_UPGRADER_PROGRAM   升级执行器程序（空 = 不渲染，用 gwlinkd 缺省 gops）
+#   GWLINKD_UPGRADE_PROJECT_DIR  gops 工程根（含 ops-prj.yml；空 = 不渲染；**绝对路径**）
 #
 # 幂等：内容与当前一致就跳过（不碰 mtime）。
 set -euo pipefail
@@ -35,11 +39,17 @@ python3 - "$VALUE_JSON" \
   "${GWLINKD_TRUST_BUNDLE:-./configs/gwlinkd/control-center.pem}" \
   "${GWLINKD_STATE_DIR:-./configs/gwlinkd/state}" \
   "${GATEWAY_SELF_ENDPOINT:-}" \
-  "${GATEWAY_SELF_CA:-}" <<'PY'
+  "${GATEWAY_SELF_CA:-}" \
+  "${PACKAGE_DIR:-./packages}" \
+  "${GWLINKD_AGENT_PACKAGE_CONTAINER_DIR:-/packages}" \
+  "${GWLINKD_UPGRADER_PROGRAM:-}" \
+  "${GWLINKD_UPGRADE_PROJECT_DIR:-}" <<'PY'
 import json, os, sys, tempfile
 
 path = sys.argv[1]
-center, gwid, trust, state, self_ep, self_ca = sys.argv[2:8]
+center, gwid, trust, state, self_ep, self_ca, drop_raw, container, upgrader, upgrade_dir = sys.argv[2:12]
+# 投放目录给 gwlinkd 用：空 = 不启用（不渲染）；相对路径 → **绝对**（gwlinkd 的 cwd 不定）。
+drop = "" if not drop_raw else (drop_raw if os.path.isabs(drop_raw) else os.path.abspath(drop_raw))
 value = {
     "center_endpoint": center,
     "gateway_id": gwid,
@@ -47,6 +57,10 @@ value = {
     "state_dir": state,
     "gateway_self_endpoint": self_ep,
     "gateway_self_ca": self_ca,
+    "agent_package_drop_dir": drop,
+    "agent_package_container_dir": container,
+    "upgrader_program": upgrader,
+    "upgrade_project_dir": upgrade_dir,
 }
 text = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 if os.path.exists(path):

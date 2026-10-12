@@ -9,8 +9,9 @@
 #
 # 说明：
 #   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
-#   - 密钥不要写在这里：compose 里用 ${SEC_xxx} 占位，运行时由 `gops run start`
-#     从 ~/.galaxy/sec_value.yml 注入，不落盘（本栈当前无密钥）；
+#   - 密钥不要写在这里：网关 admin token 走密钥文件（栈根 `.wist/sec-value.yml`）；
+#     其它密钥如需，compose 里用 ${SEC_xxx} 占位，运行时由 `gops run start`
+#     从 ~/.galaxy/sec_value.yml 注入，不落盘；
 #   - 容器内端口/路径/服务名是应用契约，直接写在 sys/docker-compose.yml 里。
 system:
   # 镜像源前缀：国内走腾讯云 TCR，境外改成 ghcr.io/dayu-sec
@@ -19,9 +20,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.3.0-alpha
+    value: v0.9.0-alpha
   - name: WEB_TAG
-    value: v0.2.0-alpha
+    value: v0.6.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.153.0
@@ -69,9 +70,8 @@ system:
   # 前端站点配置：由 sys/configs/web/nginx.conf.tpl 在 localize 时渲染到此（运行物，不入库）
   - name: WEB_NGINX_CONF
     value: ./configs/web/nginx.conf
-  # 前端站点 TLS 证书目录（运行时生成，不入库；web 容器挂到 /certs；用页面自己的证书，与网关分开）
-  - name: WEB_TLS_DIR
-    value: ./configs/web/tls
+  # 站点身份（dev/prod 共用，不入库）：证书/私钥在 ./identity/{gateway,web}/{public,private}；
+  # 由 compose 直接以字面量挂载（不在变量里——位置固定在栈根，不随部署环境变）。
   # wparse 工程：配置的**唯一源**（conf/connectors/models/topology），开发态与发布态共用
   - name: WPARSE_WORK_DIR
     value: ./data-plane
@@ -91,6 +91,12 @@ system:
   # 安装包投放目录（宿主），只读挂到网关容器的 /packages；界面「本地来源」填 /packages/<文件名>
   - name: PACKAGE_DIR
     value: ./packages
+
+  # 发布 ②「Agent 包交付」：上面那份投放目录在**网关容器里**的路径（发给网关的 package_url 前缀，
+  # 与 compose 的 `- ${PACKAGE_DIR}:/packages:ro` 一致）。gwlinkd 取到中心包后落到 PACKAGE_DIR，
+  # 再把 `<此项>/<文件名>` 交给网关托管。
+  - name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR
+    value: /packages
 
   # 初始知识库内容包（出厂自带）：`gops sys localize` 时用 gx.download 拉到 PACKAGE_DIR（packages/），
   # 网关「知识库」页的「本地来源」填 /packages/<文件名> 即可录入（录入 ≠ 生效，还要点激活）。
@@ -121,4 +127,12 @@ system:
     value: ""
   # 环回面信任锚（网关自签 HTTPS 必需；空 = 不渲染该项，用系统根）
   - name: GATEWAY_SELF_CA
+    value: ""
+  # gwlinkd 的升级执行器（空 = 不渲染该项，用 gwlinkd 内置缺省 `gops`）
+  - name: GWLINKD_UPGRADER_PROGRAM
+    value: ""
+  # gops 工程根（含 ops-prj.yml）：gwlinkd 用 gops 执行器升级时**必配**（gops 从 cwd 解析工程）。
+  # 空 = 不渲染该项（不驱动 gops 升级，收到升级计划会明确报缺配）。
+  # **用绝对路径**：gwlinkd 作为系统服务运行时 cwd 不确定。
+  - name: GWLINKD_UPGRADE_PROJECT_DIR
     value: ""

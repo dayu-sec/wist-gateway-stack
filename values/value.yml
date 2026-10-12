@@ -1,0 +1,4 @@
+# 现场值覆盖（版本化）：覆盖 sys/setting/vars.yml 的产品默认值。
+# 本栈的站点域名 —— 它同时是：网关叶证书的 SAN、网关 public_base_url 的 host、
+# 以及 agent 的 [control_plane] endpoint 主机。改这里（不是 vars.yml）才不被产品默认值带走。
+WEB_DOMAIN: c-dev01.test.gw.jingang.cloud

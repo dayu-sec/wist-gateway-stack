@@ -4,8 +4,8 @@
 # 身份模型（重要）：
 #   本脚本建立**两把 CA**：
 #     - **网关 CA**：网关的**叶证书由它签发**，agent 的信任锚 = 它
-#       （wist-gateway.toml 的 agent.trust_bundle_file → state/gateway-ca.crt.pem）。
-#     - **agent CA**（state/agent-ca.*）：专门签发 **agent 的客户端证书**（mTLS）。有了它，注册时
+#       （wist-gateway.toml 的 agent.trust_bundle_file → identity/public/gateway-ca.crt.pem）。
+#     - **agent CA**（identity/{public,private}/agent-ca.*）：专门签发 **agent 的客户端证书**（mTLS）。有了它，注册时
 #       网关才会用 agent 交的 CSR 签一张客户端证书，agent 也就能在**换库/丢库后自动重建身份**。
 #   两把分开：网关 CA 管「agent 信不信网关」，agent CA 管「网关信不信 agent」。
 #   CA 私钥不可再生 —— 丢了：网关 CA = 换锚 = 全队 agent 重装；agent CA = agent 不能自动重建，
@@ -16,19 +16,23 @@
 # 用法：
 #   scripts/init-gateway.sh [目标目录]        # 默认 configs/gateway
 #
+# 身份与资源：**证书/私钥**写**站点身份**（栈根 `identity/gateway/{public,private}`，dev/prod 共用）；
+#   `configs/gateway/state/` 只剩每部署一份的 store 库（由网关运行时建），不在本脚本职责内。
 # 生成物：
-#   <dir>/state/gateway-ca.key.pem / gateway-ca.crt.pem     # 网关 CA（锚；私钥务必备份）
-#   <dir>/state/agent-ca.key.pem / agent-ca.crt.pem         # agent CA（签 agent 客户端证书；同样务必备份）
-#   <dir>/state/admin-tls.key.pem / admin-tls.crt.pem       # 网关叶证书（CA 签；可轮换）
-#   <dir>/state/install-script-signing-ed25519.pkcs8.pem    # 安装脚本签名私钥（Ed25519 PKCS#8；可重生）
-#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（token / url）
+#   <栈根>/identity/gateway/public/gateway-ca.crt.pem           # 网关 CA 证书（锚；公开）
+#   <栈根>/identity/gateway/private/gateway-ca.key.pem          # 网关 CA 私钥（**务必备份**）
+#   <栈根>/identity/gateway/{public,private}/agent-ca.*.pem     # agent CA（签 agent 客户端证书；私钥务必备份）
+#   <栈根>/identity/gateway/{public,private}/admin-tls.*.pem    # 网关叶证书（CA 签；可轮换）
+#   <栈根>/identity/gateway/private/install-script-signing-ed25519.pkcs8.pem  # 安装脚本签名私钥（可重生）
+#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（url / 验签公钥）
+#   <栈根>/.wist/sec-value.yml                                # 密钥文件：admin token（网关 `${SEC_ADMIN_TOKEN}` 的来源）
 #
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
 #   sys/configs/gateway/wist-gateway.toml.tpl 渲染（gx.tpl）。
 #
 # 权限/属主：本脚本按最小权限创建（私钥与值文件都是 600）。**属组和「放给容器的读权限」不在这里做**
 #   —— 那由 scripts/align-host-perms.sh 统一对齐（属主=部署账号、属组=容器 gid 999、
-#   *.pem 与 wist-gateway.toml 640）。单独跑本脚本后，记得再跑一次它，否则容器读不到私钥。
+#   私钥 640 / 公开证书 644）。单独跑本脚本后，记得再跑一次它，否则容器读不到私钥。
 #
 # 可覆盖 env：
 #   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时依次从已有 value.json、
@@ -46,14 +50,22 @@ set -euo pipefail
 DIR="${1:-configs/gateway}"
 mkdir -p "$DIR"
 DIR="$(cd "$DIR" && pwd)"
+ROOT="$(cd "$DIR/../.." && pwd)"
+SEC_DIR="$ROOT/.wist"
+SEC_FILE="$SEC_DIR/sec-value.yml"
+# 站点身份（dev/prod 共用）：证书/私钥放栈根 `identity/gateway/{public,private}`，**不进资源树**。
+# `state/` 只剩每部署一份的 store 库（由网关运行时建），这里仅确保它存在。
+IDENTITY="$ROOT/identity/gateway"
+PUB="$IDENTITY/public"
+PRIV="$IDENTITY/private"
 STATE="$DIR/state"
-mkdir -p "$STATE"
+mkdir -p "$PUB" "$PRIV" "$STATE"
 
-CA_KEY="$STATE/gateway-ca.key.pem"
-CA_CRT="$STATE/gateway-ca.crt.pem"
-TLS_CRT="$STATE/admin-tls.crt.pem"
-TLS_KEY="$STATE/admin-tls.key.pem"
-SIGNING_KEY="$STATE/install-script-signing-ed25519.pkcs8.pem"
+CA_KEY="$PRIV/gateway-ca.key.pem"
+CA_CRT="$PUB/gateway-ca.crt.pem"
+TLS_CRT="$PUB/admin-tls.crt.pem"
+TLS_KEY="$PRIV/admin-tls.key.pem"
+SIGNING_KEY="$PRIV/install-script-signing-ed25519.pkcs8.pem"
 VALUE_JSON="$DIR/wist-gateway.value.json"
 CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
@@ -79,7 +91,7 @@ fi
 
 # ① 网关 CA（信任锚；只建一次，绝不重生成）
 if [[ -n "${GATEWAY_CA_CRT:-}" && -n "${GATEWAY_CA_KEY:-}" ]]; then
-  # 导入外部 CA 到 state/（配置固定引用 state/gateway-ca.crt.pem，故复制而非外链）
+  # 导入外部 CA 到 identity/public（配置固定引用 identity/public/gateway-ca.crt.pem，故复制而非外链）
   cp -f "$GATEWAY_CA_CRT" "$CA_CRT"
   cp -f "$GATEWAY_CA_KEY" "$CA_KEY"
   chmod 600 "$CA_KEY"
@@ -99,8 +111,8 @@ fi
 # ①b agent CA（签发 **agent 客户端证书** 的专用 CA；与网关 CA **分开两把**）
 #     存在它，注册时网关才会用 agent 交的 CSR 签客户端证书（mTLS）；也是「换库/丢库后 agent 能
 #     **自动重建**」的前提（网关按证书重建登记）。幂等：只建一次，绝不重生成。
-AGENT_CA_KEY_FILE="$STATE/agent-ca.key.pem"
-AGENT_CA_CRT_FILE="$STATE/agent-ca.crt.pem"
+AGENT_CA_KEY_FILE="$PRIV/agent-ca.key.pem"
+AGENT_CA_CRT_FILE="$PUB/agent-ca.crt.pem"
 AGENT_CA_DAYS="${AGENT_CA_DAYS:-3650}"
 if [[ -n "${AGENT_CA_CRT:-}" && -n "${AGENT_CA_KEY:-}" ]]; then
   cp -f "$AGENT_CA_CRT" "$AGENT_CA_CRT_FILE"
@@ -143,8 +155,8 @@ else
     openssl genrsa -out "$TLS_KEY" 2048 >/dev/null 2>&1
     chmod 600 "$TLS_KEY"
   fi
-  ext="$STATE/.leaf.ext"
-  csr="$STATE/.leaf.csr"
+  ext="$PRIV/.leaf.ext"
+  csr="$PRIV/.leaf.csr"
   cat >"$ext" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
@@ -152,13 +164,14 @@ extendedKeyUsage=serverAuth
 subjectAltName=DNS:${domain},DNS:localhost,IP:127.0.0.1
 EOF
   openssl req -new -key "$TLS_KEY" -out "$csr" -subj "/CN=${domain}" >/dev/null 2>&1
-  openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+  openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" \
+    -CAserial "$PRIV/gateway-ca.crt.srl" -CAcreateserial \
     -out "$TLS_CRT" -days "$CERT_DAYS" -sha256 -extfile "$ext" >/dev/null 2>&1
   rm -f "$csr" "$ext"
   note "已用 CA 签发网关叶证书：${TLS_CRT}（SAN: ${domain},localhost,127.0.0.1）"
 fi
 
-# ③ 安装脚本签名私钥（Ed25519 PKCS#8）。模板 `install_script_signing_private_key_file` 引用它，
+# ③ 安装脚本签名私钥（Ed25519 PKCS#8）。模板 `signing_key_file` 引用它，
 #    网关启动要求它**存在**（缺失即拒绝启动）；缺则生成（幂等）。可重生：只影响之后签发的安装脚本。
 if [[ -f "$SIGNING_KEY" ]]; then
   note "签名私钥已存在，跳过：${SIGNING_KEY}"
@@ -168,28 +181,47 @@ else
   note "已生成安装脚本签名私钥（Ed25519 PKCS#8）：${SIGNING_KEY}"
 fi
 
-# ④ 渲染值文件（public_base_url / victoria_metrics_url / admin token / 验签公钥）。
-#    **admin token 一旦生成必须持久**（只在缺失时整份新建）；
-#    但 victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变，**每轮都对齐到当前值**，
+# ④ 管理 token 落**密钥文件**（不进配置、不进 value.json）：网关用 `${SEC_ADMIN_TOKEN}` 从它解析
+#    （键 `admin_token` → orion-sec 规范成 `SEC_ADMIN_TOKEN`）。**确保该键存在**：
+#    文件缺就建、键缺就补（已有的其它键与已有 token 一律保留）。
+mkdir -p "$SEC_DIR"
+[[ -f "$SEC_FILE" ]] || : >"$SEC_FILE"
+python3 - "$SEC_FILE" <<'PY'
+import re, secrets, sys
+path = sys.argv[1]
+with open(path) as handle:
+    text = handle.read()
+if re.search(r"(?m)^\s*admin_token\s*:", text):
+    print("  复用已有 admin_token：", path)
+    sys.exit(0)
+if text and not text.endswith("\n"):
+    text += "\n"
+text += f"admin_token: {secrets.token_hex(24)}\n"
+with open(path, "w") as handle:
+    handle.write(text)
+print("  已在密钥文件写入 admin_token：", path)
+PY
+chmod 600 "$SEC_FILE"
+
+# ⑤ 渲染值文件（public_base_url / victoria_metrics_url / 验签公钥）——**不含 admin token**。
+#    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变，**每轮都对齐到当前值**，
 #    免得「复用已有 value.json」把错值一直带进渲染结果（症状：网关跑在宿主时「数据采集」页 502）。
 if [[ ! -f "$VALUE_JSON" ]]; then
   if [[ -z "$domain" ]]; then
     echo "需要域名才能新建 ${VALUE_JSON}（public_base_url）：设 WEB_DOMAIN=<域名> 再跑，或用 \`gops sys localize\`" >&2
     exit 1
   fi
-  token="$(openssl rand -hex 24)"
   cat >"$VALUE_JSON" <<EOF
 {
   "public_base_url": "https://${domain}",
-  "victoria_metrics_url": "${VM_URL}",
-  "admin_api_token": "${token}"
+  "victoria_metrics_url": "${VM_URL}"
 }
 EOF
   chmod 600 "$VALUE_JSON"
-  note "已生成值文件：${VALUE_JSON}（admin token 已随机生成）"
+  note "已生成值文件：${VALUE_JSON}"
 else
   command -v python3 >/dev/null 2>&1 || {
-    echo "需要 python3 才能更新 ${VALUE_JSON}（就地改键、保住已生成的 admin token）" >&2
+    echo "需要 python3 才能更新 ${VALUE_JSON}" >&2
     exit 1
   }
   python3 - "$VALUE_JSON" "$VM_URL" <<'PY'
@@ -198,11 +230,15 @@ import json, os, sys, tempfile
 path, vm_url = sys.argv[1], sys.argv[2]
 with open(path) as handle:
     value = json.load(handle)
-if value.get("victoria_metrics_url", "") == vm_url:
-    print(f"  值文件已是 victoria_metrics_url={vm_url!r}，跳过")
+# admin token 已迁到密钥文件（`.wist/sec-value.yml`）：就地从 value.json 里清掉。
+changed = "admin_api_token" in value
+value.pop("admin_api_token", None)
+if value.get("victoria_metrics_url", "") != vm_url:
+    value["victoria_metrics_url"] = vm_url
+    changed = True
+if not changed:
+    print(f"  值文件已是最新（victoria_metrics_url={vm_url!r}），跳过")
     sys.exit(0)
-value["victoria_metrics_url"] = vm_url
-# 原子替换，并保持 0600（它装着 admin token，别因为改写把权限放宽）。
 directory = os.path.dirname(os.path.abspath(path))
 fd, tmp = tempfile.mkstemp(dir=directory, prefix=".value-", suffix=".json")
 with os.fdopen(fd, "w") as handle:

@@ -22,8 +22,8 @@
 # 对发布制品验过：指纹 502d6b90a96afb0b…，与 wist-knowledge v0.1.1 的 .sig 对得上。
 #
 # 启用 / 关掉：
-#   启用：给上面任一个来源（或直接把公钥拷成 <dir>/state/knowledge-signing.pub.pem）→ 跑 localize
-#   关掉：删掉 <dir>/state/knowledge-signing.pub.pem → 再跑 localize
+#   启用：给上面任一个来源（或直接把公钥拷成 identity/gateway/public/knowledge-signing.pub.pem）→ 跑 localize
+#   关掉：删掉 identity/gateway/public/knowledge-signing.pub.pem → 再跑 localize
 #
 # ⚠️ 启用后网关会**拒收未签名 / 验不过**的包（`package_signature_invalid`）——
 #    换公钥后**必须**让发布侧用对应私钥重签、重新发布，旧包会录不进去。
@@ -32,7 +32,8 @@ set -euo pipefail
 DIR="${1:-configs/gateway}"
 STACK_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VALUE_JSON="${DIR}/wist-gateway.value.json"
-TARGET="${DIR}/state/knowledge-signing.pub.pem"
+# 验签公钥是**公开**事实，归站点身份（identity/public，dev/prod 共用），不进资源树的 state/。
+TARGET="${STACK_ROOT}/identity/gateway/public/knowledge-signing.pub.pem"
 VENDORED="${STACK_ROOT}/sys/keys/knowledge-signing.pub.pem"
 SIBLING="${STACK_ROOT}/../wist-knowledge/keys/knowledge-signing.pub.pem"
 
@@ -49,7 +50,7 @@ if [[ -z "$SRC" && -f "$SIBLING" ]]; then
   SRC="$SIBLING"
 fi
 
-mkdir -p "${DIR}/state"
+mkdir -p "$(dirname -- "${TARGET}")"
 
 if [[ -n "$SRC" ]]; then
   [[ -f "$SRC" ]] || {
@@ -84,7 +85,7 @@ if [[ ! -f "$VALUE_JSON" ]]; then
 fi
 
 want=""
-[[ -f "$TARGET" ]] && want="state/knowledge-signing.pub.pem"
+[[ -f "$TARGET" ]] && want="identity/public/knowledge-signing.pub.pem"
 python3 - "$VALUE_JSON" "$want" <<'PY'
 import json, os, sys, tempfile
 

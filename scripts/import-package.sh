@@ -16,7 +16,7 @@
 #   PACKAGE_DIR     投放目录（默认 ./packages）
 #   AGENTD_PKG_DIR  --latest 的来源目录（默认 ../wist-agentd/target/package）
 #   GATEWAY_URL     管理面基址（默认取 configs/gateway/wist-gateway.value.json 的 public_base_url）
-#   ADMIN_TOKEN     管理面 token（默认取同一 value.json 的 admin_api_token）
+#   ADMIN_TOKEN     管理面 token（默认取密钥文件 .wist/sec-value.yml 的 admin_token）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +25,8 @@ cd "${STACK_ROOT}"
 
 PACKAGE_DIR="${PACKAGE_DIR:-./packages}"
 VALUE_JSON="${STACK_ROOT}/configs/gateway/wist-gateway.value.json"
+# admin token 已从 value.json 移到密钥文件（键 admin_token → SEC_ADMIN_TOKEN）。
+SEC_FILE="${WIST_GATEWAY_SEC_FILE:-${STACK_ROOT}/.wist/sec-value.yml}"
 AGENTD_PKG_DIR="${AGENTD_PKG_DIR:-${STACK_ROOT}/../wist-agentd/target/package}"
 
 SET=0
@@ -92,10 +94,13 @@ url="${GATEWAY_URL:-}"
 token="${ADMIN_TOKEN:-}"
 if [[ -f "$VALUE_JSON" ]]; then
   [[ -n "$url" ]] || url="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VALUE_JSON" | head -n1)"
-  [[ -n "$token" ]] || token="$(sed -n 's/.*"admin_api_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VALUE_JSON" | head -n1)"
+fi
+if [[ -z "$token" && -f "${SEC_FILE}" ]]; then
+  token="$(sed -n 's/^[[:space:]]*admin_token:[[:space:]]*//p' "${SEC_FILE}" | head -n1)"
+  token="${token%\"}"; token="${token#\"}"; token="${token%\'}"; token="${token#\'}"
 fi
 [[ -n "$url" ]] || { echo "需要 GATEWAY_URL（或 value.json 的 public_base_url）" >&2; exit 1; }
-[[ -n "$token" ]] || { echo "需要 ADMIN_TOKEN（或 value.json 的 admin_api_token）" >&2; exit 1; }
+[[ -n "$token" ]] || { echo "需要 ADMIN_TOKEN（或密钥文件 ${SEC_FILE} 的 admin_token）" >&2; exit 1; }
 
 if [[ "$DRY_RUN" == 1 ]]; then
   echo "[dry-run] POST ${url%/}/api/v1/admin/agent/install-package {\"package_url\":\"${container_path}\",\"package_sha256\":\"sha256:${sha}\"}"

@@ -1,6 +1,6 @@
 # wist-gateway-web 站点配置**模板**（handlebars，由 localize 渲染）。
 # src: 本文件（sys/configs/web/nginx.conf.tpl）
-# dst: configs/web/nginx.conf（sys/docker-compose.yml 把它挂到 /etc/nginx/conf.d/default.conf；证书目录挂到 /certs）
+# dst: configs/web/nginx.conf（sys/docker-compose.yml 把它挂到 /etc/nginx/conf.d/default.conf；站点身份目录 identity/web 挂到 /certs）
 # 渲染值：configs/web/nginx.value.json（scripts/init-web-conf.sh 从环境变量 WEB_DOMAIN 生成）
 #
 # 职责：443 上终止 TLS + 托管前端静态产物 + SPA 深链回退 + 把 /api 反代到网关容器。
@@ -11,8 +11,8 @@ server {
     listen 443 ssl;
     server_name {{web_domain}};
 
-    ssl_certificate     /certs/web-tls.crt.pem;
-    ssl_certificate_key /certs/web-tls.key.pem;
+    ssl_certificate     /certs/public/web-tls.crt.pem;
+    ssl_certificate_key /certs/private/web-tls.key.pem;
 
     root /usr/share/nginx/html;
     index index.html;

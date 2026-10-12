@@ -5,8 +5,10 @@
 # 网关持久数据在 `<栈根>/dev/configs/gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
 #
 # 用法：
-#   ./dev/svc.sh start [组件…] [--no-build] [--no-forward] [--dry-run]
-#   ./dev/svc.sh stop  [组件…]
+#   ./dev/svc.sh start   [组件…] [--no-build] [--no-forward] [--no-gwlinkd] [--dry-run]
+#   ./dev/svc.sh stop    [组件…]
+#   ./dev/svc.sh restart [组件…] [--no-build] [--no-forward] [--no-gwlinkd] [--dry-run]
+#                        # 停所选组件（逆序）再起回（正序）—— 「改了配置/代码要生效」用它
 #   ./dev/svc.sh status
 #   ./dev/svc.sh token    # 打印**开发态**网关的 admin token 与出处（登录/管理 API 用）
 #
@@ -24,15 +26,17 @@
 #   start：先 `cargo build` 一次（wist-gateway + wist-agentd + wist-gwlinkd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
 #          每个组件**已在运行则跳过**；按 vm → wparse → web → forward → gateway → gwlinkd 顺序；
 #          各组件**全部后台常驻**（不随本脚本退出/关终端而停）；起完就返回。
-#          **start 从不接管/杀已经在跑的进程**（包括 gateway）—— 要重启就先 `stop` 再 `start`。
+#          **start 从不接管/杀已经在跑的进程**（包括 gateway）—— 要重启就用 `restart`（= 停 + 起）。
 #   stop ：按 start 的**逆序**停；未在跑的是 no-op。
+#   restart：对所选组件**先停（逆序）再起（正序）**；flags 与 start 同口径（默认会 `cargo build` 一次）。
 #   status：只读，打印各组件的当前状态。
 #
 # 例：
 #   ./dev/svc.sh start                  # 全栈（日常；含 443 转发 + gwlinkd）
 #   ./dev/svc.sh start --no-forward --no-gwlinkd   # 不要 agent 面 / 不接入上级
-#   ./dev/svc.sh start web              # 只重启前端（gateway 已在跑时）
-#   ./dev/svc.sh start gateway --no-build
+#   ./dev/svc.sh restart web            # 只重启前端（gateway 已在跑时）
+#   ./dev/svc.sh restart gateway --no-build   # 改了网关配置/代码后重启网关
+#   ./dev/svc.sh restart                # 全栈重启
 #   ./dev/svc.sh stop web gateway
 #   ./dev/svc.sh status
 #
@@ -57,6 +61,15 @@ WIST_KNOWLEDGE_DIR="${WIST_KNOWLEDGE_DIR:-${ROOT_DIR}/wist-knowledge}"
 
 # ── 控制面 gateway ──
 GW_HOME="${WIST_GATEWAY_HOME:-${STACK_ROOT}/dev/configs/gateway}"
+# 站点身份（CA/证书/私钥/信任锚/签名密钥）放**栈根** `identity/`，dev 与发布态共用同一份。
+# GW_HOME 下用 `identity` symlink 指过去，于是配置里的相对路径（identity/public|private/...）从 dev home 即可解析。
+# 资源（store/logs/content）仍各态一份，留在 GW_HOME 下，不放共享身份。
+GW_IDENTITY="${STACK_ROOT}/identity/gateway"
+IDENTITY_PUBLIC="${GW_IDENTITY}/public"
+IDENTITY_PRIVATE="${GW_IDENTITY}/private"
+IDENTITY_LINK="${GW_HOME}/identity"
+# 管理 token 走密钥文件（配置里写 `${SEC_ADMIN_TOKEN}`，值放这里；与发布态同一机制）。
+GATEWAY_SEC_FILE="${WIST_GATEWAY_SEC_FILE:-${STACK_ROOT}/.wist/sec-value.yml}"
 GATEWAY_PIDFILE="${GATEWAY_PIDFILE:-/tmp/wist-gateway.pid}"
 # ── 前端 web ──
 WEB_URL="${WEB_URL:-http://127.0.0.1:5174}"
@@ -90,7 +103,8 @@ VM_URL="${VM_URL:-http://127.0.0.1:18429}"
 COMPOSE=(docker compose --project-directory "${STACK_ROOT}" -f "${STACK_ROOT}/sys/docker-compose.yml")
 
 usage() {
-  sed -n '3,50p' "${BASH_SOURCE[0]}" | sed 's/^#[[:space:]]\{0,1\}//'
+  # 打印文件头的**注释块**（第 3 行起，到首个非注释行为止）：加/删注释行都不用改行号。
+  awk 'NR>=3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 die() {
@@ -107,6 +121,42 @@ pid_alive() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"
+}
+
+# 确保 dev home 里指向**栈根共享身份**的 symlink 存在（缺则建）：
+#   · `identity` —— 配置里写相对配置目录的 `identity/public|private/...`，靠它落到共享身份；
+#   · `wist-gateway-pub.toml` —— 接口层（对外域名/归属）也在共享身份里，用 symlink 让网关的
+#     “配置同目录的 pub.toml”默认查找命中它（于是 dev 与发布态共用同一个域名）。
+ensure_identity_link() {
+  local identity_target pub_target
+  identity_target="$(python3 - "${GW_HOME}" "${GW_IDENTITY}" <<'PY'
+import os, sys
+print(os.path.relpath(sys.argv[2], sys.argv[1]))
+PY
+  )"
+  pub_target="$(python3 - "${GW_HOME}" "${GW_IDENTITY}/public/wist-gateway-pub.toml" <<'PY'
+import os, sys
+print(os.path.relpath(sys.argv[2], sys.argv[1]))
+PY
+  )"
+  mkdir -p "${GW_HOME}"
+  ensure_symlink "${IDENTITY_LINK}" "${identity_target}" "identity"
+  ensure_symlink "${GW_HOME}/wist-gateway-pub.toml" "${pub_target}" "wist-gateway-pub.toml"
+}
+
+# 建/修正一个 symlink；若同名位置是普通文件则拒绝（别把现场值静默顶掉）。
+ensure_symlink() {
+  local link="$1" target="$2" label="$3"
+  if [[ -L "${link}" ]]; then
+    [[ "$(readlink "${link}")" == "${target}" ]] && return 0
+    echo "  修正 ${label} symlink：$(readlink "${link}") → ${target}"
+    ln -sfn "${target}" "${link}"
+  elif [[ -e "${link}" ]]; then
+    die "${link} 已存在且不是 symlink —— 它应指向 ${target}（请先手工处理）"
+  else
+    ln -s "${target}" "${link}"
+    echo "  已建 ${label} symlink：${link} → ${target}"
+  fi
 }
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -302,6 +352,10 @@ start_web() {
   port="$(web_port)"
   export WARP_INSIGHT_WEB_PROXY_TARGET="${WARP_INSIGHT_WEB_PROXY_TARGET:-$(web_proxy_target)}"
 
+  # admin token 一律由使用者在管理页面手填（存浏览器 sessionStorage，请求时作 Bearer 发出）。
+  # web / dev server 都不碰 token：不读配置、不读 env 抠 token、不往页面注入，避免
+  # 「拿占位符或错 token 发请求 → 401 → 限流」。取 token 用 `./dev/svc.sh token`。
+
   # 子 shell + exec：$! 即 npm 的 pid。
   (
     cd "${WEB_DIR}"
@@ -374,8 +428,9 @@ build_binaries() {
 
 # 生成/迁移网关配置。每次启动都做：
 #   - 缺配置 → `wist-gateway init-config` 生成（含随机 admin token）；
-#   - 信任锚写 `[agent] trust_bundle_file`（优先 gateway-ca.crt.pem，退回叶证书）；迁移旧的内联
-#     `trust_bundle = """…"""` 写法（新配置不认它，留着会以 missing field 起不来）。
+#   - 证书/私钥/信任锚/签名密钥的路径指向**共享身份** `identity/public|private`（而不是 dev home 的
+#     state/）；信任锚写 `[agent] trust_bundle_file`（优先 gateway-ca.crt.pem，退回叶证书）；
+#     迁移旧的内联 `trust_bundle = """…"""` 写法（新配置不认它，留着会以 missing field 起不来）。
 # 注：安装包**不再是配置项**（`agent.package_file` 已删）—— 它只有「管理面录入」一个来源，
 #     在「安装包」页录本仓 agentd 二进制的路径即可（dev 态直接填宿主路径）。
 ensure_gateway_config() {
@@ -389,16 +444,24 @@ ensure_gateway_config() {
   fi
 
   # ① 信任锚走文件（[agent] trust_bundle_file）。旧名 dev-ca.* → 统一为 gateway-ca.*
-  #    （内容不变，锚不变；与发布态同名，便于直接对拷）。
-  if [[ -f "${GW_HOME}/state/dev-ca.crt.pem" && ! -f "${GW_HOME}/state/gateway-ca.crt.pem" ]]; then
-    mv -f "${GW_HOME}/state/dev-ca.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem"
-    [[ -f "${GW_HOME}/state/dev-ca.key.pem" ]] && mv -f "${GW_HOME}/state/dev-ca.key.pem" "${GW_HOME}/state/gateway-ca.key.pem"
+  #    （内容不变，锚不变；与发布态同名，便于直接对拷）。身份已拆到共享目录：
+  #    老的 state/dev-ca.*（或新目录里的 dev-ca.*）一并搬进共享身份再改名。
+  local old_crt="" old_key="" base
+  for base in "${IDENTITY_PUBLIC}" "${IDENTITY_PRIVATE}" "${GW_HOME}/state"; do
+    [[ -f "${base}/dev-ca.crt.pem" ]] && old_crt="${base}/dev-ca.crt.pem"
+    [[ -f "${base}/dev-ca.key.pem" ]] && old_key="${base}/dev-ca.key.pem"
+  done
+  if [[ -n "${old_crt}" && ! -f "${IDENTITY_PUBLIC}/gateway-ca.crt.pem" ]]; then
+    mv -f "${old_crt}" "${IDENTITY_PUBLIC}/gateway-ca.crt.pem"
+    [[ -n "${old_key}" ]] && mv -f "${old_key}" "${IDENTITY_PRIVATE}/gateway-ca.key.pem"
   fi
-  python3 - "${GW_HOME}/state/admin-tls.crt.pem" "${GW_HOME}/state/gateway-ca.crt.pem" "${config}" "${VM_URL}" <<'PY'
+  python3 - "${IDENTITY_PUBLIC}/admin-tls.crt.pem" "${IDENTITY_PUBLIC}/gateway-ca.crt.pem" "${config}" "${VM_URL}" <<'PY'
 import os, re, sys
 leaf, ca, path, vm_url = sys.argv[1:5]
+# 锚 = 网关 CA 根（跑过 setup-domain.sh / init-gateway 就有），没有才退回叶证书。
 anchor = ca if os.path.exists(ca) else leaf
-anchor_rel = os.path.join("state", os.path.basename(anchor))
+# 身份在共享身份（identity/）：配置里写相对配置目录的路径，经 dev home 的 identity symlink 落到栈根。
+anchor_rel = os.path.join("identity", "public", os.path.basename(anchor))
 with open(path) as handle:
     lines = handle.read().splitlines()
 kept, index = [], 0
@@ -414,6 +477,43 @@ while index < len(lines):
     kept.append(line)
     index += 1
 text = "\n".join(kept) + "\n"
+
+# 旧 `[agent]` 键名 → 新名（配置结构重命名；见 wist-gateway CHANGELOG）。只改键名、留值。
+for old, new in {
+    "agent_ca_cert_file": "ca_cert_file",
+    "agent_ca_key_file": "ca_key_file",
+    "bootstrap_token_ttl_seconds": "bootstrap_ttl_seconds",
+    "install_script_signing_private_key_file": "signing_key_file",
+    "install_script_signing_key_file": "signing_key_file",
+}.items():
+    text = re.sub(rf"(?m)^([ \t]*){re.escape(old)}([ \t]*=)", rf"\g<1>{new}\g<2>", text)
+# `signing_key_file` 是必填键（无默认）：老配置完全没有时，按模板默认补一行。
+if not re.search(r"(?m)^\s*signing_key_file\s*=", text):
+    default_signing = 'signing_key_file = "identity/private/install-script-signing-ed25519.pkcs8.pem"'
+    text, replaced = re.subn(r"(?m)^(\[agent\]\s*)$", lambda m: m.group(1) + "\n" + default_signing, text, count=1)
+    if replaced != 1:
+        sys.exit("配置里找不到 [agent] 段，无法写入 signing_key_file")
+
+# 证书/私钥/信任锚/签名密钥：真身在**共享身份**（栈根 identity/），配置里写相对配置目录的路径
+# （经 dev home 的 identity symlink 落地）。store/logs/content 仍留 dev home，不动。
+cert_dirs = {
+    "gateway-ca.crt.pem": "identity/public",
+    "agent-ca.crt.pem": "identity/public",
+    "admin-tls.crt.pem": "identity/public",
+    "knowledge-signing.pub.pem": "identity/public",
+    "gateway-ca.key.pem": "identity/private",
+    "agent-ca.key.pem": "identity/private",
+    "admin-tls.key.pem": "identity/private",
+    "install-script-signing-ed25519.pkcs8.pem": "identity/private",
+}
+
+def _to_identity(match):
+    name = match.group(2)
+    dest = cert_dirs.get(name)
+    return match.group(0) if dest is None else f'{match.group(1)}{dest}/{name}"'
+
+text = re.sub(r'(=[ \t]*")state/([^"/]+)"', _to_identity, text)
+
 setting = f'trust_bundle_file = "{anchor_rel}"'
 if re.search(r"(?m)^trust_bundle_file\s*=", text):
     text = re.sub(r"(?m)^trust_bundle_file\s*=.*$", setting, text, count=1)
@@ -440,8 +540,59 @@ print(f"  trust_bundle_file = {anchor_rel}")
 print(f"  victoria_metrics_url = {vm_url}")
 PY
 
+  # ③ 管理 token：迁到密钥文件（`.wist/sec-value.yml`），配置改写为 `${SEC_ADMIN_TOKEN}`。
+  ensure_gateway_secret "${config}"
+
   # ② 策展内容（wist-knowledge 是创作源，拷到配置目录就近引用；找不到知识库仓就跳过）
   ensure_content_files
+}
+
+# 管理 token 的**密钥文件**化：值落 `<栈根>/.wist/sec-value.yml`（键 `admin_token`），
+# 配置里只留 `${SEC_ADMIN_TOKEN}`；网关启动时用 `WIST_GATEWAY_SEC_FILE` 指过去解析（见 `secret_dict`）。
+ensure_gateway_secret() {
+  local config="$1"
+  mkdir -p "$(dirname "${GATEWAY_SEC_FILE}")"
+
+  # 现有**字面** token（老配置 / init-config 生成的）优先迁入；否则随机。
+  # 确保 `admin_token` 键存在（文件缺则建、键缺则补；已有其它键与已有 token 一律保留）。
+  [[ -f "${GATEWAY_SEC_FILE}" ]] || : >"${GATEWAY_SEC_FILE}"
+  local literal
+  literal="$(sed -n 's/^[[:space:]]*admin_api_token[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  python3 - "${GATEWAY_SEC_FILE}" "${literal}" <<'PY'
+import re, secrets, sys
+path, literal = sys.argv[1], sys.argv[2]
+with open(path) as handle:
+    text = handle.read()
+if re.search(r"(?m)^\s*admin_token\s*:", text):
+    print("  复用已有 admin_token：", path)
+    sys.exit(0)
+token = literal if literal and literal != "${SEC_ADMIN_TOKEN}" else secrets.token_hex(24)
+if text and not text.endswith("\n"):
+    text += "\n"
+text += f"admin_token: {token}\n"
+with open(path, "w") as handle:
+    handle.write(text)
+print("  已在密钥文件写入 admin_token：", path)
+PY
+  chmod 600 "${GATEWAY_SEC_FILE}"
+
+  # 配置统一改写为 `${SEC_ADMIN_TOKEN}`（无论原来是字面还是已占位）。
+  python3 - "${config}" <<'PY'
+import re, sys
+path = sys.argv[1]
+with open(path) as handle:
+    text = handle.read()
+setting = 'admin_api_token = "${SEC_ADMIN_TOKEN}"'
+if re.search(r"(?m)^admin_api_token\s*=", text):
+    text = re.sub(r"(?m)^admin_api_token\s*=.*$", setting, text, count=1)
+else:
+    text, n = re.subn(r"(?m)^(\[server\]\s*)$", lambda m: m.group(1) + "\n" + setting, text, count=1)
+    if n != 1:
+        sys.exit("配置里找不到 [server] 段，无法写入 admin_api_token")
+with open(path, "w") as handle:
+    handle.write(text)
+print("  admin_api_token = ${SEC_ADMIN_TOKEN}（值在密钥文件）")
+PY
 }
 
 ensure_content_files() {
@@ -485,8 +636,12 @@ PY
 }
 
 ensure_admin_tls_cert() {
-  local state_dir="${GW_HOME}/state"
-  local cert="${state_dir}/admin-tls.crt.pem"
+  # 叶证书/私钥落**共享身份**（公开证书进 public，私钥进 private），与 setup-domain.sh 同一份。
+  local cert="${IDENTITY_PUBLIC}/admin-tls.crt.pem"
+  local key="${IDENTITY_PRIVATE}/admin-tls.key.pem"
+  local ca_crt="${IDENTITY_PUBLIC}/gateway-ca.crt.pem"
+  local ca_key="${IDENTITY_PRIVATE}/gateway-ca.key.pem"
+  mkdir -p "${IDENTITY_PUBLIC}" "${IDENTITY_PRIVATE}"
   require_cmd openssl
   if [[ -f "${cert}" ]] && cert_is_end_entity "${cert}"; then
     return 0
@@ -494,14 +649,41 @@ ensure_admin_tls_cert() {
   if [[ -f "${cert}" ]]; then
     echo "  已有 TLS 证书不是合法叶证书（basicConstraints 非 CA:FALSE），重新生成"
   else
-    echo "  生成网关自签 TLS 证书（叶证书形态）"
+    echo "  生成网关 TLS 叶证书"
   fi
-  openssl req -x509 -newkey rsa:2048 -nodes \
-    -keyout "${state_dir}/admin-tls.key.pem" -out "${cert}" -days 365 -subj "/CN=localhost" \
-    -addext "basicConstraints=critical,CA:FALSE" \
-    -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
-    -addext "extendedKeyUsage=serverAuth" \
-    -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
+  local ext="${IDENTITY_PRIVATE}/.admin-tls.ext"
+  cat >"${ext}" <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=IP:127.0.0.1,DNS:localhost
+EOF
+  if [[ -f "${ca_crt}" && -f "${ca_key}" ]]; then
+    # 有共享网关 CA 就用它签：锚保持稳定，换库/换域名不换锚（已装 agent 无感）。
+    # 私钥是耗材：缺则生成，已有则复用（轮换应是刻意的，不该是脚本的副作用）。
+    if [[ ! -f "${key}" ]]; then
+      openssl genrsa -out "${key}" 2048 >/dev/null 2>&1
+      chmod 600 "${key}"
+    fi
+    local csr="${IDENTITY_PRIVATE}/.admin-tls.csr.pem"
+    openssl req -new -key "${key}" -out "${csr}" -subj "/CN=localhost" >/dev/null 2>&1
+    # 序列号文件（.srl）也落私钥目录（不在公开的 CA 证书目录里）。
+    openssl x509 -req -in "${csr}" -CA "${ca_crt}" -CAkey "${ca_key}" \
+      -CAserial "${IDENTITY_PRIVATE}/gateway-ca.crt.srl" -CAcreateserial \
+      -out "${cert}" -days 365 -sha256 -extfile "${ext}" >/dev/null 2>&1
+    rm -f "${csr}" "${ext}"
+    echo "  已用共享 CA 签出 TLS 叶证书：${cert}"
+  else
+    # 没有 CA 才自签：此时叶证书同时是信任锚（换域名 = 换锚 = 所有 agent 要重装）。
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "${key}" -out "${cert}" -days 365 -subj "/CN=localhost" \
+      -addext "basicConstraints=critical,CA:FALSE" \
+      -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+      -addext "extendedKeyUsage=serverAuth" \
+      -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
+    rm -f "${ext}"
+    echo "  已自签 TLS 叶证书：${cert}（无共享 CA）"
+  fi
 }
 
 cert_is_end_entity() {
@@ -572,6 +754,7 @@ start_gateway() {
   require_cmd python3
   require_cmd lsof
 
+  ensure_identity_link
   ensure_gateway_config
   ensure_admin_tls_cert
 
@@ -590,6 +773,7 @@ start_gateway() {
   # pidfile 记**网关自身**的 pid（不再记承载进程 —— 没有承载进程了）；两处 `exec` 保证 `$!` 就是它。
   (
     export WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml"
+    export WIST_GATEWAY_SEC_FILE="${GATEWAY_SEC_FILE}"
     exec nohup "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1
   ) &
   local pid=$!
@@ -686,6 +870,33 @@ gwlinkd_pid() {
 
 gwlinkd_up() { [[ -n "$(gwlinkd_pid)" ]]; }
 
+# 发布 ②「Agent 包交付」：dev 网关在宿主、无容器 → 缺这两项就以 <栈根>/packages 补上（两项同一绝对目录）。
+# 幂等：已配就跳过。缺了会让 gwlinkd 收到 push-agent-package 计划时报「未配置 agent_package_drop_dir」。
+ensure_gwlinkd_agent_package() {
+  if grep -q '^[[:space:]]*agent_package_drop_dir[[:space:]]*=' "${GWLINKD_CONFIG}"; then
+    return 0
+  fi
+  local drop="${STACK_ROOT}/packages"
+  mkdir -p "${drop}"
+  python3 - "${GWLINKD_CONFIG}" "${drop}" <<'PY'
+import sys
+path, drop = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+insert = [
+    "",
+    "# 发布 ②「Agent 包交付」：dev 网关在宿主、无容器 → 两项填同一绝对目录",
+    'agent_package_drop_dir = "%s"' % drop,
+    'agent_package_container_dir = "%s"' % drop,
+]
+idx = next((i for i, line in enumerate(lines) if line.strip().startswith("[[")), len(lines))
+lines = lines[:idx] + insert + lines[idx:]
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("\n".join(lines) + "\n")
+print("  已补 ② 投放目录配置：", path)
+PY
+}
+
 start_gwlinkd() {
   echo "== gwlinkd（接入上级：轮询网关「链接上级」页）=="
   if gwlinkd_up; then
@@ -702,6 +913,8 @@ start_gwlinkd() {
     echo "  → 接入中心：填 control_center_endpoint（自签中心再填 trust_bundle）；"
     echo "    页面路再设 gateway_self_endpoint / gateway_self_ca，改完重启本组件。"
   fi
+  # 发布 ② 交付：dev 下缺 agent_package_drop_dir 就补上（<栈根>/packages，两项同一绝对目录）。
+  ensure_gwlinkd_agent_package
   WIST_GWLINKD_CONFIG="${GWLINKD_CONFIG}" \
     nohup "${bin}" run >"${GWLINKD_LOG}" 2>&1 &
   local pid=$!
@@ -951,27 +1164,25 @@ cmd_status() {
 # 它的 token 是**另一个**；人很容易照错那份去登录。本命令只认开发态 home。
 cmd_token() {
   local config="${GW_HOME}/wist-gateway.toml"
-  if [[ ! -f "${config}" ]]; then
-    die "找不到开发态网关配置：${config}（还没起过网关？先 ./dev/svc.sh start gateway）"
-  fi
+  [[ -f "${config}" ]] || die "找不到开发态网关配置：${config}（还没起过网关？先 ./dev/svc.sh start gateway）"
+  [[ -f "${GATEWAY_SEC_FILE}" ]] || die "找不到密钥文件：${GATEWAY_SEC_FILE}（先 ./dev/svc.sh start gateway）"
   local token listen base
-  token="$(sed -n 's/^[[:space:]]*admin_api_token[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  token="$(sed -n 's/^[[:space:]]*admin_token:[[:space:]]*//p' "${GATEWAY_SEC_FILE}" | head -1)"
+  token="${token%\"}"; token="${token#\"}"; token="${token%\'}"; token="${token#\'}"
   listen="$(sed -n 's/^[[:space:]]*listen_addr[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
-  base="$(sed -n 's/^[[:space:]]*public_base_url[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
-  [[ -n "${token}" ]] || die "在 ${config} 里没找到 admin_api_token"
+  base="$(sed -n 's/^[[:space:]]*public_base_url[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GW_HOME}/wist-gateway-pub.toml" | head -1)"
+  [[ -n "${token}" ]] || die "在 ${GATEWAY_SEC_FILE} 里没找到 admin_token"
   cat <<EOF
 开发态网关 admin Bearer token（登录「${WEB_URL}」/ 直接打管理 API 都用它）：
 
   ${token}
 
-  读取自： ${config}
-           ← 开发态（本机进程）的配置；网关 home = ${GW_HOME}
+  读取自： ${GATEWAY_SEC_FILE}（密钥文件，键 admin_token）
+           ← 开发态（本机进程）；网关 home = ${GW_HOME}；配置里只写 \${SEC_ADMIN_TOKEN}
   监听：   ${listen:-?}
   对外基址： ${base:-?}
 
-提示：仓库里的 <栈根>/configs/gateway/wist-gateway.toml 是**发布态（容器）**配置
-      （本地渲染生成、已被 .gitignore 忽略），token 与上面这份**不同** ——
-      本机跑的是开发态，请用上面这个。
+提示：发布态 token 是另一把（同样在密钥文件里），与上面这份**不同** —— 本机跑的是开发态，用上面这个。
 EOF
 }
 
@@ -1029,69 +1240,89 @@ for c in "${COMPONENTS[@]}"; do
 done
 [[ ${#selected[@]} -gt 0 ]] || die "没有选中任何组件"
 
+# 停所选组件（逆序）。stop 与 restart 共用。
+cmd_stop_selected() {
+  echo "停止开发态组件（逆序）：$(
+    printf '%s ' "${selected[@]}" | awk '{for (i=NF; i>0; i--) printf "%s%s", $i, (i>1?" ":"\n")}'
+  )"
+  echo
+  for i in $(seq $((${#selected[@]} - 1)) -1 0); do
+    case "${selected[$i]}" in
+      vm) stop_vm ;;
+      wparse) stop_wparse ;;
+      web) stop_web ;;
+      forward) stop_forward ;;
+      gateway) stop_gateway ;;
+      gwlinkd) stop_gwlinkd ;;
+    esac
+    echo
+  done
+}
+
+# 起所选组件（正序）。start 与 restart 共用。
+cmd_start_selected() {
+  require_cmd curl
+  echo "启动开发态组件：${selected[*]}"
+  [[ "${DRY_RUN}" == "1" ]] && echo "  [dry-run] 只打印计划，不实际启动"
+  echo
+  # 先构建一次（**只有构建失败才中止**：没二进制后面无从谈起）；再按序起。
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    echo "  将要构建：cargo build（wist-gateway / wist-agentd / wist-gwlinkd）"
+  else
+    build_binaries
+  fi
+  echo
+  # 全部组件后台常驻、彼此独立：任一组件起不来只 WARN、不中止整栈
+  # （绑到一起会让一个慢/坏的前端挡住网关，是结构性耦合）。
+  failed=()
+  for c in "${selected[@]}"; do
+    if [[ "${DRY_RUN}" == "1" ]]; then
+      echo "  将要启动：${c}"
+      continue
+    fi
+    # 子 shell：组件函数里的 `die`（exit 1）只结束子 shell，不会掀翻整栈。
+    if ( case "${c}" in
+           vm) start_vm ;;
+           wparse) start_wparse ;;
+           web) start_web ;;
+           forward) start_forward "${FORWARD_EXPLICIT}" ;;
+           gateway) start_gateway ;;
+           gwlinkd) start_gwlinkd ;;
+         esac ); then
+      :
+    else
+      failed+=("${c}")
+      echo "  [warn] ${c} 未就绪/未成功，继续（不影响其它组件）。" >&2
+    fi
+    echo
+  done
+  if [[ "${DRY_RUN}" != "1" ]]; then
+    if [[ ${#failed[@]} -gt 0 ]]; then
+      echo "启动小结：未就绪 = ${failed[*]}；其余已起。复核：./dev/svc.sh status" >&2
+      echo
+    fi
+    echo "完成。全部后台运行。停止：./dev/svc.sh stop ${selected[*]}"
+    # 有未就绪组件时以非 0 退，便于脚本/CI 察觉（但整栈已经起来了）。
+    [[ ${#failed[@]} -eq 0 ]] || exit 1
+  fi
+}
+
 case "${cmd}" in
   start)
-    require_cmd curl
-    echo "启动开发态组件：${selected[*]}"
-    [[ "${DRY_RUN}" == "1" ]] && echo "  [dry-run] 只打印计划，不实际启动"
-    echo
-    # 先构建一次（**只有构建失败才中止**：没二进制后面无从谈起）；再按序起。
-    if [[ "${DRY_RUN}" == "1" ]]; then
-      echo "  将要构建：cargo build（wist-gateway / wist-agentd / wist-gwlinkd）"
-    else
-      build_binaries
-    fi
-    echo
-    # 全部组件后台常驻、彼此独立：任一组件起不来只 WARN、不中止整栈
-    # （绑到一起会让一个慢/坏的前端挡住网关，是结构性耦合）。
-    failed=()
-    for c in "${selected[@]}"; do
-      if [[ "${DRY_RUN}" == "1" ]]; then
-        echo "  将要启动：${c}"
-        continue
-      fi
-      # 子 shell：组件函数里的 `die`（exit 1）只结束子 shell，不会掀翻整栈。
-      if ( case "${c}" in
-             vm) start_vm ;;
-             wparse) start_wparse ;;
-             web) start_web ;;
-             forward) start_forward "${FORWARD_EXPLICIT}" ;;
-             gateway) start_gateway ;;
-             gwlinkd) start_gwlinkd ;;
-           esac ); then
-        :
-      else
-        failed+=("${c}")
-        echo "  [warn] ${c} 未就绪/未成功，继续（不影响其它组件）。" >&2
-      fi
-      echo
-    done
-    if [[ "${DRY_RUN}" != "1" ]]; then
-      if [[ ${#failed[@]} -gt 0 ]]; then
-        echo "启动小结：未就绪 = ${failed[*]}；其余已起。复核：./dev/svc.sh status" >&2
-        echo
-      fi
-      echo "完成。全部后台运行。停止：./dev/svc.sh stop ${selected[*]}"
-      # 有未就绪组件时以非 0 退，便于脚本/CI 察觉（但整栈已经起来了）。
-      [[ ${#failed[@]} -eq 0 ]] || exit 1
-    fi
+    cmd_start_selected
     ;;
   stop)
-    echo "停止开发态组件（逆序）：$(
-      printf '%s ' "${selected[@]}" | awk '{for (i=NF; i>0; i--) printf "%s%s", $i, (i>1?" ":"\n")}'
-    )"
+    cmd_stop_selected
+    ;;
+  restart)
+    echo "重启开发态组件（停 → 起）：${selected[*]}"
     echo
-    for i in $(seq $((${#selected[@]} - 1)) -1 0); do
-      case "${selected[$i]}" in
-        vm) stop_vm ;;
-        wparse) stop_wparse ;;
-        web) stop_web ;;
-        forward) stop_forward ;;
-        gateway) stop_gateway ;;
-        gwlinkd) stop_gwlinkd ;;
-      esac
-      echo
-    done
+    if [[ "${DRY_RUN}" == "1" ]]; then
+      echo "  [dry-run] 将停（逆序）：${selected[*]}；再起（正序）：${selected[*]}"
+    else
+      cmd_stop_selected
+      cmd_start_selected
+    fi
     ;;
   status)
     cmd_status
@@ -1104,6 +1335,6 @@ case "${cmd}" in
     ;;
   *)
     usage >&2
-    die "未知子命令：${cmd}（可用：start | stop | status | token）"
+    die "未知子命令：${cmd}（可用：start | stop | restart | status | token）"
     ;;
 esac

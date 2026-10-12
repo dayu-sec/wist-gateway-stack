@@ -10,12 +10,13 @@
 #   改成 CA + 叶后：把 **CA 导入一次**，之后凡是它签的叶浏览器自动接受，换叶零动作。
 #
 # 用法：
-#   scripts/init-web-tls.sh <域名> [输出目录]
+#   scripts/init-web-tls.sh <域名> [身份目录]
 #     scripts/init-web-tls.sh c-dev01.test.gw.jingang.cloud
 #
-# 生成（幂等）：
-#   <输出目录>/web-ca.key.pem / web-ca.crt.pem     # CA：**只建一次，绝不重生成**；私钥 0600 务必备份
-#   <输出目录>/web-tls.key.pem / web-tls.crt.pem   # 叶：由 CA 签；缺 / 与当前 CA 不对应 / SAN 缺域名 → 重签
+# 生成（幂等）——身份目录下分公开/私密两半（公开进 contract、私密进 backup）：
+#   <身份>/public/web-ca.crt.pem     # CA 证书（信任锚）：**只建一次，绝不重生成**
+#   <身份>/public/web-tls.crt.pem    # 叶：由 CA 签；缺 / 与当前 CA 不对应 / SAN 缺域名 → 重签
+#   <身份>/private/web-ca.key.pem    # CA 私钥（0600 务必备份）；<身份>/private/web-ca.crt.srl 序列号
 #
 # 浏览器免提示（这一步永远需要人做一次，脚本只把材料递到手上）：
 #   把 `web-ca.crt.pem` 导入信任库。Firefox：设置 → 隐私与安全 → 证书 → 查看证书… →
@@ -29,16 +30,19 @@
 #   WEB_CA_CRT/WEB_CA_KEY 复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
 set -euo pipefail
 
-DOMAIN="${1:?用法: $0 <域名> [输出目录]}"
-OUT_DIR="${2:-configs/web/tls}"
+DOMAIN="${1:?用法: $0 <域名> [身份目录]}"
+OUT_DIR="${2:-identity/web}"
 CERT_DAYS="${CERT_DAYS:-365}"
 CA_DAYS="${CA_DAYS:-3650}"
 
-mkdir -p "${OUT_DIR}"
-CA_CRT="${OUT_DIR}/web-ca.crt.pem"
-CA_KEY="${OUT_DIR}/web-ca.key.pem"
-CRT="${OUT_DIR}/web-tls.crt.pem"
-KEY="${OUT_DIR}/web-tls.key.pem"
+PUB="${OUT_DIR}/public"
+PRIV="${OUT_DIR}/private"
+mkdir -p "${PUB}" "${PRIV}"
+CA_CRT="${PUB}/web-ca.crt.pem"
+CA_KEY="${PRIV}/web-ca.key.pem"
+CRT="${PUB}/web-tls.crt.pem"
+KEY="${PRIV}/web-tls.key.pem"
+SRL="${PRIV}/web-ca.crt.srl"
 
 note() { echo "  $*"; }
 
@@ -49,7 +53,7 @@ fi
 
 # ① web CA（信任锚；只建一次，绝不重生成 —— 重生成 = 换锚 = 每台浏览器都要重新导入）
 if [[ -n "${WEB_CA_CRT:-}" && -n "${WEB_CA_KEY:-}" ]]; then
-  # 导入外部 CA（配置与 nginx 都固定引用本目录下的文件名，故复制而非外链）
+  # 导入外部 CA（nginx 固定引用 public/private 下的文件名，故复制而非外链）
   cp -f "$WEB_CA_CRT" "$CA_CRT"
   cp -f "$WEB_CA_KEY" "$CA_KEY"
   chmod 600 "$CA_KEY"
@@ -84,8 +88,8 @@ else
     openssl genrsa -out "$KEY" 2048 >/dev/null 2>&1
     chmod 600 "$KEY"
   fi
-  ext="${OUT_DIR}/.leaf.ext"
-  csr="${OUT_DIR}/.leaf.csr"
+  ext="${PRIV}/.leaf.ext"
+  csr="${PRIV}/.leaf.csr"
   cat >"$ext" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
@@ -93,7 +97,8 @@ extendedKeyUsage=serverAuth
 subjectAltName=DNS:${DOMAIN},DNS:localhost,IP:127.0.0.1
 EOF
   openssl req -new -key "$KEY" -out "$csr" -subj "/CN=${DOMAIN}" >/dev/null 2>&1
-  openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+  openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" \
+    -CAserial "$SRL" -CAcreateserial \
     -out "$CRT" -days "$CERT_DAYS" -sha256 -extfile "$ext" >/dev/null 2>&1
   rm -f "$csr" "$ext"
   note "已用 web CA 签发叶证书：${CRT}（SAN: ${DOMAIN},localhost,127.0.0.1）"

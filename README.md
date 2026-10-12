@@ -17,15 +17,20 @@
 一条判据：**这份东西「每个环境是否不同」**。
 
 - **`configs/` —— 必须分开**：分开发态 `dev/configs/*` 与发布态 `configs/*`。里面是**每环境不同**的量
-  （`admin_api_token`、`public_base_url`、TLS/CA、`victoria_metrics_url`、`[content]` …）且含**密钥**，
+  （`admin_api_token`、`public_base_url`、`victoria_metrics_url`、`[content]` …）且含**密钥**，
   两套无法共用，也**绝不入库**。两份同名 `wist-gateway.toml` 因此长得一模一样 —— 别照着翻错，
   开发态用哪个认准 `./dev/svc.sh token`。
+- **`identity/` —— 不分开（dev/prod 共用一份）**：站点身份（CA / 证书 / 私钥 / 对外域名）是**站点级**的，
+  已从资源树里拆出来放**栈根** `identity/gateway/{public,private}`（前端那份是 `identity/web/{public,private}`）——
+  这样换域名 / 重签叶证书只动**一处**，两边看到的是同一张 CA 与信任锚。配置里按相对配置目录的
+  `identity/public|private/…` 引用它（开发态靠 `dev/configs/gateway/identity` 这个 symlink 解析回栈根）。
 - **`data-plane/` —— 不用分开**：`data-plane/{conf,connectors,models,topology}` 是 warp-parse 的
   **业务配置**，开发态与发布态**共用同一份**（发布态只读挂载）；环境差异靠
   `WPARSE_VM_ENDPOINT` / `WPARSE_GATEWAY_ENDPOINT` 注入，不复制配置、也就不产生漂移。
 
-其中**运行态一律各自独立**（运行态不是配置）：网关 `dev/configs/gateway/state` ↔ `configs/gateway/state`；
-wparse `data-plane/{data,.run}` ↔ `data-plane-run/{data,.run}` —— 两侧可同时跑、不互踩。
+其中**运行态一律各自独立**（运行态不是配置）：网关 `dev/configs/gateway/state` ↔ `configs/gateway/state`
+（现在只剩每部署一份的 **store 库** —— 证书 / 私钥已在共享身份 `identity/` 里）；wparse
+`data-plane/{data,.run}` ↔ `data-plane-run/{data,.run}` —— 两侧可同时跑、不互踩。
 
 ## 组件
 
@@ -88,11 +93,15 @@ wist-gateway-stack/
     svc.sh                  # 起/停/看 全栈（vm | wparse | web | gateway）
     setup-domain.sh         # 按需：切域名（建/复用 dev CA + 签叶证书 + 改配置）
     bin/                    # wparse 本地二进制
-    configs/                # 开发态：网关运行期配置/密钥（同 configs/ 的形状，但**开发态专用**；不入 git）
-      gateway/              # 开发态 wist-gateway.toml + state/（含 admin token，`./dev/svc.sh token` 可取）
-  configs/                  # 运行期配置/密钥（现场生成，不入 git / 不入包）
-    gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ state/（证书/密钥/store/包缓存）
-    web/                    # 发布态：nginx.conf（由模板渲染）+ nginx.value.json + tls/（证书）
+    configs/                # 开发态：网关运行期资源（同 configs/ 的形状，但**开发态专用**；不入 git）
+      gateway/              # 开发态 wist-gateway.toml + state/（store 库）；admin token 在栈根 .wist/sec-value.yml
+                            #   其 identity 是指向栈根 ../../../identity/gateway 的 symlink（配置按相对路径读身份）
+  identity/                 # **站点身份（dev/prod 共用一份）**：CA / 证书 / 私钥 / 对外域名；不入 git / 不入包
+    gateway/{public,private}/  # 网关：CA、叶证书、agent CA、签名私钥（私）、wist-gateway-pub.toml（公）
+    web/{public,private}/      # 前端（浏览器）侧：web CA + 叶证书（公）、CA 私钥（私）
+  configs/                  # 运行期资源（现场生成，不入 git / 不入包）
+    gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ wist-gateway.value.json + state/（**只剩 store 库**）
+    web/                    # 发布态：nginx.conf（由模板渲染）+ nginx.value.json
   packages/                 # 安装包投放目录（宿主；只读挂到网关 /packages；不入 git）
   scripts/                  # 发布态初始化脚本
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
@@ -104,12 +113,11 @@ wist-gateway-stack/
     init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
     backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
     restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
-    promote-dev-identity.sh # 一步：把开发态身份 + 库搬成发布态的（只搬文件，不碰容器；--dry-run 预演）
   .github/workflows/release.yml     # 打包发布（见「制品包」）
   README.md
 ```
 
-> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `dev/configs/gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（SQLite 库 / TLS / 签名密钥），与运行期临时目分离，清 `.run` 不会丢 agents 注册表。发布态通过 `sys/docker-compose.yml` 把它挂进容器。
+> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `dev/configs/gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（**现只剩 store 库**），与运行期临时目录分离，清 `.run` 不会丢 agents 注册表。**证书 / 私钥 / 信任锚 / 签名密钥不在这里**，而在 dev/prod 共用的栈根 `identity/gateway/{public,private}`（见上「谁分、谁不分」）。发布态通过 `sys/docker-compose.yml` 把 `configs/gateway`（挂 `/config`）与 `./identity/gateway`（挂 `/config/identity`，只读）一起挂进容器。
 
 > **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动；schema 在启动时自动迁移。**这个库不用备份**：库丢了，持有效客户端证书的 agent 会在重连时自动重新登记（mTLS 自愈）——真正不可再生的只有 PEM（见「备份与恢复」）。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
 
@@ -163,7 +171,7 @@ gops sys localize
 
 **`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做六件**幂等**的事：
 
-1. 备料 `configs/gateway/`：Ed25519 签名密钥、网关 TLS 证书、渲染值 `wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
+1. 备料：身份材料（Ed25519 签名密钥、网关 CA / TLS 证书，写入栈根 `identity/gateway/{public,private}`）与渲染值 `configs/gateway/wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
 2. 渲染 `configs/gateway/wist-gateway.toml`（模板在 `sys/configs/gateway/wist-gateway.toml.tpl`）；
 3. 生成前端站点 TLS 证书（`scripts/init-web-tls.sh`，存在即跳过；域名取 `WEB_DOMAIN`）；
 4. 写前端站点配置的**渲染值** `configs/web/nginx.value.json`（`scripts/init-web-conf.sh`；域名取 `WEB_DOMAIN`）；
@@ -175,16 +183,17 @@ gops sys localize
 
 `gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过。
 
-> 本栈当前无密钥；将来若需要，compose 里用 `${SEC_xxx}` 占位，由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入，不落盘。
+> 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，键 `admin_token`，只读挂进网关容器、`WIST_GATEWAY_SEC_FILE` 指定）；该文件由 `scripts/init-gateway.sh` 生成、`.gitignore`。其它密钥如需，仍可用 `${SEC_xxx}` 占位由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入、不落盘。
 
 ### 前置：挂载文件
 
 compose 还挂这些路径：
 
-1. `configs/gateway/` —— 网关配置与密钥。**仓库不含**，由 `scripts/init-gateway.sh` 现场备料 + 模板渲染（见下 A）。
+1. `configs/gateway/` —— 网关配置 + `wist-gateway.value.json`。**仓库不含**，由 `scripts/init-gateway.sh` 现场备料 + 模板渲染（见下 A）。另有站点身份 `identity/gateway/`（证书 / 私钥 / 信任锚 / `wist-gateway-pub.toml`，由同一脚本写入**栈根**），只读挂到容器 `/config/identity`。
 2. `sys/configs/web/nginx.conf.tpl` —— 前端站点配置**模板**。**仓库自带**，由 `gops sys localize` 渲染到 `configs/web/nginx.conf`（注入 `WEB_DOMAIN` → `server_name`）：443 上终止 TLS、托管前端静态产物、SPA 深链回退到 `index.html`、把 `/api` 反代到 `gateway:3000`（网关那侧是**自签 HTTPS**，已关掉证书校验）。
-3. `configs/web/tls/` —— 前端站点 TLS 证书/私钥（**页面自己的**，与网关分开）。用 `scripts/init-web-tls.sh <域名>` 在目标机现场生成。
+3. `identity/web/{public,private}/` —— 前端站点 TLS 证书/私钥（**页面自己的**，与网关分开）。用 `scripts/init-web-tls.sh <域名> identity/web` 在目标机现场生成（身份 dev/prod 共用，只读挂到 web 容器 `/certs`）。
 4. `packages/`（`${PACKAGE_DIR}`）—— 安装包**投放目录**，只读挂到网关容器 `/packages`。用 `scripts/import-package.sh` 导入（见下 A）；界面「本地来源」填 **`/packages/<文件名>`**（容器读不到宿主任意路径；或改用 `https://...` URL）。
+   > **发布 ②（中心下发 agent 包到网关）也走这份目录**：gwlinkd 用中心信任取到包后落到 `PACKAGE_DIR`，再把这个**同一份**以**容器路径**（`GWLINKD_AGENT_PACKAGE_CONTAINER_DIR`，即 `/packages/<文件名>`）交给网关托管。栈已把 `${PACKAGE_DIR}`（宿主）与 `/packages`（容器）由 `scripts/init-gwlinkd.sh` 渲染进 gwlinkd 配置；未配则 ② fail-closed。交付成功后 gwlinkd 按 `agent_package_drop_keep`（缺省 12）保留最新若干份。
 
 ### 权限与运行身份（Linux 必读）
 
@@ -193,7 +202,7 @@ compose 还挂这些路径：
 | 症状 | 现场表现 | 根因 |
 |---|---|---|
 | wparse 无限重启 | `flock: cannot open lock file /data/.run/.wparse.lock: Permission denied`，容器 `Exited (75)` | `data-plane-run/{data,.run}` 对 uid 999 不可写 |
-| gateway 无限重启 | `failed to read install script signing key …: Permission denied (os error 13)` | `configs/gateway/state/*.pem`（600 且属主不是 999）容器读不到 |
+| gateway 无限重启 | `failed to read install script signing key …: Permission denied (os error 13)` | `identity/gateway/private/*`（600 且属主不是 999）容器读不到 |
 
 （web 跟着起不来、报 `host not found in upstream "gateway"` 只是被网关拖累，网关一好它自愈。）
 
@@ -203,14 +212,14 @@ compose 还挂这些路径：
 - **属组 = 容器 gid `999`**：容器进程天然在这个组里；
 - 挂载目录分两档：**需要容器写**的 `2770`（组可写 + **setgid**，目录里新建的文件/目录自动继承该组）、**容器只读**的 `2755`；私钥与含密钥的 `wist-gateway.toml` 为 `640`（不放宽到全局：其它宿主账号连 `2770` 目录都进不去）；
 - **SQLite 库**（`state/*.db*`）：容器自建的（`999:999`）**不碰** —— 否则每次 `localize` 都要提权；但**恢复搬过来的库**属主是部署账号，会放开到属组可写（`660`）—— 不然网关只能读不能写，报 `unable to open database file` / `readonly database`；
-- `state/*.srl`（CA 序列号）归部署账号：宿主 `openssl` 重新签叶时要写它，曾被 root 跑过就会卡住后续非 root 的签叶；
+- `identity/**/private/*.srl`（CA 序列号）归部署账号：宿主 `openssl` 重新签叶时要写它，曾被 root 跑过就会卡住后续非 root 的签叶；
 - **不依赖「目录是谁创建的」**：`docker compose up` 会把缺失的挂载源目录建成 `root:root`，本脚本把属主/属组一并纠回来；
 - **幂等**：已对齐时不写盘、也不要任何权限（所以日常 `localize` 不会再要 sudo）；确需修正而当前没权限时会失败，并打印那一行 `sudo` 命令 —— **全新主机第一次 `localize` 通常就属这种情况**（要把属组改成 999），免密 sudo 时脚本会自己重跑；
 - **边界**：只对齐**挂载根与私钥**，不递归内容树（`configs/gateway/knowledge/`、`packages/` 里的文件由打包/投放侧保证 644/755 可读）；
 - **非 Linux 自动跳过**（macOS / OrbStack 的 bind 挂载不校验属主）—— 这也是「macOS 上一直好好的、上 Linux 才炸」的原因。
 
 > 新机器用备份重建：`restore-gateway.sh` 解包出的文件属组是「解包账号」的（tar 以非 root 解包保不住属主），
-> 所以它在目标为 `configs/gateway` 时会**自动**再跑一次对齐。
+> 所以它在目标为**栈根**时会**自动**再跑一次对齐。
 
 ### A. 宿主机显式初始化（推荐生产）
 
@@ -219,7 +228,7 @@ compose 还挂这些路径：
 gops sys update && gops sys localize
 
 # 它做六件事（都幂等）：
-#   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) + Ed25519 签名密钥 + value.json
+#   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) + Ed25519 签名密钥 → identity/gateway；value.json → configs/gateway
 #   gx.tpl 渲染 sys/configs/gateway/wist-gateway.toml.tpl → configs/gateway/wist-gateway.toml
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
 #   scripts/init-web-conf.sh $WEB_DOMAIN      # 前端站点配置的渲染值 nginx.value.json
@@ -244,16 +253,16 @@ gops run start
 #   公钥在 wist-knowledge 仓的 keys/knowledge-signing.pub.pem（同级仓时自动取，不用给路径）。
 #   启用后**只收**发布侧签过的包（未签名的会被拒：package_signature_invalid）。
 KNOWLEDGE_SIGNING_PUBKEY=/path/to/knowledge-signing.pub.pem gops sys localize
-#   关掉：rm configs/gateway/state/knowledge-signing.pub.pem && gops sys localize
+#   关掉：rm identity/gateway/public/knowledge-signing.pub.pem && gops sys localize
 
 # 改了证书/配置后，必须**重启网关容器**才生效（`up -d` 不会因挂载文件变化而重建）：
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway
 ```
 
-> 域名 / 端口改 **`values/value.yml`**（现场值的唯一入口），跑 `gops sys localize` 后重启网关容器即生效；只有改产品默认 `sys/setting/vars.yml` 才需要先 `gops sys update`。若换了域名，前端站点证书要 `rm -rf configs/web/tls` 让它按新域名重签（网关叶证书会自动重签）。
+> 域名 / 端口改 **`values/value.yml`**（现场值的唯一入口），跑 `gops sys localize` 后重启网关容器即生效；只有改产品默认 `sys/setting/vars.yml` 才需要先 `gops sys update`。若换了域名，前端站点叶证书要重签：删掉叶证书 `rm -f identity/web/public/web-tls.crt.pem` 再 `gops sys localize`（**CA 不动、浏览器无需重导**）；网关叶证书会自动重签（同理，锚 = CA 根不变）。
 >
-> **身份模型（CA 签叶）**：`scripts/init-gateway.sh` 建一张**网关 CA**（`state/gateway-ca.{crt,key}.pem`），网关**叶证书由它签发**，agent 的信任锚 = **CA 根**（配置 `agent.trust_bundle_file = state/gateway-ca.crt.pem`）。于是**换域名 / 续期 / 换 SAN 只重签叶证书，锚不变、agent 无感**。
-> **CA 私钥不可再生**：`state/gateway-ca.key.pem` 丢了 = 换锚 = **全队 agent 重装**，务必备份（见「备份与恢复」）。
+> **身份模型（CA 签叶）**：`scripts/init-gateway.sh` 建一张**网关 CA**（栈根 `identity/gateway/public/gateway-ca.crt.pem` + `identity/gateway/private/gateway-ca.key.pem`，dev/prod 共用），网关**叶证书由它签发**，agent 的信任锚 = **CA 根**（配置 `agent.trust_bundle_file = identity/public/gateway-ca.crt.pem`，相对配置目录）。于是**换域名 / 续期 / 换 SAN 只重签叶证书，锚不变、agent 无感**。
+> **CA 私钥不可再生**：`identity/gateway/private/gateway-ca.key.pem` 丢了 = 换锚 = **全队 agent 重装**，务必备份（见「备份与恢复」）。
 
 ### B. 容器自动初始化（零配置）
 
@@ -337,7 +346,7 @@ wist-gateway-stack-<tag>.tar.gz
 
 用 `git archive` 出包，只收 git 跟踪的内容 —— `dev/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 
-包里**含 `sys/configs/web/nginx.conf.tpl`**（前端站点配置随仓走）**但不含任何私钥/证书**：`configs/gateway/`（网关配置 + 密钥）与 `configs/web/`（页面配置 + 证书）都在目标机现场生成。下载解压后跑一次 `gops sys update && gops sys localize` 即可（备料 + 渲染 + 页面证书一步到位，见「发布态 A」）。
+包里**含 `sys/configs/web/nginx.conf.tpl`**（前端站点配置随仓走）**但不含任何私钥/证书**：站点身份（`identity/gateway/`、`identity/web/`）与运行配置（`configs/gateway/`、`configs/web/`）都在目标机现场生成。下载解压后跑一次 `gops sys update && gops sys localize` 即可（备料 + 渲染 + 页面证书一步到位，见「发布态 A」）。
 
 ## 环境接线
 
@@ -349,7 +358,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ## 已知坑
 
 1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
-2. **信任锚走文件，且是 CA 根**。配置用 `agent.trust_bundle_file = state/gateway-ca.crt.pem`（相对配置目录），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
+2. **信任锚走文件，且是 CA 根**。配置写 `agent.trust_bundle_file = identity/public/gateway-ca.crt.pem`（**相对配置目录**，经配置目录下的 `identity` symlink / 挂载落到栈根 `identity/gateway/public/`），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
 3. **叶证书必须带 `basicConstraints=CA:FALSE`（叶形态）、且由网关 CA 签**。`openssl req -x509` 的旧默认会打 `CA:TRUE`，rustls/webpki 会以 `CaUsedAsEndEntity` 拒收；`scripts/init-gateway.sh` 生成的叶证书是 `CA:FALSE` + `serverAuth`，并由网关 CA 签发。**轮换叶证书（换域名 / 续期）是安全的**——锚 = CA 根不变，agent 无感；只有当**锚本身**变了（换 CA / 删掉 `gateway-ca.*` 重生成）才需要**重跑安装**（仅重新注册不刷新锚）。
 4. **改证书/配置后要重启网关容器**：`gops run start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。
 5. **镜像 tag 是浮动 `:latest`**。同一份 compose 在不同时间拉到的镜像可能不同，升级也对不齐；生产建议钉到固定版本（必要时加 `@sha256:` 摘要），做法就是改 `sys/docker-compose.yml` 里 `gateway` / `web` 的 `image`。
@@ -363,19 +372,19 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 ```bash
 # 备份分两级（--level）：rebuild = 可重建级（默认）；restore = 可还原级
-./scripts/backup-gateway.sh --from configs/gateway                    # 可重建级 → ./wist-gateway-backup-<时间戳>.tar.gz
-./scripts/backup-gateway.sh --level restore --from configs/gateway    # 可还原级（再加 value.json + SQLite 库）
-./scripts/backup-gateway.sh check --from configs/gateway              # 先看会备份哪些件（不写文件）
-./scripts/backup-gateway.sh list                                      # 列已备份的归档；list <归档文件> 看它里面有哪些件
+# 打点相对**栈根**（身份在 identity/gateway、资源在 configs/gateway），故 --from 给栈根（默认 `.`）
+./scripts/backup-gateway.sh --from .                    # 可重建级 → ./wist-gateway-backup-<时间戳>.tar.gz
+./scripts/backup-gateway.sh --level restore --from .    # 可还原级（再加 value.json + SQLite 库）
+./scripts/backup-gateway.sh check --from .              # 先看会备份哪些件（不写文件）
+./scripts/backup-gateway.sh list                        # 列已备份的归档；list <归档文件> 看它里面有哪些件
 
-# 恢复（独立脚本；默认目标目录 configs/gateway，默认不覆盖已有文件，加 --force 才覆盖）
-./scripts/restore-gateway.sh <备份文件> [--to configs/gateway] [--pem-only] [--force] [--restart]
+# 恢复（独立脚本；默认目标为**栈根**（`.`），默认不覆盖已有文件，加 --force 才覆盖）
+./scripts/restore-gateway.sh <备份文件> [--to .] [--pem-only] [--force] [--restart]
 ```
 
-- **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`state/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`state/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
+- **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`identity/gateway/private/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`identity/gateway/private/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
 - **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
 - **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
-- **一步搬身份（+ 库）**：`scripts/promote-dev-identity.sh`（默认 `--from <栈根>/dev/configs/gateway --to <栈根>/configs/gateway`）—— 把开发态的**身份 + 管理面状态（SQLite 库）**搬成发布态的（`--level restore` 出包 + `--no-config` 恢复，**配置不动**）。**只搬文件、不碰容器**；`--dry-run` 可先预演。要让老 agent **无感**回来，用这个（只搬 PEM 不够）。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
-- 开发态同样可用：`./scripts/backup-gateway.sh --from dev/configs/gateway`。
+- 开发态：身份就是栈根这份共享身份，`./scripts/backup-gateway.sh --from .` 即可收身份（+ 渲染配置）；注意 dev 的**运行态**（`dev/configs/gateway/state/` 下的 store 库）不在这套相对栈根的固定条目里。

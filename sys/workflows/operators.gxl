@@ -18,6 +18,10 @@ mod operators {
     //     来源（按序）：env KNOWLEDGE_SIGNING_PUBKEY=<路径>、<栈>/sys/keys/（交付走这条）、
     //     同级 wist-knowledge 仓的 keys/（本地开发）。
     gx.cmd ( "./scripts/init-knowledge-signing.sh configs/gateway" );
+    // ①'' 接口层（**现场态**）：对外基址 / 归属单独一份（`wist-gateway-pub.toml`），
+    //      按缺补齐、**已存在一律保留**（不随模板重渲）。必须在 ① 之前：网关加载时读两份，
+    //      主配置里已经没有 `public_base_url`。
+    gx.cmd ( "./scripts/init-gateway-pub.sh identity/gateway/public" );
     // ① 渲染网关运行配置：模板 + value.json → configs/gateway/wist-gateway.toml（依赖 ③）
     gx.tpl (
       tpl  : "./sys/configs/gateway/wist-gateway.toml.tpl",
@@ -36,7 +40,7 @@ mod operators {
     //     **不再用 `test -f … ||` 挡住** —— 幂等由脚本自己判（缺 / 换了域名 / 与当前 CA 不对应才重签）；
     //     如果这里短路，改了 WEB_DOMAIN 就永远不会重签（叶的 SAN 里没有新域名，浏览器报域名不匹配）。
     //     域名取合并后的值 WEB_DOMAIN；脚本末尾会打印该导入哪份 CA。
-    gx.cmd ( "./scripts/init-web-tls.sh $(printenv WEB_DOMAIN)" );
+    gx.cmd ( "./scripts/init-web-tls.sh $(printenv WEB_DOMAIN) identity/web" );
     // ④ 前端站点配置：备料渲染值（脚本）→ gx.tpl → configs/web/nginx.conf。
     //     渲染值必须走脚本，不能在这里 printf：GXL 字符串**不还原 `\"`**，而 Ubuntu 的 /bin/sh 是
     //     dash（printf 不认 `\"`，会把反斜杠写进文件）→ 非法 JSON → gx.tpl 报 parse json data file。
@@ -50,7 +54,7 @@ mod operators {
     // ④b 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
     //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
     //     **不改属主** —— 未对齐就是两个稳定故障：wparse 写不出 /data/.run 的锁（以 75 无限重启）、
-    //     网关读不到 state/ 下的私钥（拒绝启动）。
+    //     网关读不到 identity/private/ 下的私钥（拒绝启动）。
     //     还必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录建成 root:root，
     //     属主一旦是 root，之后的部署账号就写不动了。
     //     幂等：已对齐时不写盘、也不要任何权限；确需修正而当前没权限时本步失败，并给出那一行 sudo 命令。

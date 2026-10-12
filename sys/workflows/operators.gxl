@@ -28,9 +28,23 @@ mod operators {
       dst  : "./configs/gateway/wist-gateway.toml",
       file : "./configs/gateway/wist-gateway.value.json"
     );
-    // ①c gwlinkd（网关**宿主侧**常驻）的运行配置：备料渲染值 → gx.tpl 渲染。
-    //     与网关同一套机制；**接入券不进渲染值**（由「链接上级」页/gwlinkd 自联时写回 rendered 配置）。
+    // ①c gwlinkd（网关**宿主侧**常驻）的配置：**分两份**。
+    //   先备料主配置的渲染值。
     gx.cmd ( "./scripts/init-gwlinkd.sh configs/gwlinkd" );
+    // ①c'' gwlinkd 的**现场态**（现场接线：中心地址 / 本网关在中心侧的标识 / 中心信任锚）：
+    //   落在 `identity/gwlinkd/`（`sys-prj.yml: contract` 之下）：不可再生、不进包、必进备份。
+    //   **声明 + 值分开**（docker-compose 口径）：
+    //     · **声明** `gwlinkd-pub.toml`（只写 `${VAR}` 引用、不含现场值）—— 与其它交付物一样
+    //       走 **tpl** 机制渲染（交付物，随版本覆盖；值不在这里，所以重渲动不到现场）；
+    //     · **值** 在同目录 `.env`（脚本按缺补齐，永不重渲）。
+    gx.tpl (
+      tpl  : "./sys/configs/gwlinkd/gwlinkd-pub.toml.tpl",
+      dst  : "./identity/gwlinkd/gwlinkd-pub.toml",
+      data : "{}"
+    );
+    gx.cmd ( "./scripts/init-gwlinkd-pub.sh identity/gwlinkd" );
+    // ①c gwlinkd 的**主配置**（交付物，只含随部署环境渲染的项）：模板 + value.json → 渲染。
+    //   现场接线与一次性接入券在主配置之外（上一步的现场态文件）；gwlinkd 加载时读**两份**。
     gx.tpl (
       tpl  : "./sys/configs/gwlinkd/gwlinkd.toml.tpl",
       dst  : "./configs/gwlinkd/gwlinkd.toml",

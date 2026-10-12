@@ -88,6 +88,10 @@ export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001
 GWLINKD_CRATE="${ROOT_DIR}/wist-gwlinkd"
 GWLINKD_HOME="${WIST_GWLINKD_HOME:-${STACK_ROOT}/dev/configs/gwlinkd}"
 GWLINKD_CONFIG="${GWLINKD_HOME}/gwlinkd.toml"
+# **现场态配置**（中心地址 / 网关标识 / 中心信任锚）与 dev 主配置**分开**，并放在栈根 `identity/` 下
+# —— 与发布态**共用同一份**（身份/现场选择是栈级唯一一份；主配置才是每态一份的渲染物）。
+GWLINKD_IDENTITY_DIR="${STACK_ROOT}/identity/gwlinkd"
+GWLINKD_PUB="${GWLINKD_IDENTITY_DIR}/gwlinkd-pub.toml"
 GWLINKD_LOG="${GWLINKD_HOME}/gwlinkd.log"
 GWLINKD_PIDFILE="${GWLINKD_HOME}/gwlinkd.pid"
 # ── 可选：端口转发（补上发布态由 docker 提供的那一跳）──
@@ -897,6 +901,31 @@ print("  已补 ② 投放目录配置：", path)
 PY
 }
 
+# dev 侧把**身份目录**指向栈根 `identity/gwlinkd/`（与发布态共用同一份身份）：
+# 主配置里的 `state_dir` 仍是 dev 本地运行态（锁 / 簿记），身份材料（证书 + 私钥 / 信任锚）不落在那里。
+# 幂等：已配就跳过。
+ensure_gwlinkd_identity_dir() {
+  if grep -q '^[[:space:]]*identity_dir[[:space:]]*=' "${GWLINKD_CONFIG}"; then
+    return 0
+  fi
+  python3 - "${GWLINKD_CONFIG}" "${GWLINKD_IDENTITY_DIR}" <<'PY'
+import sys
+path, identity = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+insert = [
+    "",
+    "# 身份材料（客户端证书 + 私钥、中心信任锚）落栈根 identity/ —— dev 与发布态共用一份",
+    'identity_dir = "%s"' % identity,
+]
+idx = next((i for i, line in enumerate(lines) if line.strip().startswith("[")), len(lines))
+lines = lines[:idx] + insert + lines[idx:]
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("\n".join(lines) + "\n")
+print("  已补 identity_dir：", path)
+PY
+}
+
 start_gwlinkd() {
   echo "== gwlinkd（接入上级：轮询网关「链接上级」页）=="
   if gwlinkd_up; then
@@ -905,17 +934,21 @@ start_gwlinkd() {
   fi
   local bin="${GWLINKD_CRATE}/target/debug/wist-gwlinkd"
   [[ -x "${bin}" ]] || die "缺 gwlinkd 二进制：${bin}"
-  mkdir -p "${GWLINKD_HOME}"
-  # 配置驱动：缺配置就生成一份带注释的模板（不含密钥），由运维/页面填入中心地址等。
+  mkdir -p "${GWLINKD_HOME}" "${GWLINKD_IDENTITY_DIR}"
+  # 现场态配置的落点（中心地址 / 网关标识 / 中心信任锚）—— **与发布态共用同一份**：
+  # 身份与现场选择是栈级唯一一份，主配置才是每态一份的渲染物。
+  export WIST_GWLINKD_PUB_CONFIG="${GWLINKD_PUB}"
+  # 配置驱动：缺配置就生成主配置 + 现场态骶架（均不含密钥），由运维/页面填入中心地址等。
   if [[ ! -f "${GWLINKD_CONFIG}" ]]; then
     "${bin}" init-config "${GWLINKD_CONFIG}"
-    echo "  已生成 gwlinkd 配置模板：${GWLINKD_CONFIG}"
-    echo "  → 接入中心：填 control_center_endpoint（自签中心再填 trust_bundle）；"
+    echo "  已生成 gwlinkd 配置：${GWLINKD_CONFIG}（+ 现场态 ${GWLINKD_PUB}）"
+    echo "  → 接入中心：填 ${GWLINKD_PUB} 的 control_center_endpoint（自签中心再填 trust_bundle）；"
     echo "    页面路再设 gateway_self_endpoint / gateway_self_ca，改完重启本组件。"
   fi
+  ensure_gwlinkd_identity_dir
   # 发布 ② 交付：dev 下缺 agent_package_drop_dir 就补上（<栈根>/packages，两项同一绝对目录）。
   ensure_gwlinkd_agent_package
-  WIST_GWLINKD_CONFIG="${GWLINKD_CONFIG}" \
+  WIST_GWLINKD_CONFIG="${GWLINKD_CONFIG}" WIST_GWLINKD_PUB_CONFIG="${GWLINKD_PUB}" \
     nohup "${bin}" run >"${GWLINKD_LOG}" 2>&1 &
   local pid=$!
   echo "${pid}" >"${GWLINKD_PIDFILE}"
@@ -1149,7 +1182,8 @@ cmd_status() {
   local gwlinkd_state gwlinkd_pid_val gwid
   gwlinkd_pid_val="$(gwlinkd_pid)"
   if [[ -n "${gwlinkd_pid_val}" ]]; then
-    gwid="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_HOME}/gwlinkd.toml" 2>/dev/null | head -1)"
+    # `gateway_id` 在**现场态**配置里（与主配置分文件）。
+    gwid="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_PUB}" 2>/dev/null | head -1)"
     gwlinkd_state="up   pid=${gwlinkd_pid_val}（gateway_id=${gwid:-?}）"
   else
     gwlinkd_state="down （页面接入靠它拉取；默认 start 会带上）"

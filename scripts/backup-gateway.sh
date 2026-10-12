@@ -64,8 +64,14 @@ level_label() {
 }
 
 # 会进备份的相对路径（**相对栈根**；只收**存在**的）。
-#   可重建级：身份 PEM（`identity/gateway/{public,private}`）+ 渲染好的 `configs/gateway/wist-gateway.toml`。
+#   可重建级：身份 PEM（`identity/gateway/{public,private}`）+ **gwlinkd 的站点身份**
+#               （`identity/gwlinkd/{pub.toml,control-center.pem,credential.json}`）
+#               + 渲染好的 `configs/gateway/wist-gateway.toml`。
 #   可还原级：再 + 渲染源 `value.json` + SQLite 库（`configs/gateway/state/`）。
+#
+# ⚠ gwlinkd 的 `credential.json`（客户端证书 + 私钥）**不可再生**：丢了只能到中心**新建实例、
+#   换 `gateway_id`**（中心无“重置实例”接口）。它与 `pub.toml`（现场接线）一起属 `contract` 档，
+#   落点与 `gops prj contract export` 一致。
 collect_files() {
   local root="$1" rel f
   for rel in \
@@ -73,6 +79,8 @@ collect_files() {
     identity/gateway/public/agent-ca.crt.pem    identity/gateway/private/agent-ca.key.pem \
     identity/gateway/public/admin-tls.crt.pem   identity/gateway/private/admin-tls.key.pem \
     identity/gateway/private/install-script-signing-ed25519.pkcs8.pem \
+    identity/gwlinkd/gwlinkd-pub.toml          identity/gwlinkd/control-center.pem \
+    identity/gwlinkd/credential.json             identity/gwlinkd/.env \
     configs/gateway/wist-gateway.toml; do
     [[ -e "${root}/${rel}" ]] && printf '%s\n' "${rel}"
   done

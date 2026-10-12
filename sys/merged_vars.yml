@@ -48,9 +48,11 @@ system:
 - name: GWLINKD_GATEWAY_ID
   value: gw-local
 - name: GWLINKD_TRUST_BUNDLE
-  value: ./configs/gwlinkd/control-center.pem
+  value: ./identity/gwlinkd/control-center.pem
 - name: GWLINKD_STATE_DIR
   value: ./configs/gwlinkd/state
+- name: GWLINKD_IDENTITY_DIR
+  value: ./identity/gwlinkd
 - name: GATEWAY_SELF_ENDPOINT
   value: ''
 - name: GATEWAY_SELF_CA

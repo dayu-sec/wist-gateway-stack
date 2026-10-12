@@ -108,20 +108,35 @@ system:
     value: https://github.com/dayu-sec/wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
-  #    由 sys/configs/gwlinkd/gwlinkd.toml.tpl 在 localize 时渲染到 configs/gwlinkd/gwlinkd.toml
-  #    （运行物，不入库）；渲染值由 scripts/init-gwlinkd.sh 写。
-  #    一次性接入券 `link_token` **不进渲染值**：由「链接上级」页/gwlinkd 自联时写回 rendered 配置。
+  #    **分两份**（与网关的 impl/pub 同口径）：
+  #      · 主配置 `configs/gwlinkd/gwlinkd.toml`（交付物）——由 sys/configs/gwlinkd/gwlinkd.toml.tpl
+  #        在 localize 时渲染（运行物，不入库）；渲染值由 scripts/init-gwlinkd.sh 写。
+  #        只放随部署环境渲染的项；升级 / 重渲该被覆盖。
+  #      · 现场态（永不重渲）——**声明 + 值分开**：
+  #        声明 `identity/gwlinkd/gwlinkd-pub.toml`（只写 `${VAR}` 引用，由 tpl 机制渲染）；
+  #        值   `identity/gwlinkd/.env`（scripts/init-gwlinkd-pub.sh 按缺补齐；下方
+  #        CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE 就是它的输入 ——
+  #        **脚本只写这个值文件，不动声明 toml**）。
+  #        落在 identity/ 之下 ⇒ 随 contract 一起不进包 / 必进备份。
+  #    一次性接入券 `link_token` 不在渲染值里：由「链接上级」页触发、gwlinkd 临时写进 `.env`，
+  #    **接入成功后自行删除**。
   #    center 端点默认空：现场在 values/value.yml 覆盖后跑 `gops sys localize` 即生效。
   - name: CENTER_ENDPOINT
     value: ""
   - name: GWLINKD_GATEWAY_ID
     value: gw-local
-  # 中心 CA-S 信任锚路径（自签中心必需；公网中心可置空 → gwlinkd 回落系统根）
+  # 中心 CA-S 信任锚路径（自签中心必需；公网中心可置空 → gwlinkd 回落系统根）。
+  # 它是**现场事实**：与客户端证书同处身份目录（identity/），不在 configs/ 资源树里。
   - name: GWLINKD_TRUST_BUNDLE
-    value: ./configs/gwlinkd/control-center.pem
-  # gwlinkd 状态/身份目录（含客户端证书与私钥；**要备份**）
+    value: ./identity/gwlinkd/control-center.pem
+  # gwlinkd **运行态**目录：单实例锁 / 升级簿记 / 待消费注册券 —— 可删可重建，**不是**身份材料。
   - name: GWLINKD_STATE_DIR
     value: ./configs/gwlinkd/state
+  # gwlinkd **身份目录**：客户端证书 + 私钥（`credential.json`）与中心信任锚。
+  # 不可再生（丢了只能换 gateway_id）⇒ 进 sys-prj.yml 的 `contract`（identity/），不进交付包。
+  # 空 = 不渲染该项（gwlinkd 回落 state_dir，行为与旧版一致）。
+  - name: GWLINKD_IDENTITY_DIR
+    value: ./identity/gwlinkd
   # 本机网关环回面（页面路才需要；空 = 不渲染该项）
   - name: GATEWAY_SELF_ENDPOINT
     value: ""

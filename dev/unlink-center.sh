@@ -3,7 +3,7 @@
 #
 # **清理逻辑归 `wist-gwlinkd`**（与 link/`onboard` 同一个 owner，见 `wist-gwlinkd/src/unlink.rs`）：
 # 「与 Center 的连接」= gwlinkd 手里的注册态（客户端证书 / 链接配置 / 注册券 / 身份 / 实例），
-# 加上 `gwlinkd.toml` 的一次性接入券 `link_token`。unlink 由 gwlinkd 自己删，本脚本只负责开发态的
+# 加上**现场态配置**里的一次性接入券 `link_token`。unlink 由 gwlinkd 自己删，本脚本只负责开发态的
 # 接线 —— **停掉 gwlinkd，再调 `wist-gwlinkd unlink`**，不做任何文件手术。
 #
 #   * 不碰中心信任锚（trust_bundle 的 PEM）—— 它是中心的公开证书，不是连接；`--forget-center` 才删。
@@ -31,6 +31,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 GWLINKD_HOME="${WIST_GWLINKD_HOME:-${SCRIPT_DIR}/configs/gwlinkd}"
 CONFIG="${GWLINKD_HOME}/gwlinkd.toml"
+# 现场态配置（中心地址 / 网关标识 / 中心信任锚 / 临时接入券）与主配置**分文件**，
+# 并在栈根 `identity/gwlinkd/`（dev 与发布态共用同一份）—— unlink 去券要看的是它。
+STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PUB="${WIST_GWLINKD_PUB_CONFIG:-${STACK_ROOT}/identity/gwlinkd/gwlinkd-pub.toml}"
 GWLINKD_BIN="${SCRIPT_DIR}/../../wist-gwlinkd/target/debug/wist-gwlinkd"
 
 usage() {
@@ -103,6 +107,7 @@ fi
 echo "断开本机网关与 Center 的连接（开发态，交由 gwlinkd 处理）"
 note "gwlinkd home : ${GWLINKD_HOME}"
 note "配置         : ${CONFIG}"
+note "现场态配置   : ${PUB}"
 echo
 
 # 运行中的 gwlinkd 会拒绝 unlink（它会不停写回凭据）—— 先停。干跑不停进程（要看的就是「现状下会做什么」）。
@@ -121,7 +126,8 @@ fi
 
 echo "== gwlinkd unlink =="
 # 空数组展开在 `set -u` + macOS 自带 bash 3.2 下会报 unbound variable —— 用 `+` 形式护一下。
-WIST_GWLINKD_CONFIG="${CONFIG}" "${GWLINKD_BIN}" unlink ${GWLINKD_ARGS[@]+"${GWLINKD_ARGS[@]}"}
+WIST_GWLINKD_CONFIG="${CONFIG}" WIST_GWLINKD_PUB_CONFIG="${PUB}" \
+  "${GWLINKD_BIN}" unlink ${GWLINKD_ARGS[@]+"${GWLINKD_ARGS[@]}"}
 echo
 
 # unlink 完**默认把 gwlinkd 起回**（回到「等待页面接入请求」的常驻态）—— 组件不断档，

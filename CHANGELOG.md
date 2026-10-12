@@ -5,6 +5,39 @@
 
 ## [未发布]
 
+### 变更
+
+- **gwlinkd 配置分层：主配置（交付物）+ 现场态 `identity/gwlinkd/pub.toml`**（需 `wist-gwlinkd >= 0.9.0`）：
+  - 主配置 `configs/gwlinkd/gwlinkd.toml` 只由模板渲染**交付物类**项（运行态目录 / 环回自述面 /
+    投放目录 / 升级参数）—— 升级 / 重渲该覆盖；
+  - **现场选择**（上级中心地址 / 本网关在中心侧的标识 / 中心信任锚）与一次性券 `link_token`
+    移到 `identity/gwlinkd/pub.env`：**形态就是 `.env`**（`KEY=VALUE`，键名 = 配置键名大写；
+    `CONTROL_CENTER_ENDPOINT` / `GATEWAY_ID` / `TRUST_BUNDLE`）—— 现场值本就来自环境变量,
+    所以**不要模板、不要占位符替换、不产生中间渲染物**；
+    `scripts/init-gwlinkd-pub.sh` 只做一件事：按缺（**键不存在或值为空**）把几个键写进去，
+    非空一律保留（现场改过 / 页面写过 / 迁移搬来的）。gwlinkd 加载时读**两份**（叶子键不许重复）。
+    因为落在 `identity/` 之下，它随既有的 `contract: - identity` **自动**获得“不进包 / 不重渲 /
+    必进备份” —— `sys-prj.yml` **无需改动**。
+    升级时：把旧的 `identity/gwlinkd/pub.toml` 改成 `pub.env`（键名大写）即可，
+    gwlinkd 两种写法都读（键名大小写不敏感、值引号可选）。
+- **gwlinkd 身份与运行态分开**：新增变量 `GWLINKD_IDENTITY_DIR`（默认 `./identity/gwlinkd`）——
+  不可再生的身份材料（客户端证书 + 私钥、中心信任锚）落这里（进 contract）；
+  `GWLINKD_STATE_DIR`（默认 `./configs/gwlinkd/state`）只剩单实例锁 / 升级簿记 / 临时注册券。
+  中心 CA 的路径由 `GWLINKD_TRUST_BUNDLE` 改为 `./identity/gwlinkd/control-center.pem`。
+- **dev 态与发布态共用一份身份 / 现场态**（与网关的 `identity/` 同口径）：
+  `dev/svc.sh` 启 gwlinkd 时注入 `WIST_GWLINKD_PUB_CONFIG=<栈根>/identity/gwlinkd/pub.toml`，
+  并幂等补 `identity_dir`；`dev/unlink-center.sh` 同步。
+
+### 升级注意
+
+- 已有现场需跑一次 `gops sys localize` 补出 `identity/gwlinkd/pub.toml`。
+- **必须重装宿主服务**（否则进程拿不到 `WIST_GWLINKD_PUB_CONFIG`，会报“未接入上级”）：
+  `wist-gwlinkd service install --system --run-as <用户> --bin … --config …/configs/gwlinkd/gwlinkd.toml --pub-config …/identity/gwlinkd/pub.toml --force`
+  （重跑中心下发的安装脚本即可）。
+- 老现场的 `configs/gwlinkd/control-center.pem` 与 `configs/gwlinkd/state/credential.json`
+  需搬到 `identity/gwlinkd/` 下（**先备份**），否则会被当成“尚未接入” —— 而中心无“重置实例”接口，
+  丢了身份只能**新建实例、换 `gateway_id`**。
+
 ## [0.1.27-alpha] - 2026-10-12
 
 ### 变更

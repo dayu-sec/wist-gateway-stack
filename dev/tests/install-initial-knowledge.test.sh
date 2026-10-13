@@ -30,13 +30,13 @@ fail=0
 chk() { if [[ "$2" == "$3" ]]; then echo "  [OK]   $1"; else echo "  [FAIL] $1（期望 $2，实际 $3）"; fail=1; fi; }
 has() { case "$2" in *"$1"*) echo "  [OK]   $3" ;; *) echo "  [FAIL] $3：$2"; fail=1 ;; esac; }
 
-echo "== 1) KNOWLEDGE_PKG_URL 为空 → 跳过但**显式告警**（exit 0）=="
-out="$(cd "${TMP}/site" && env -u KNOWLEDGE_PKG_URL bash "${RUN}" 2>&1)"; rc=$?
+echo "== 1) ARTIFACT_HOME / KNOWLEDGE_PATH 为空 → 跳过但**显式告警**（exit 0）=="
+out="$(cd "${TMP}/site" && env -u ARTIFACT_HOME -u KNOWLEDGE_PATH bash "${RUN}" 2>&1)"; rc=$?
 chk "空 URL 不阻断 localize（exit 0）" "0" "${rc}"
 has "空载" "${out}" "告警说清了后果（网关将空载）"
 
 echo "== 2) URL 有但包没落盘 → **失败**并给出处置 =="
-out="$(cd "${TMP}/site" && KNOWLEDGE_PKG_URL="https://example.invalid/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid" KNOWLEDGE_PATH="${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
 chk "缺包时 exit 1（不装出一个空网关）" "1" "${rc}"
 has "不可达" "${out}" "报错点明了可能原因（不可达）"
 has "${PKG_NAME}" "${out}" "报错给出了包名，便于手工放包"
@@ -49,7 +49,7 @@ for f in catalog.toml packs.toml templates.toml purpose-rules.toml aspect-polici
 done
 printf '{}\n' > "${STAGE}/manifest.json"
 tar -czf "${TMP}/site/packages/${PKG_NAME}" -C "${TMP}/stage" wist-knowledge-9.9.9-test
-out="$(cd "${TMP}/site" && KNOWLEDGE_PKG_URL="https://example.invalid/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid" KNOWLEDGE_PATH="${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
 chk "包在时 exit 0" "0" "${rc}"
 missing=""
 for f in catalog.toml packs.toml templates.toml purpose-rules.toml aspect-policies.toml; do

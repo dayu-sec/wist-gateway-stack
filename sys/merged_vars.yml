@@ -41,8 +41,10 @@ system:
   value: ./packages
 - name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR
   value: /packages
-- name: KNOWLEDGE_PKG_URL
-  value: https://github.com/dayu-sec/wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
+- name: ARTIFACT_HOME
+  value: https://github.com/dayu-sec
+- name: KNOWLEDGE_PATH
+  value: wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
 - name: CENTER_ENDPOINT
   value: ''
 - name: GWLINKD_GATEWAY_ID

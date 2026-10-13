@@ -12,7 +12,7 @@ test_envs:
 #
 # 身份/内容要跟着交付走，走的是它们自己的通路，不是系统包：
 #   身份：`gops prj contract export/import`（或在栈根 `scripts/backup-gateway.sh`）
-#   内容：KNOWLEDGE_PKG_URL（或现场投放 configs/gateway/knowledge/initial/）
+#   内容：ARTIFACT_HOME + KNOWLEDGE_PATH（或现场投放 configs/gateway/knowledge/initial/）
 ignore:
   # 栈根现场密钥文件：`WIST_GATEWAY_SEC_FILE` 默认指向 `.wist/sec-value.yml`（网关 admin token）。
   # 密钥绝不进交付包；默认模式靠 `.gitignore` 挡住，这条是 **`--full` 模式的护栏**。

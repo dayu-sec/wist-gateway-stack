@@ -12,7 +12,8 @@
 #
 # 用法：scripts/install-initial-knowledge.sh
 # 环境（由 `gops sys localize` 以合并后的值注入）：
-#   KNOWLEDGE_PKG_URL     包地址（与 flow 里 gx.download 用的是同一个值）；**空 = 跳过**
+#   ARTIFACT_HOME         制品基址；与 KNOWLEDGE_PATH 拼成包地址（= flow 里 gx.download 用的同一个值）
+#   KNOWLEDGE_PATH        相对基址的路径；**两者任一为空 = 跳过**
 #                         （但会**显式告警**并说清网关将空载，不再静默）
 #   GATEWAY_CONFIG_DIR    网关配置目录（默认 ./configs/gateway）
 #   KNOWLEDGE_SOURCE_DIR  解到哪儿（相对网关配置目录；默认 knowledge/initial，须与 tpl 一致）
@@ -22,15 +23,19 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${STACK_ROOT}"
 
-url="${KNOWLEDGE_PKG_URL:-}"
-if [[ -z "${url}" ]]; then
+home="${ARTIFACT_HOME:-}"
+path="${KNOWLEDGE_PATH:-}"
+if [[ -z "${home}" || -z "${path}" ]]; then
   # 有意跳过，但**不静默**：空载的后果要说清（它看起来像“装好了”，实际什么都不采）。
-  echo "[告警] 跳过初始知识库：KNOWLEDGE_PKG_URL 为空。" >&2
+  echo "[告警] 跳过初始知识库：ARTIFACT_HOME / KNOWLEDGE_PATH 有空项。" >&2
   echo "        网关将以**空载**启动：不产「系统类型」建议 / 用途建议，也无法派采集工作。" >&2
-  echo "        需要内容就：① 设可达的 KNOWLEDGE_PKG_URL，或 ② 把包手工放进 packages/，" >&2
+  echo "        需要内容就：① 设可达的 ARTIFACT_HOME + KNOWLEDGE_PATH，或 ② 把包手工放进 packages/，" >&2
   echo "        再在「知识库」页录入并激活（录入 ≠ 生效，要点激活）。" >&2
   exit 0
 fi
+
+# 拼包地址：基址去掉尾部 `/`，避免拼出 `//`（文件名推导见下）。
+url="${home%/}/${path}"
 
 gcd="${GATEWAY_CONFIG_DIR:-./configs/gateway}"
 sd="${KNOWLEDGE_SOURCE_DIR:-knowledge/initial}"
@@ -42,9 +47,9 @@ dst="${gcd}/${sd}"
 
 if [[ ! -f "${pkg}" ]]; then
   echo "初始知识库包不在 ${pkg} —— gx.download 没能把它拉下来。" >&2
-  echo "  多半是 KNOWLEDGE_PKG_URL 在这台机器上不可达（外网 / GitHub 被墙 / 域名解析不到）：" >&2
+  echo "  多半是 ARTIFACT_HOME + KNOWLEDGE_PATH 拼出的地址在这台机器上不可达（外网 / GitHub 被墙 / 域名解析不到）：" >&2
   echo "    ${url}" >&2
-  echo "  处置：把 ${pkg_name} 手工拷进 packages/ 后重跑本步，或把 KNOWLEDGE_PKG_URL 换成可达镜像。" >&2
+  echo "  处置：把 ${pkg_name} 手工拷进 packages/ 后重跑本步，或把 ARTIFACT_HOME 换成可达镜像。" >&2
   exit 1
 fi
 

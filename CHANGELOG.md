@@ -3,6 +3,19 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.31-alpha] - 2026-10-13
+
+### 变更
+
+- **初始知识库包地址拆成两段，便于整段替换制品源**：`KNOWLEDGE_PKG_URL` 拆为 `ARTIFACT_HOME`
+  （制品基址）+ `KNOWLEDGE_PATH`（相对路径，带版本）。换内网 / 镜像源时只需改 `ARTIFACT_HOME`
+  并写对应的 `KNOWLEDGE_PATH`，不用再维护一整条 URL；任一为空即跳过初始知识库包。
+
+### 移除
+
+- **仓内不再携带现场站点值**：删除 `values/value.yml`；现场覆盖（如 `WEB_DOMAIN`）改在
+  `values/sys_value.yml` 里改（该文件不入库）。
+
 ## [0.1.30-alpha] - 2026-10-13
 
 ### 变更

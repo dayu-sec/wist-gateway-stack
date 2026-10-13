@@ -73,7 +73,7 @@ mod operators {
     //     属主一旦是 root，之后的部署账号就写不动了。
     //     幂等：已对齐时不写盘、也不要任何权限；确需修正而当前没权限时本步失败，并给出那一行 sudo 命令。
     gx.cmd ( "./scripts/align-host-perms.sh" );
-    // ⑤ 初始知识库内容包（出厂自带）：把合并后的 KNOWLEDGE_PKG_URL 拉到投放目录 packages/。
+    // ⑤ 初始知识库内容包（出厂自带）：把 ARTIFACT_HOME + "/" + KNOWLEDGE_PATH 拼出的地址拉到投放目录 packages/。
     //     该目录只读挂给网关的 /packages，界面「知识库」页「本地来源」填 /packages/<文件名> 即可录入
     //     —— 录入 ≠ 生效，还要点激活。
     //
@@ -86,9 +86,10 @@ mod operators {
     //         `parent path not exists`。
     //         目录形式会按 URL 文件名落盘，且默认 reuse_cache（存在即跳过）——
     //         URL 里带版本、文件名随版本变，所以升版本不会复用旧包。
-    gx.read_cmd ( name: "KNOWLEDGE_PKG_URL", cmd: "printenv KNOWLEDGE_PKG_URL || true", silence: "true" );
-    if defined(${KNOWLEDGE_PKG_URL}) && ${KNOWLEDGE_PKG_URL} != "" {
-      gx.download ( url: "${KNOWLEDGE_PKG_URL}", local_file: "./packages" );
+    gx.read_cmd ( name: "ARTIFACT_HOME", cmd: "printenv ARTIFACT_HOME || true", silence: "true" );
+    gx.read_cmd ( name: "KNOWLEDGE_PATH", cmd: "printenv KNOWLEDGE_PATH || true", silence: "true" );
+    if defined(${ARTIFACT_HOME}) && ${ARTIFACT_HOME} != "" && defined(${KNOWLEDGE_PATH}) && ${KNOWLEDGE_PATH} != "" {
+      gx.download ( url: "${ARTIFACT_HOME}/${KNOWLEDGE_PATH}", local_file: "./packages" );
     }
     // 解包这一步**始终执行**（不再包在 if 里）—— 就是为了**不静默**：
     //   · URL 空   → 脚本打印跳过并说清后果（网关将**空载**：不产用途建议、不能派活）；

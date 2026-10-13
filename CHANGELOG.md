@@ -3,7 +3,7 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.28-alpha] - 2026-10-13
 
 ### 变更
 
@@ -58,6 +58,9 @@
     web 容器挂 `identity/web → /certs`（nginx 走 `/certs/public|private/...`）。
   - **升级 / 迁移注意**：老现场的 `configs/gateway/state/*.pem`、`configs/web/tls/*` 需搬到 `identity/` 下对应的 `public|private`
     子目录；dev 侧 `dev/configs/gateway/identity` 改为指向栈根共享身份的 symlink、`wist-gateway-pub.toml` 同样 symlink。**搬前先备份。**
+    另：若 `dev/configs/gwlinkd/gwlinkd.toml` / 现场 `gwlinkd` 配置里的 `gateway_self_ca` 仍指旧的
+    `…/configs/gateway/state/gateway-ca.crt.pem`（身份已不在那里），改成 `identity/gateway/public/gateway-ca.crt.pem`
+    —— 否则 gwlinkd 启动即报「读取信任锚失败」。
   - `scripts/promote-dev-identity.sh` **移除**：身份已共用，无需再从 dev 搬身份（要搬 dev 的 store 库，直接拷 `state/`）。
 - **网关配置拆两层：`wist-gateway.toml`（impl，交付物）+ `wist-gateway-pub.toml`（接口层，现场态）**：
   “这台网关**对外是什么**”的三个键（`public_base_url` / `tenant_id` / `environment_id`）**移出**主配置模板，

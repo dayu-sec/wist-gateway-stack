@@ -3,6 +3,13 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.29-alpha] - 2026-10-13
+
+### 变更
+
+- **内部依赖包跟进：网关镜像 `GATEWAY_TAG` → `v0.9.1-alpha`**（对应 `wist-gateway` `v0.9.1-alpha`：
+  分层配置读取改用共享 `wist-config`）。
+
 ## [0.1.28-alpha] - 2026-10-13
 
 ### 变更

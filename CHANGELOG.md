@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.32-alpha] - 2026-10-14
+
+### 变更
+
+- **镜像源可各自指定，不再一刀切**：镜像源前缀由单个 `IMAGE_SPC` 拆成三个 —— `WIST_SPC`（网关 / 前端）、
+  `WARP_SPC`（wparse）、`VM_SPC`（VictoriaMetrics），可分别指向不同 registry，在 `values/value.yml`
+  覆盖后 `gops sys localize` 生效。**破坏性**：旧变量名 `IMAGE_SPC` / `WPARSE_IMAGE` 不再识别，
+  现场用旧名的覆盖需改名（`IMAGE_SPC` → `WIST_SPC`，`WPARSE_IMAGE` → `WARP_SPC`）。
+- **VictoriaMetrics 默认源改为 `quay.io/victoriametrics`**：避开 Docker Hub 匿名拉取限流
+  （`429 Too Many Requests`），现场 / CI 拉取更稳。
+- **数据面引擎升级到 wparse `0.29.1-alpha`**（`WPARSE_TAG`）。
+
+### 新增
+
+- **`dev/push-images.sh`：把上游镜像同步到 TCR**：把发布态 compose 里**非 wist\*** 的镜像
+  （VictoriaMetrics / wparse）推到指定 registry（默认 `dy-sec.tencentcloudcr.com/cloud`），供内网 /
+  客户环境统一从 TCR 拉取。推前先探目标（已存在且 digest 一致则跳过）、做登录预检；推完自动 inspect
+  校验 digest 落地。用法见 `dev/README.md`。
+
 ## [0.1.31-alpha] - 2026-10-13
 
 ### 变更

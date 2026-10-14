@@ -57,6 +57,7 @@ x-topology/wist/                  <- $WIST
 | 不要 agent 面 / 不想碰 sudo | `./dev/svc.sh start --no-forward` |
 | 把本机网关接入本机中心 | 网关页「链接上级」提交接入链接；`./dev/svc.sh start gwlinkd` 把它起起来（见「接入上级」一节） |
 | 断开与中心的连接（回到未接入） | `./dev/unlink-center.sh`（停 gwlinkd → 调 `wist-gwlinkd unlink` → **再起回** gwlinkd；可 `--dry-run`／`--no-restart`；加 `--forget-center` 连中心 CA 也清） |
+| 把 compose 里非 wist\* 的上游镜像（VM / wparse）同步到 TCR | `./dev/push-images.sh`（先 `--dry-run` 看计划；详见「上游镜像同步到 TCR」一节） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
@@ -287,6 +288,43 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 它删**已知的每一份**中心 CA（`trust_bundle` 指向的、`state/` 里的副本、配置目录下的旧副本，去重）
 （之后 gwlinkd 会 WARN 回落公共根，重接时写回新 CA 即恢复）。
 
+## 上游镜像同步到 TCR（`push-images.sh`）
+
+`sys/docker-compose.yml` 里的镜像分两类：**wist\*** 由发布流水线双推（`ghcr.io/dayu-sec/*` 与
+`dy-sec.tencentcloudcr.com/cloud/*`），TCR 里本来就有；**victoria-metrics / wparse 是上游镜像**
+（`victoriametrics/victoria-metrics`、`ghcr.io/wp-labs/warp-parse`），TCR 里**没有**。内网 / 客户环境
+只方便拉 TCR 时，用 `./dev/push-images.sh` 把非 wist\* 的那几个也推进同一个 `cloud` 命名空间：
+
+```bash
+./dev/push-images.sh --dry-run     # 只列「会推哪些、推到哪」
+./dev/push-images.sh               # 推（先 `docker login dy-sec.tencentcloudcr.com`）
+./dev/push-images.sh --force       # 云上已有也覆盖推（默认已有就跳过）
+```
+
+- **登录预检（先查再推）**：推之前先查本机是否已为 `TARGET_HOST` 存了登录凭据（与 docker 自身同一套
+  解析：`credHelpers[host]` → `credsStore` → 内联 `auths`）。**没登录就直接报错退出**（不撞 401）；
+  `--dry-run` 只告警继续。查不了（无 python3）或想绕过预检：`SKIP_AUTH_CHECK=1`。
+  ⚠ 预检只判「有没有凭据」，判不了「凭据是否有 push 权限 / 是否过期」——那只有真推才知道。
+- **失败分类提示**：推送失败会按报错给出方向 —— `429 Too Many Requests` → **源仓库限流**（`docker.io`
+  匿名拉取有额度：`docker login docker.io` 提高额度，或稍后重试）；`401/403 unauthorized` → **目标鉴权**
+  （`docker login <目标 host>`）。
+- **云上已存在先探后推**：默认先**只读探一下**目标仓库（`buildx imagetools inspect`，不 pull、不下载）——
+  命中且与源 **digest 一致**就**跳过**（幂等，重复跑不白推）；命中但 digest 不同（上游 tag 被重指等）
+  默认**只告警不覆盖**；确实要覆盖加 `--force`。探不到（未登录 / 网络问题）不假装「不存在」，仍会尝试推送。
+- **推完自动自检**：每推完一个就**再 inspect 一遍**目标地址、比对 digest 是否落地，不符则整趟以非零码退出
+  （不只看 `push` 命令的退出码就算成功）。buildx 路径比**源 index digest**（imagetools 逐字节保留）；
+  `--method pull` 路径比 **`docker push` 输出里的平台 digest**（只推当前架构，digest 本就与源 index 不同）。
+
+- **取镜像的唯一源是 `docker compose config --images`** —— 让 Compose 自己解析 compose 里的 `${VAR}`
+  （值来自 `sys/merged_vars.yml` 产品默认 + 栈根 `.env` 现场覆盖），脚本不另造一套解析规则。
+- 目标仓库名默认取源镜像**末段**（`victoriametrics/victoria-metrics` → `cloud/victoria-metrics`），
+  与 `cloud/wist-gateway` 的扁平命名一致；要保留源路径加 `--keep-path`；换目标用 `--registry`。
+- 默认走 `docker buildx imagetools create`：**不落本地、保留多架构 manifest**（`docker pull/tag/push`
+  只推当前宿主那一种架构）；无 buildx 时自动回落 `--method pull`。
+- 推完按脚本末尾提示把 compose 指过来：compose 的三个源前缀 `WIST_SPC` / `WARP_SPC` / `VM_SPC`
+  （默认见 `sys/setting/vars.yml`）在 `values/value.yml` 覆盖成 `${TARGET_REGISTRY}` 后 `gops sys localize`
+  （tag 不变）。例：VM 撞 Docker Hub 限流时，把 `VM_SPC` 指到 `quay.io/victoriametrics` 即可换源。
+
 ## 注意事项
 
 1. **gateway 是 HTTPS**。排查时用 `https://` + `curl -k`；用 `http://` 会得到 TLS 握手失败
@@ -335,6 +373,7 @@ dev/
   svc.sh                        # 唯一入口：start / stop / restart / status（管 vm/wparse/web/forward/gateway/gwlinkd）
   setup-domain.sh               # 按需：把网关切到某域名（在共享身份 identity/gateway 建/复用 CA + 签叶证书 + 改配置）
   unlink-center.sh              # 按需：断开与 Center 的连接（停 gwlinkd → unlink → 起回；见「接入上级」小节）
+  push-images.sh                # 按需：把 compose 里非 wist* 的上游镜像（VM / wparse）同步到腾讯云 TCR
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
   tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）
     align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）

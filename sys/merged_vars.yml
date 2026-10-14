@@ -1,16 +1,18 @@
 system:
-- name: IMAGE_SPC
+- name: WIST_SPC
   value: ghcr.io/dayu-sec
+- name: WARP_SPC
+  value: ghcr.io/wp-labs
+- name: VM_SPC
+  value: quay.io/victoriametrics
 - name: GATEWAY_TAG
   value: v0.9.1-alpha
 - name: WEB_TAG
   value: v0.6.0-alpha
 - name: VM_TAG
   value: v1.153.0
-- name: WPARSE_IMAGE
-  value: ghcr.io/wp-labs/warp-parse
 - name: WPARSE_TAG
-  value: 0.27.1-alpha
+  value: 0.29.1-alpha
 - name: GATEWAY_PORT
   value: 443
 - name: WEB_PORT

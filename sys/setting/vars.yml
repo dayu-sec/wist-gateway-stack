@@ -15,8 +15,14 @@
 #   - 容器内端口/路径/服务名是应用契约，直接写在 sys/docker-compose.yml 里。
 system:
   # 镜像源前缀：国内走腾讯云 TCR，境外改成 ghcr.io/dayu-sec
-  - name: IMAGE_SPC
+  - name: WIST_SPC
     value: ghcr.io/dayu-sec
+
+  - name: WARP_SPC
+    value: ghcr.io/wp-labs
+
+  - name: VM_SPC
+    value: quay.io/victoriametrics
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
@@ -26,15 +32,11 @@ system:
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.153.0
-  # wparse 镜像仓库与 tag：来自上游（无 TCR 镜像），内网/客户环境拉不到 ghcr.io 时
-  # 把 WPARSE_IMAGE 指向内网镜像仓库（同步同版本镜像过去），tag 不变。
-  - name: WPARSE_IMAGE
-    value: ghcr.io/wp-labs/warp-parse
   # wparse 版本与 data-plane 工程强耦合（conf/connectors/models/topology 随引擎版本变），
   # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
   # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: 0.27.1-alpha
+    value: 0.29.1-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

@@ -5,26 +5,26 @@
 # 网关持久数据在 `<栈根>/dev/configs/gateway`（发布态另用 `<栈根>/configs/gateway`，两套目录互不影响）。
 #
 # 用法：
-#   ./dev/svc.sh start   [组件…] [--no-build] [--no-forward] [--no-gwlinkd] [--dry-run]
+#   ./dev/svc.sh start   [组件…] [--no-build] [--no-forward] [--dry-run]
 #   ./dev/svc.sh stop    [组件…]
-#   ./dev/svc.sh restart [组件…] [--no-build] [--no-forward] [--no-gwlinkd] [--dry-run]
+#   ./dev/svc.sh restart [组件…] [--no-build] [--no-forward] [--dry-run]
 #                        # 停所选组件（逆序）再起回（正序）—— 「改了配置/代码要生效」用它
 #   ./dev/svc.sh status
 #   ./dev/svc.sh token    # 打印**开发态**网关的 admin token 与出处（登录/管理 API 用）
 #
-#   组件（不给 = vm|wparse|web|forward|gateway|gwlinkd）：vm | wparse | web | gateway | forward | gwlinkd（也可写 all）
+#   组件（不给 = vm|wparse|web|forward|gateway）：vm | wparse | web | gateway | forward（也可写 all）
 #     forward = `FORWARD_LISTEN （默认 443）→ 网关监听端口` 的纯 TCP 转发。它就一件事：把发布态由
 #     docker 提供的那一跳（`${GATEWAY_PORT}:3000`）在 dev 态补上，好让 agentd 用**不带端口**的域名走 443。
 #     它在**默认 start 里**（agent 能不能连上来是日常问题，不该靠人记得敲第二个命令）；
 #     绑 <1024 的端口要 sudo：能免密就用、交互终端上要一次密码、实在要不到就**跳过并告知**
 #     （不拖垮整次 start）。不想碰权限/不需要 agent 面就走 `--no-forward`。
-#     gwlinkd = 网关**宿主侧**常驻（把网关接入上级控制中心）。**轮询网关**、消费「链接上级」页提交的接入请求，
-#     完成 link-upstream/register（此后 mTLS）。**配置驱动**：读 <home>/gwlinkd.toml（缺了就生成一份模板）。
-#     它在**默认 start 里**（页面接入靠它拉取）。不想起就走 `--no-gwlinkd`。
+#
+#   注：gwlinkd（网关**宿主侧**常驻、接入上级控制中心）**不由本脚本管** —— 不构建、不起、不停、不看。
+#   它归**系统服务**：装 / 更新 / 看 / 回滚走 `./dev/install-gwlinkd-dev.sh`；断开接入走 `./dev/unlink-center.sh`。
 #
 # 同一口径（不再有「有的跳过、有的报错」）：
-#   start：先 `cargo build` 一次（wist-gateway + wist-agentd + wist-gwlinkd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
-#          每个组件**已在运行则跳过**；按 vm → wparse → web → forward → gateway → gwlinkd 顺序；
+#   start：先 `cargo build` 一次（wist-gateway + wist-agentd；`--no-build` 或 `SKIP_BUILD=1` 跳过）；
+#          每个组件**已在运行则跳过**；按 vm → wparse → web → forward → gateway 顺序；
 #          各组件**全部后台常驻**（不随本脚本退出/关终端而停）；起完就返回。
 #          **start 从不接管/杀已经在跑的进程**（包括 gateway）—— 要重启就用 `restart`（= 停 + 起）。
 #   stop ：按 start 的**逆序**停；未在跑的是 no-op。
@@ -32,8 +32,8 @@
 #   status：只读，打印各组件的当前状态。
 #
 # 例：
-#   ./dev/svc.sh start                  # 全栈（日常；含 443 转发 + gwlinkd）
-#   ./dev/svc.sh start --no-forward --no-gwlinkd   # 不要 agent 面 / 不接入上级
+#   ./dev/svc.sh start                  # 全栈（日常；含 443 转发）
+#   ./dev/svc.sh start --no-forward     # 不要 agent 面 / 不碰 sudo
 #   ./dev/svc.sh restart web            # 只重启前端（gateway 已在跑时）
 #   ./dev/svc.sh restart gateway --no-build   # 改了网关配置/代码后重启网关
 #   ./dev/svc.sh restart                # 全栈重启
@@ -41,8 +41,8 @@
 #   ./dev/svc.sh status
 #
 # 可覆盖 env（与旧的分散脚本同口径）：
-#   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward；SKIP_GWLINKD=1 等价 --no-gwlinkd
-#   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  WIST_GWLINKD_HOME（默认 <栈根>/dev/configs/gwlinkd）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
+#   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward
+#   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
 #   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
 #   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
@@ -55,6 +55,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# 2026-10 目录重组：crate / 前端 / 知识库收拢进 `wist/` 仓组。脚本还在旧栈位置
+# （wist-stack/wist-gateway-stack/dev）时上一级是 x-topology，wist 组是其下的 `wist/`；
+# 脚本随栈迁到 wist/wist-gateway-stack/dev 后上一级本身就是 wist 组 —— 两种位置都能解析。
+if [[ -d "${ROOT_DIR}/wist/wist-gateway" ]]; then
+  ROOT_DIR="${ROOT_DIR}/wist"
+# 集成区与组件区为同级目录时（如 x-topology/wist-stack 与 x-topology/wist）
+elif [[ -d "${ROOT_DIR}/../wist/wist-gateway" ]]; then
+  ROOT_DIR="$(cd "${ROOT_DIR}/../wist" && pwd)"
+fi
 GW_CRATE="${ROOT_DIR}/wist-gateway"
 AGENTD_CRATE="${ROOT_DIR}/wist-agentd"
 WIST_KNOWLEDGE_DIR="${WIST_KNOWLEDGE_DIR:-${ROOT_DIR}/wist-knowledge}"
@@ -82,18 +91,9 @@ WPARSE_BIN="${WPARSE_BIN:-${SCRIPT_DIR}/bin/wparse}"
 WPARSE_PIDFILE="${WPARSE_WORK_ROOT}/data/logs/wparse.pid"
 export WPARSE_VM_ENDPOINT="${WPARSE_VM_ENDPOINT:-http://127.0.0.1:18429}"
 export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001}"
-# ── gwlinkd（接入上级控制中心的**宿主侧常驻**；随网关走）──
-# **配置驱动**：读 <home>/gwlinkd.toml（缺了就生成一份带注释的模板），轮询网关、
-# 消费「链接上级」页提交的接入请求并完成 link-upstream/register，所以排在 gateway 之后起。
-GWLINKD_CRATE="${ROOT_DIR}/wist-gwlinkd"
-GWLINKD_HOME="${WIST_GWLINKD_HOME:-${STACK_ROOT}/dev/configs/gwlinkd}"
-GWLINKD_CONFIG="${GWLINKD_HOME}/gwlinkd.toml"
-# **现场态配置**（中心地址 / 网关标识 / 中心信任锚）与 dev 主配置**分开**，并放在栈根 `identity/` 下
-# —— 与发布态**共用同一份**（身份/现场选择是栈级唯一一份；主配置才是每态一份的渲染物）。
-GWLINKD_IDENTITY_DIR="${STACK_ROOT}/identity/gwlinkd"
-GWLINKD_PUB="${GWLINKD_IDENTITY_DIR}/gwlinkd-pub.toml"
-GWLINKD_LOG="${GWLINKD_HOME}/gwlinkd.log"
-GWLINKD_PIDFILE="${GWLINKD_HOME}/gwlinkd.pid"
+# ── gwlinkd（网关**宿主侧**常驻、接入上级控制中心）**不归本脚本管** ──
+# 它已从「svc.sh 的组件」移到**系统服务**：装/更新/看/回滚走 `dev/install-gwlinkd-dev.sh`，
+# 断开接入走 `dev/unlink-center.sh`（它们自己解析 gwlinkd 的路径与配置）。这里不再持有它的任何变量。
 # ── 可选：端口转发（补上发布态由 docker 提供的那一跳）──
 FORWARD_LISTEN="${FORWARD_LISTEN:-443}"
 FORWARD_BIND="${FORWARD_BIND:-0.0.0.0}"
@@ -414,7 +414,7 @@ stop_web() {
 # ────────────────────────────────────────────────────────────────────────────
 
 build_binaries() {
-  echo "== 构建 Rust 二进制（wist-gateway / wist-agentd / wist-gwlinkd）=="
+  echo "== 构建 Rust 二进制（wist-gateway / wist-agentd）=="
   if [[ "${NO_BUILD}" == "1" ]]; then
     echo "  已跳过（--no-build / SKIP_BUILD=1）"
   else
@@ -422,10 +422,9 @@ build_binaries() {
     # 不重定向输出：编译错误必须让操作者看见。
     cargo build --manifest-path "${GW_CRATE}/Cargo.toml"
     cargo build --manifest-path "${AGENTD_CRATE}/Cargo.toml"
-    cargo build --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
   fi
   local bin
-  for bin in "${GW_CRATE}/target/debug/wist-gateway" "${AGENTD_CRATE}/target/debug/wist-agentd" "${GWLINKD_CRATE}/target/debug/wist-gwlinkd"; do
+  for bin in "${GW_CRATE}/target/debug/wist-gateway" "${AGENTD_CRATE}/target/debug/wist-agentd"; do
     [[ -x "${bin}" ]] || die "缺少可执行文件：${bin}（去掉 --no-build 重跑以构建）"
   done
 }
@@ -853,129 +852,6 @@ stop_gateway() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# 组件：gwlinkd（把网关接入上级控制中心）
-#
-# gwlinkd 是网关**宿主侧**的容器外常驻（CR-003），随网关走 —— 所以它是**本栈**的组件（不是 center-stack）。
-# 它**轮询网关**、消费「链接上级」页提交的接入请求，完成 link-upstream/register，再回报结果（此后走 mTLS）。
-#
-# **配置驱动**：读 `${GWLINKD_CONFIG}`（缺了就 `wist-gwlinkd init-config` 生成带注释的模板）。
-# 页面路要在配置里设 `gateway_self_endpoint` + `gateway_self_ca`（否则它不去拉网关）。
-gwlinkd_pid() {
-  local pid=""
-  if [[ -f "${GWLINKD_PIDFILE}" ]]; then
-    pid="$(cat "${GWLINKD_PIDFILE}" 2>/dev/null || true)"
-    if [[ -n "${pid}" ]] && pid_alive "${pid}"; then
-      echo "${pid}"
-      return 0
-    fi
-  fi
-  pgrep -f 'wist-gwlinkd run' 2>/dev/null | head -1 || true
-}
-
-gwlinkd_up() { [[ -n "$(gwlinkd_pid)" ]]; }
-
-# 发布 ②「Agent 包交付」：dev 网关在宿主、无容器 → 缺这两项就以 <栈根>/packages 补上（两项同一绝对目录）。
-# 幂等：已配就跳过。缺了会让 gwlinkd 收到 push-agent-package 计划时报「未配置 agent_package_drop_dir」。
-ensure_gwlinkd_agent_package() {
-  if grep -q '^[[:space:]]*agent_package_drop_dir[[:space:]]*=' "${GWLINKD_CONFIG}"; then
-    return 0
-  fi
-  local drop="${STACK_ROOT}/packages"
-  mkdir -p "${drop}"
-  python3 - "${GWLINKD_CONFIG}" "${drop}" <<'PY'
-import sys
-path, drop = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as handle:
-    lines = handle.read().splitlines()
-insert = [
-    "",
-    "# 发布 ②「Agent 包交付」：dev 网关在宿主、无容器 → 两项填同一绝对目录",
-    'agent_package_drop_dir = "%s"' % drop,
-    'agent_package_container_dir = "%s"' % drop,
-]
-idx = next((i for i, line in enumerate(lines) if line.strip().startswith("[[")), len(lines))
-lines = lines[:idx] + insert + lines[idx:]
-with open(path, "w", encoding="utf-8") as handle:
-    handle.write("\n".join(lines) + "\n")
-print("  已补 ② 投放目录配置：", path)
-PY
-}
-
-# dev 侧把**身份目录**指向栈根 `identity/gwlinkd/`（与发布态共用同一份身份）：
-# 主配置里的 `state_dir` 仍是 dev 本地运行态（锁 / 簿记），身份材料（证书 + 私钥 / 信任锚）不落在那里。
-# 幂等：已配就跳过。
-ensure_gwlinkd_identity_dir() {
-  if grep -q '^[[:space:]]*identity_dir[[:space:]]*=' "${GWLINKD_CONFIG}"; then
-    return 0
-  fi
-  python3 - "${GWLINKD_CONFIG}" "${GWLINKD_IDENTITY_DIR}" <<'PY'
-import sys
-path, identity = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as handle:
-    lines = handle.read().splitlines()
-insert = [
-    "",
-    "# 身份材料（客户端证书 + 私钥、中心信任锚）落栈根 identity/ —— dev 与发布态共用一份",
-    'identity_dir = "%s"' % identity,
-]
-idx = next((i for i, line in enumerate(lines) if line.strip().startswith("[")), len(lines))
-lines = lines[:idx] + insert + lines[idx:]
-with open(path, "w", encoding="utf-8") as handle:
-    handle.write("\n".join(lines) + "\n")
-print("  已补 identity_dir：", path)
-PY
-}
-
-start_gwlinkd() {
-  echo "== gwlinkd（接入上级：轮询网关「链接上级」页）=="
-  if gwlinkd_up; then
-    echo "  已在运行（pid=$(gwlinkd_pid)），跳过。"
-    return 0
-  fi
-  local bin="${GWLINKD_CRATE}/target/debug/wist-gwlinkd"
-  [[ -x "${bin}" ]] || die "缺 gwlinkd 二进制：${bin}"
-  mkdir -p "${GWLINKD_HOME}" "${GWLINKD_IDENTITY_DIR}"
-  # 现场态配置的落点（中心地址 / 网关标识 / 中心信任锚）—— **与发布态共用同一份**：
-  # 身份与现场选择是栈级唯一一份，主配置才是每态一份的渲染物。
-  export WIST_GWLINKD_PUB_CONFIG="${GWLINKD_PUB}"
-  # 配置驱动：缺配置就生成主配置 + 现场态骶架（均不含密钥），由运维/页面填入中心地址等。
-  if [[ ! -f "${GWLINKD_CONFIG}" ]]; then
-    "${bin}" init-config "${GWLINKD_CONFIG}"
-    echo "  已生成 gwlinkd 配置：${GWLINKD_CONFIG}（+ 现场态 ${GWLINKD_PUB}）"
-    echo "  → 接入中心：填 ${GWLINKD_PUB} 的 control_center_endpoint（自签中心再填 trust_bundle）；"
-    echo "    页面路再设 gateway_self_endpoint / gateway_self_ca，改完重启本组件。"
-  fi
-  ensure_gwlinkd_identity_dir
-  # 发布 ② 交付：dev 下缺 agent_package_drop_dir 就补上（<栈根>/packages，两项同一绝对目录）。
-  ensure_gwlinkd_agent_package
-  WIST_GWLINKD_CONFIG="${GWLINKD_CONFIG}" WIST_GWLINKD_PUB_CONFIG="${GWLINKD_PUB}" \
-    nohup "${bin}" run >"${GWLINKD_LOG}" 2>&1 &
-  local pid=$!
-  echo "${pid}" >"${GWLINKD_PIDFILE}"
-  sleep 2
-  if ! pid_alive "${pid}"; then
-    echo "  [warn] gwlinkd 未起来，见 ${GWLINKD_LOG}" >&2
-    rm -f "${GWLINKD_PIDFILE}"
-    return 1
-  fi
-  echo "  gwlinkd 在跑（pid=${pid}）。最近日志："
-  tail -n 2 "${GWLINKD_LOG}" 2>/dev/null || true
-}
-
-stop_gwlinkd() {
-  echo "== gwlinkd =="
-  local pid
-  pid="$(gwlinkd_pid)"
-  if [[ -n "${pid}" ]]; then
-    kill "${pid}" 2>/dev/null || true
-    echo "  已停止（pid=${pid}）。"
-  else
-    echo "  未在运行。"
-  fi
-  rm -f "${GWLINKD_PIDFILE}"
-}
-
-# ────────────────────────────────────────────────────────────────────────────
 # 可选组件：端口转发（`FORWARD_LISTEN` → 127.0.0.1:<网关端口>）
 #
 # 为什么单独一个组件：发布态 agentd 走的 `443` 是 docker 的端口映射给的；dev 态网关是普通进程、
@@ -1179,17 +1055,6 @@ cmd_status() {
   fi
 
   # 登录/管理 API 的 token 常被翻错地方（仓库里还有一份发布态配置）。这里只指个路。
-  local gwlinkd_state gwlinkd_pid_val gwid
-  gwlinkd_pid_val="$(gwlinkd_pid)"
-  if [[ -n "${gwlinkd_pid_val}" ]]; then
-    # `gateway_id` 在**现场态**配置里（与主配置分文件）。
-    gwid="$(sed -n 's/^gateway_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${GWLINKD_PUB}" 2>/dev/null | head -1)"
-    gwlinkd_state="up   pid=${gwlinkd_pid_val}（gateway_id=${gwid:-?}）"
-  else
-    gwlinkd_state="down （页面接入靠它拉取；默认 start 会带上）"
-  fi
-  printf '  %-8s %s\n' "gwlinkd" "${gwlinkd_state}"
-
   printf '  %-8s %s\n' "token" "登录管理员界面用的 token：./dev/svc.sh token"
 }
 
@@ -1230,16 +1095,14 @@ cmd="${1:-}"
 NO_BUILD=0
 DRY_RUN=0
 SKIP_FORWARD="${SKIP_FORWARD:-0}"
-SKIP_GWLINKD="${SKIP_GWLINKD:-0}"
 FORWARD_EXPLICIT=0
 requested=()
 for arg in "$@"; do
   case "${arg}" in
     --no-build) NO_BUILD=1 ;;
     --no-forward) SKIP_FORWARD=1 ;;
-    --no-gwlinkd) SKIP_GWLINKD=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    vm | wparse | web | gateway | forward | gwlinkd | all)
+    vm | wparse | web | gateway | forward | all)
       requested+=("${arg}")
       [[ "${arg}" == "forward" ]] && FORWARD_EXPLICIT=1
       ;;
@@ -1252,13 +1115,10 @@ done
 # 组件按固定顺序收集（不给 = 默认全量，**含 forward**；顺带达成 canonical 顺序）。
 # gateway 排最后（主服务；它起来时其余依赖已在）。全部后台常驻，顺序只是启动先后。
 # `--no-forward` / SKIP_FORWARD=1 把它整个摘掉（不需要 agent 面 / 不想碰 sudo 时用）。
-COMPONENTS=(vm wparse web forward gateway gwlinkd)
+COMPONENTS=(vm wparse web forward gateway)
 selected=()
 for c in "${COMPONENTS[@]}"; do
   if [[ "${SKIP_FORWARD}" == "1" && "${c}" == "forward" ]]; then
-    continue
-  fi
-  if [[ "${SKIP_GWLINKD}" == "1" && "${c}" == "gwlinkd" ]]; then
     continue
   fi
   if [[ ${#requested[@]} -eq 0 ]]; then
@@ -1287,7 +1147,6 @@ cmd_stop_selected() {
       web) stop_web ;;
       forward) stop_forward ;;
       gateway) stop_gateway ;;
-      gwlinkd) stop_gwlinkd ;;
     esac
     echo
   done
@@ -1301,7 +1160,7 @@ cmd_start_selected() {
   echo
   # 先构建一次（**只有构建失败才中止**：没二进制后面无从谈起）；再按序起。
   if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "  将要构建：cargo build（wist-gateway / wist-agentd / wist-gwlinkd）"
+    echo "  将要构建：cargo build（wist-gateway / wist-agentd）"
   else
     build_binaries
   fi
@@ -1321,7 +1180,6 @@ cmd_start_selected() {
            web) start_web ;;
            forward) start_forward "${FORWARD_EXPLICIT}" ;;
            gateway) start_gateway ;;
-           gwlinkd) start_gwlinkd ;;
          esac ); then
       :
     else

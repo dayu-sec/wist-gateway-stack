@@ -6,6 +6,9 @@
 **入口只有一个：`./dev/svc.sh`**。9 个分散的 start/stop 脚本已合并成它一个 —— 起/停/看全在里面，
 「什么被自动执行、什么不用」只在一处定义。
 
+> **gwlinkd 不在 `svc.sh` 里**：它是网关宿主侧的常驻，现归**系统服务** —— 装 / 更新 / 看 / 回滚走
+> `./dev/install-gwlinkd-dev.sh`，断开接入走 `./dev/unlink-center.sh`。`svc.sh` **不构建、不起、不停**它。
+
 ```
 wist-gateway-stack/
   data-plane/     # wparse 工程（conf/connectors/models/topology），开发态与发布态共用
@@ -28,7 +31,7 @@ x-topology/wist/                  <- $WIST
 ## 快速开始
 
 ```bash
-# 起全栈（日常）：构建一次 → 六个组件全部后台常驻（VM/wparse/web/forward/gateway/gwlinkd）
+# 起全栈（日常）：构建一次 → 五个组件全部后台常驻（VM/wparse/web/forward/gateway）
 ./dev/svc.sh start
 
 # 只看计划，不启动
@@ -40,7 +43,7 @@ x-topology/wist/                  <- $WIST
 # 重启（停 → 起）：改了配置/代码要生效时用（如 setup-domain 后重启 gateway）
 ./dev/svc.sh restart gateway
 
-# 停全栈（逆序：gwlinkd → gateway → forward → web → wparse → VM）
+# 停全栈（逆序：gateway → forward → web → wparse → VM）
 ./dev/svc.sh stop
 ```
 
@@ -55,8 +58,10 @@ x-topology/wist/                  <- $WIST
 | 只停/起某个组件 | `./dev/svc.sh stop web` / `./dev/svc.sh start gateway --no-build` |
 | 换域名 | `./dev/setup-domain.sh <域名>`（改配置 + 重签证书，**改完 `./dev/svc.sh restart gateway`**） |
 | 不要 agent 面 / 不想碰 sudo | `./dev/svc.sh start --no-forward` |
-| 把本机网关接入本机中心 | 网关页「链接上级」提交接入链接；`./dev/svc.sh start gwlinkd` 把它起起来（见「接入上级」一节） |
-| 断开与中心的连接（回到未接入） | `./dev/unlink-center.sh`（停 gwlinkd → 调 `wist-gwlinkd unlink` → **再起回** gwlinkd；可 `--dry-run`／`--no-restart`；加 `--forget-center` 连中心 CA 也清） |
+| 把本机网关接入本机中心 | 网关页「链接上级」提交接入链接；gwlinkd 在跑（系统服务）时会自动拉取（见「接入上级」一节） |
+| 断开与中心的连接（回到未接入） | `./dev/unlink-center.sh`（停 gwlinkd 服务 → 调 `wist-gwlinkd unlink` → **再起回**；可 `--dry-run`／`--no-restart`；加 `--forget-center` 连中心 CA 也清） |
+| 让**系统服务**跑我刚编的 gwlinkd（发布态已装服务时） | `./dev/install-gwlinkd-dev.sh`（先 `--dry-run` 看计划；详见「把本机编译的 gwlinkd 发布到系统服务」一节） |
+| 跑一次 gwlinkd 的子命令（`diagnose` / `version` / `service status`…） | `wist-gwlinkd diagnose` 单独就够（`--conf` 缺省时回落已装服务定义）；要**本地构建**或看落点用 `./dev/gwlinkd.sh --paths` |
 | 把 compose 里非 wist\* 的上游镜像（VM / wparse）同步到 TCR | `./dev/push-images.sh`（先 `--dry-run` 看计划；详见「上游镜像同步到 TCR」一节） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
@@ -66,8 +71,7 @@ x-topology/wist/                  <- $WIST
 
 ## 组件与脚本
 
-`svc.sh` 管六个组件（顺序 = 依赖序）；`forward` 与 `gwlinkd` 在默认 `start` 里，可分别用
-`--no-forward` / `--no-gwlinkd` 摘掉：
+`svc.sh` 管**五个**组件（顺序 = 依赖序）；`forward` 在默认 `start` 里，可用 `--no-forward` 摘掉：
 
 | 组件 | 是什么 | 前台/后台 | 说明 |
 |---|---|---|---|
@@ -76,9 +80,10 @@ x-topology/wist/                  <- $WIST
 | `web` | 前端 vite dev server（`5174`） | 后台常驻 | `npm run dev`，工作目录 `$WIST/wist-gateway-web` |
 | `gateway` | 控制面后端（HTTPS `:3000`） | 后台常驻 | 跑在最后；`./dev/svc.sh stop gateway` 停 |
 | `forward` | `443 → 网关端口` 纯 TCP 转发 | 后台常驻 | **在默认 `start` 里**（绑 443 要 sudo；`--no-forward` 摘掉）；见下面「组件 forward」一节 |
-| `gwlinkd` | 网关**宿主侧**常驻：接入上级控制中心 | 后台常驻 | **在默认 `start` 里**（轮询网关、消费「链接上级」页请求；`--no-gwlinkd` 摘掉）；**配置驱动**（读 `dev/configs/gwlinkd/gwlinkd.toml`）；见「接入上级」一节 |
 
-**六个组件都是后台常驻**：`./dev/svc.sh start` 起完就返回，不会占住终端；停用 `./dev/svc.sh stop`
+> **gwlinkd 不是 `svc.sh` 的组件**（已移出）：它归**系统服务**（见「把本机编译的 gwlinkd 发布到系统服务」一节）。
+
+**五个组件都是后台常驻**：`./dev/svc.sh start` 起完就返回，不会占住终端；停用 `./dev/svc.sh stop`
 （`stop gateway` 会一并停掉 443 转发 —— 网关都停了，那个 443 只会让人看到 transport error）。
 
 ## 二进制与路径（开发态实际运行的东西）
@@ -232,17 +237,17 @@ agent 侧地址不必带端口）。**它是默认 `start` 的一部分** ——
 源 IP，但网关会以 **root** 跑，它写的 `state/*`（库、`knowledge/`、日志）都变成 root 所有，
 之后普通用户的 dev 会踩权限。
 
-## 接入上级（控制中心）：`svc.sh` 的 `gwlinkd` 组件
+## 接入上级（控制中心）：gwlinkd 常驻（**系统服务**）
 
-> **默认 `./dev/svc.sh start` 已经把 gwlinkd 带起来了**；只想单独起/停它就
-> `./dev/svc.sh start gwlinkd` / `./dev/svc.sh stop gwlinkd`。
+> gwlinkd 不在 `./dev/svc.sh` 里。它是**系统服务**常驻：装 / 更新 / 看走 `./dev/install-gwlinkd-dev.sh`
+> （`--status` 会打出它读的是哪份 bin/config/pub），断开接入走 `./dev/unlink-center.sh`。
 
 gwlinkd 是网关**宿主侧**的容器外常驻（设计 `gateway-secure-registration.md`，CR-003），**随网关走**：
 它**轮询网关**「链接上级」页提交的接入请求，完成 `link-upstream → register`（换客户端证书），
 此后走 mTLS 并周期 `status`，再消费升级计划。产品路径就是**页面**：在网关页「链接上级」粘一条接入链接。
 
-**配置驱动**：gwlinkd 读 `dev/configs/gwlinkd/gwlinkd.toml`（缺了 `svc.sh` 会用
-`wist-gwlinkd init-config` 生成一份带注释的模板）。要接入：
+**配置驱动**：gwlinkd 读**服务定义里那两份**（主配置 + 现场态；`./dev/install-gwlinkd-dev.sh --status`
+会打出来 —— 本机现状是 `<栈根>/configs/gwlinkd/gwlinkd.toml` + `<栈根>/identity/gwlinkd/gwlinkd-pub.toml`）。要接入：
 
 - `control_center_endpoint`：中心地址（自签中心再填 `trust_bundle` 指向它的 CA）；
 - 页面路还要设 `gateway_self_endpoint`（网关环回面，如 `https://127.0.0.1:3000`）+ `gateway_self_ca`
@@ -255,7 +260,8 @@ gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `fir
 - `gateway_id` 须与页面接入物里的 `gateway_id` 一致；
 - 接入成功的唯一副作用是往 `state/` 落客户端证书 —— 之后重启直接续用，不再需要接入券。
 
-可覆盖 env：仅 `WIST_GWLINKD_HOME`（gwlinkd 配置 + 状态目录，默认 `<栈根>/dev/configs/gwlinkd`）。
+> 改完这两份配置要生效：`./dev/install-gwlinkd-dev.sh`（它重渲染服务定义 + 重启；`--dry-run` 先看）。
+> 两份配置都是**交付物 / 现场态**：主配置由发布态渲染（`gops sys localize`），现场态在 `identity/` 下（与 dev 共用）。
 
 **发布 ②（中心下发 agent 包）还要配两项**（dev 网关跑在**宿主**上，没有容器 —— 两项填**同一个绝对目录**即可）：
 `agent_package_drop_dir = "<绝对路径，如 <栈根>/packages>"` + `agent_package_container_dir = "<同一个绝对路径>"`。
@@ -267,16 +273,18 @@ gwlinkd **只在未注册（首跑）时拉**页面请求（拉取发生在 `fir
 
 **断开连接**：`./dev/unlink-center.sh`。与 Center 的连接就是 gwlinkd 手里的**注册态**（客户端证书 / 链接
 配置 / 注册券 / 身份 / 实例）加 `gwlinkd.toml` 的 `link_token`。这个清理**归 gwlinkd 自己**（`wist-gwlinkd
-unlink`，与 link/`onboard` 同一个 owner），dev 脚本只负责**停进程 + 调它**，不做文件手术：
+unlink`，与 link/`onboard` 同一个 owner），dev 脚本只负责**停服务 + 调它**，不做文件手术：
 
 ```bash
-./dev/svc.sh stop gwlinkd                     # 运行中的常驻会拒绝 unlink（它会不停写回凭据）
-WIST_GWLINKD_CONFIG=dev/configs/gwlinkd/gwlinkd.toml \
-  ../wist-gwlinkd/target/debug/wist-gwlinkd unlink
+# 手工等价（`./dev/unlink-center.sh` 把这三步包了）：停服务 → 用**服务那份配置**跑 unlink → 起回服务。
+# 配置路径从服务定义读：./dev/install-gwlinkd-dev.sh --status
+WIST_GWLINKD_CONFIG=<主配置> WIST_GWLINKD_PUB_CONFIG=<现场态> \
+  /usr/local/bin/wist-gwlinkd unlink
 ```
 
-`./dev/unlink-center.sh [--dry-run] [--forget-center] [--no-restart]` 把三步包在一起：**停 gwlinkd →
-unlink → 再起回 gwlinkd**（起回后回到「等待页面接入请求」，组件不断档；要它就那样停着加 `--no-restart`）。
+`./dev/unlink-center.sh [--dry-run] [--forget-center] [--no-restart]` 把三步包在一起：**停 gwlinkd 服务 →
+unlink → 再起回**（起回后回到「等待页面接入请求」，组件不断档；要它就那样停着加 `--no-restart`）。
+它自己从**服务定义**里读 bin / config / pub（与 `install-gwlinkd-dev.sh` 同一口径），所以清的是**同一份**注册态。
 它**不**在 Center 侧注销（那是 center-stack 的事）：同一 `gateway_id` **无法**再接入 —— 中心没有「重置
 实例」，而且这是**有意**的安全边界（不把「初始化后可再置备」的口子开出来）。要再接入就在 Center **新建
 实例**、用它的**新 `gateway_id`**（gwlinkd 按新接入链接自动切过去）。**不做备份**：要留底就自己先拷
@@ -287,6 +295,40 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 重指进去）时也**不需要搬动**它。要连这张 CA 也一起清（真正「忘掉这个中心」）就加 `--forget-center`：
 它删**已知的每一份**中心 CA（`trust_bundle` 指向的、`state/` 里的副本、配置目录下的旧副本，去重）
 （之后 gwlinkd 会 WARN 回落公共根，重接时写回新 CA 即恢复）。
+
+## 把本机编译的 gwlinkd 发布到系统服务（`install-gwlinkd-dev.sh`）
+
+发布态把 gwlinkd 装成**系统服务**常驻（中心下发的安装脚本调：`wist-gwlinkd service install --system
+--run-as <部署用户> --bin /usr/local/bin/wist-gwlinkd --config <栈根>/configs/gwlinkd/gwlinkd.toml
+--pub-config <栈根>/identity/gwlinkd/gwlinkd-pub.toml`）。你在改 gwlinkd 源码，想让**这个服务跑的就是你刚编出来的那份**，用 `./dev/install-gwlinkd-dev.sh`：
+
+```bash
+./dev/install-gwlinkd-dev.sh --dry-run   # 只看计划（连会写进去的服务定义都渲染出来）
+./dev/install-gwlinkd-dev.sh             # 构建 debug → 备份旧二进制 → 换上 → 重写定义并重启 → 验证
+./dev/install-gwlinkd-dev.sh --release   # 用 target/release 的产物（默认 debug，与 dev 其余脚本同口径）
+./dev/install-gwlinkd-dev.sh --status    # 只看服务现状（不构建、不改任何东西）
+./dev/install-gwlinkd-dev.sh --rollback  # 换回最近一次备份并重启
+```
+
+- **编译归本脚本**：默认 `cargo build`（debug，编 `<crate>/target/debug/wist-gwlinkd`）→ 拷过去；
+  `--release` 编 release、`--no-build` / `SKIP_BUILD=1` 用现有产物。这也是 `svc.sh` 不再编 gwlinkd 之后的唯一构建入口。
+
+- **只动二进制 + 服务定义**：不写配置、不碰注册态/凭据（enrollment 与 `state/` 原样）—— 它就是「换代码」这一件事。
+- **沿用服务现有的发布态配置**：`--config` / `--pub-config` 直接从已装的 plist/unit 里读出来（读不到才退回本栈的
+  `<栈根>/configs/gwlinkd/gwlinkd.toml`、`<栈根>/identity/gwlinkd/gwlinkd-pub.toml`）；要换用别的加
+  `WIST_GWLINKD_DEV_CONFIG` / `WIST_GWLINKD_DEV_PUB_CONFIG`。
+- **拷到服务的位置**：默认 `/usr/local/bin/wist-gwlinkd`（`WIST_GWLINKD_DEV_BIN` 可改）；覆盖前先 `cp -p` 备份成
+  `*.bak-<时间戳>`，换完用 sha256 校验（不一致即报错），`--rollback` 换回最近一次。
+- **运行身份仍是部署用户**（`--run-as $(id -un)`）：别让服务以 root 跑 —— gwlinkd 会回写配置、落身份、驱动
+  `gops` 升级，那些都该是部署用户的属主（与中心安装脚本同一口径）。
+- **gwlinkd 只归这一个服务**：`svc.sh` 已不管它（不构建、不起、不停）。本脚本装服务前只兜底清掉
+  「老的 nohup 形态」残留进程 —— 它不归服务管理器管，却占着同一个 state 目录的 `flock`，留着服务起不来。
+- **要停 / 卸载**：`sudo /usr/local/bin/wist-gwlinkd service uninstall --system`（停用并删定义）。
+  只想临时停一下：macOS `sudo launchctl bootout system/com.dayu-sec.wist-gwlinkd`、
+  Linux `sudo systemctl stop wist-gwlinkd`。
+- **不想敲那三串长路径**：`wist-gwlinkd` 自己就能兜（`--conf` 缺省时，`diagnose` / `service status` 回落读**已装服务定义**里那份，见它自己的 README）；dev 侧的 `./dev/gwlinkd.sh <子命令>` 是另一条——它把 bin/config/pub 从定义里读出来、默认用**服务已装的那个二进制**，还能 `--bin` 指定本地构建、`--paths` 只看落点。它只是穿透，不管进程生命周期（要 root 的子命令自己加 `sudo`）。
+
+> 日志：macOS `sudo tail -f /var/log/wist-gwlinkd/gwlinkd.err`；Linux `journalctl -u wist-gwlinkd -f`。
 
 ## 上游镜像同步到 TCR（`push-images.sh`）
 
@@ -370,9 +412,11 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 ```
 dev/
   README.md                     # 本文件
-  svc.sh                        # 唯一入口：start / stop / restart / status（管 vm/wparse/web/forward/gateway/gwlinkd）
+  svc.sh                        # 唯一入口：start / stop / restart / status（管 vm/wparse/web/forward/gateway）
   setup-domain.sh               # 按需：把网关切到某域名（在共享身份 identity/gateway 建/复用 CA + 签叶证书 + 改配置）
-  unlink-center.sh              # 按需：断开与 Center 的连接（停 gwlinkd → unlink → 起回；见「接入上级」小节）
+  unlink-center.sh              # 按需：断开与 Center 的连接（停 gwlinkd 服务 → unlink → 起回；见「接入上级」小节）
+  install-gwlinkd-dev.sh        # 按需：把**本机编译的** gwlinkd 发布到系统服务（换二进制 + 重写定义 + 重启）
+  gwlinkd.sh                    # 按需：在**服务那份配置**上跑 gwlinkd 子命令（省掉三串长路径；--paths 看落点）
   push-images.sh                # 按需：把 compose 里非 wist* 的上游镜像（VM / wparse）同步到腾讯云 TCR
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
   tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）

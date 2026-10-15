@@ -23,7 +23,7 @@
 #   GWLINKD_UPGRADER_PROGRAM       升级执行器程序（空 = 不渲染，用 gwlinkd 缺省 gops）
 #   GWLINKD_UPGRADE_PROJECT_DIR    gops 工程根（含 ops-prj.yml；空 = 不渲染；**绝对路径**）
 #
-# 注意：**现场选择**（CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE）**不经过本脚本**
+# 注意：**现场选择**（GWLINKD_CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE）**不经过本脚本**
 # —— 它们由 `scripts/init-gwlinkd-pub.sh` 写进现场态**值文件** `identity/gwlinkd/.env`
 # （**只写该值文件，不动声明 toml**）。
 #

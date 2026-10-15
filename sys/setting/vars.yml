@@ -124,13 +124,13 @@ system:
   #      · 现场态（永不重渲）——**声明 + 值分开**：
   #        声明 `identity/gwlinkd/gwlinkd-pub.toml`（只写 `${VAR}` 引用，由 tpl 机制渲染）；
   #        值   `identity/gwlinkd/.env`（scripts/init-gwlinkd-pub.sh 按缺补齐；下方
-  #        CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE 就是它的输入 ——
+  #        GWLINKD_CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE 就是它的输入 ——
   #        **脚本只写这个值文件，不动声明 toml**）。
   #        落在 identity/ 之下 ⇒ 随 contract 一起不进包 / 必进备份。
   #    一次性接入券 `link_token` 不在渲染值里：由「链接上级」页触发、gwlinkd 临时写进 `.env`，
   #    **接入成功后自行删除**。
   #    center 端点默认空：现场在 values/value.yml 覆盖后跑 `gops sys localize` 即生效。
-  - name: CENTER_ENDPOINT
+  - name: GWLINKD_CENTER_ENDPOINT
     value: ""
   - name: GWLINKD_GATEWAY_ID
     value: gw-local

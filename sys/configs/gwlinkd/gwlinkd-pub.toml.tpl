@@ -5,7 +5,7 @@
 # 因为值不在这里。真值在同目录的 `.env`（docker-compose 口径：`.env` 挨着本文件；**进程环境优先**）。
 #
 # 变量名用 gops 的系统变量名，好让现场脚本“原样搬”：
-#   CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE
+#   GWLINKD_CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE
 # 左侧是 gwlinkd 的配置键；网关「链接上级」页接入时，gwlinkd 会把值写进 `.env` 里
 # **本文件声明的那个变量名**（见 wist-gwlinkd 的 `upsert_link_settings`）。
 #
@@ -13,7 +13,7 @@
 # 这里三个都写全，避免“忘了跑安装脚本”只能看到“端点未配置”这种远端的症状。
 
 # 上级控制中心地址（空 = 尚未接入）
-control_center_endpoint = "${CENTER_ENDPOINT}"
+control_center_endpoint = "${GWLINKD_CENTER_ENDPOINT}"
 
 # 本网关在中心侧的标识（须与中心实例名一致）
 gateway_id = "${GWLINKD_GATEWAY_ID}"

@@ -111,7 +111,7 @@ system:
   - name: ARTIFACT_HOME
     value: https://github.com/dayu-sec
   - name: KNOWLEDGE_PATH
-    value: wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
+    value: wist-knowledge/releases/download/v0.1.6/wist-knowledge-0.1.6.tar.gz
   # 内网 / 镜像源示例（把上面两段**一起**换）：
   #   ARTIFACT_HOME: https://wist-1347593047.cos.ap-guangzhou.myqcloud.com
   #   KNOWLEDGE_PATH: wist-knowledge/v0.1.5/wist-knowledge-0.1.5.tar.gz

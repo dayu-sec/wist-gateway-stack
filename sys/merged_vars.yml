@@ -46,7 +46,7 @@ system:
 - name: ARTIFACT_HOME
   value: https://github.com/dayu-sec
 - name: KNOWLEDGE_PATH
-  value: wist-knowledge/releases/download/v0.1.4/wist-knowledge-0.1.4.tar.gz
+  value: wist-knowledge/releases/download/v0.1.6/wist-knowledge-0.1.6.tar.gz
 - name: GWLINKD_CENTER_ENDPOINT
   value: ''
 - name: GWLINKD_GATEWAY_ID

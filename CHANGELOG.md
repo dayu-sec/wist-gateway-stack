@@ -3,6 +3,37 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.34-alpha] - 2026-10-15
+
+### 新增
+
+- **`dev/install-gwlinkd-dev.sh`：把本机编译的 gwlinkd 发布到已装的系统服务**（开发机自用）——
+  构建 → 备份旧二进制 → 换上 → 重写服务定义并重启 → 验证；带 `--dry-run` / `--status` / `--rollback`。
+- **`dev/gwlinkd.sh`：在服务那份配置上跑 gwlinkd 子命令**（`diagnose` / `service status` …）——
+  bin / 主配置 / 现场态都从已装的服务定义里读，不必再敲那几串长路径；`--paths` 只看落点。
+
+### 变更
+
+- **gwlinkd 不再由 `dev/svc.sh` 管**：不构建、不起、不停、不看（组件、`--no-gwlinkd` 与相关变量 / 函数
+  全部移除）。宿主侧常驻改由**系统服务**托管 —— 发布态仍由中心下发的安装脚本装，开发态装/更新/回滚走
+  `dev/install-gwlinkd-dev.sh`。
+- **`dev/unlink-center.sh` 改为「服务感知」**：停 / 起走服务管理器（`launchctl` / `systemctl`），
+  bin / 主配置 / 现场态从服务定义读 —— 清的是**服务那一份**注册态，不再猜。
+- **gwlinkd 现场态变量名统一为 `GWLINKD_*`**（`CENTER_ENDPOINT` → `GWLINKD_CENTER_ENDPOINT`、
+  `TRUST_BUNDLE` → `GWLINKD_TRUST_BUNDLE`；`GWLINKD_GATEWAY_ID` 原本就带前缀）：与 gwlinkd 仓骨架同一套名，
+  避免「值写在一个名下、声明引用另一个名」的死键（最坑的是 `TRUST_BUNDLE=` 空着 —— 看着像信任锚没配，
+  实际生效的是 `GWLINKD_TRUST_BUNDLE`）。初始化脚本还会按**声明里引用的 `${VAR}`**
+  清掉未被引用的死键（读不到声明就不清，防清空）。
+
+### 升级注意
+
+- **已有现场：`.env` 里旧键的值要先搬到新键**（`CENTER_ENDPOINT` → `GWLINKD_CENTER_ENDPOINT`、
+  `TRUST_BUNDLE` → `GWLINKD_TRUST_BUNDLE`），再跑 `gops sys localize` —— 重渲会把未被声明引用的旧键
+  **自动清掉**，值不会跟着搬（中心地址 / 信任锚会变空 → 网关侧显示「未接入」）。
+- **gwlinkd 宿主侧常驻改由系统服务托管**：发布态由中心下发的安装脚本装（无需额外动作）；开发态用
+  `./dev/install-gwlinkd-dev.sh`。`svc.sh` 不再带 gwlinkd —— `./dev/svc.sh status` 也不会再列它。
+  macOS 上带 `--run-as` 的服务需 `wist-gwlinkd >= 0.10.0-alpha`（修了日志目录属主）。
+
 ## [0.1.33-alpha] - 2026-10-14
 
 ### 变更

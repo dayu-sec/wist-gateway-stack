@@ -25,6 +25,11 @@ dev/bin/
 /identity/
 # 开发态网关 home（`dev/svc.sh` 生成：含 admin token / TLS 私钥 / CA / store —— 同发布态，绝不入库）
 /dev/configs/
+# gwlinkd **运行态**：`state_dir` 写成相对路径时的落点 —— 开发态 `dev/configs/gwlinkd/gwlinkd.toml`
+# 就是 `state_dir = "state"`，从栈根起进程于是落在 `/state/`（单实例锁、升级簿记、注册凭据
+# `identity` 里的 `ident_*` 与 instance id）。含凭据、可重建，绝不入库。
+# 发布态的 `state_dir` 是绝对路径（`configs/gwlinkd/state`），已被上面的 `/configs/` 覆盖。
+/state/
 # 安装包投放目录（现场放 agent 安装包，只读挂给网关容器）
 /packages/
 

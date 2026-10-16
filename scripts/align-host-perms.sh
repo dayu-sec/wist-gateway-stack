@@ -4,11 +4,13 @@
 #
 # 为什么需要它：
 #   网关与数据面**固定以 uid:gid 999:999 运行**（镜像内如此，compose 里也显式钉死）。bind 挂载在
-#   Linux 上**不改变属主**（宿主是谁，容器里就是谁），于是两种稳定故障：
+#   Linux 上**不改变属主**（宿主是谁，容器里就是谁），于是三种稳定故障：
 #     · data-plane-run/{data,.run} 属主是 root/部署账号且 755 → 容器写不出锁文件
 #       （flock: cannot open lock file /data/.run/.wparse.lock: Permission denied）→ wparse 以 75 退出、无限重启；
 #     · configs/gateway/state/*.pem 是 600 且属主不是 999 → 容器读不到签名私钥 / CA
-#       （failed to read install script signing key ...: Permission denied）→ 网关拒绝启动。
+#       （failed to read install script signing key ...: Permission denied）→ 网关拒绝启动；
+#     · 栈根 `.wist/sec-value.yml` 由 init-gateway.sh 以 600 生成且属主不是 999 → 容器读不到密钥文件
+#       （failed to load secrets /secrets/sec-value.yml: system error）→ 网关拒绝启动、无限重启。
 #   更麻烦的是：Docker 在 `up` 时会**自行**把缺失的 bind 源目录建成 root:root 755 ——
 #   所以「属主取决于谁先创建」，只能在 `up` **之前**显式对齐。
 #
@@ -61,6 +63,8 @@ OWNER_GID="${SUDO_GID:-$(id -g)}"
 #     免得 Docker 先建出 root 属主的目录后部署账号自己都写不动。
 #   identity/*：站点身份（dev/prod 共用，容器只读挂载）—— 证书公开（2755）、私钥目录 2750
 #     （setgid 让宿主 openssl 新签的叶/密钥自动归容器组，否则容器读不到）。
+#   .wist/：栈根密钥目录（容器只读挂载到 /secrets；网关用 WIST_GATEWAY_SEC_FILE 读里面的
+#     sec-value.yml 解析 ${SEC_ADMIN_TOKEN}）—— 容器只读，2755（setgid 让 init 新生成的密钥文件自动归容器组）。
 #   需要容器写的目录 2770（组可写 + setgid）；容器只读的 2755（web 容器是 root，不需要属组）。
 # 边界：只对齐**挂载根与私钥**，不递归内容树 —— `configs/gateway/knowledge/`、`packages/` 里的
 #   文件由打包/投放侧保证可读（644/755），递归 chmod 一个内容树既不安全也没必要。
@@ -80,12 +84,14 @@ TARGET_DIRS=(
   "identity/web:2755"
   "identity/web/public:2755"
   "identity/web/private:2750"
+  ".wist:2755"
 )
 # 目标文件（**存在才处理**，不新建）：
 #   私钥 / 签名密钥 / CA 序列号（identity/**/private、configs/gateway/wist-gateway.toml）—— 容器要读，
 #     且含密钥，故 640（不是 644）；宿主 openssl 重签叶时会往 private 写、`.srl` 也归部署账号
 #     （曾被 root 跑过就会卡住下一次非 root 的签叶 —— 同一类“谁先创建就归谁”）。
 #   公开证书（identity/**/public）—— 公开信息，644。
+#   栈根密钥文件（.wist/sec-value.yml：admin token，网关从它解析 ${SEC_ADMIN_TOKEN}）—— 含密钥，640。
 #   注：`wist-gateway.value.json` 是**渲染源**，容器不读它，保持 init-gateway 的 600，这里不动。
 TARGET_FILES_SECRET=(
   identity/gateway/private/*.key.pem
@@ -94,6 +100,7 @@ TARGET_FILES_SECRET=(
   identity/web/private/*.key.pem
   identity/web/private/*.srl
   configs/gateway/wist-gateway.toml
+  .wist/sec-value.yml
 )
 TARGET_FILES_PUBLIC=(
   identity/gateway/public/*.crt.pem

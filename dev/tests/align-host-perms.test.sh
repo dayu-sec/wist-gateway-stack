@@ -67,15 +67,18 @@ align_as_root() { # 模拟 `sudo ./scripts/align-host-perms.sh`：euid=0，但�
 }
 seed_site() { # 一个「全新机器」的现场：部署账号拥有、最小权限
   rm -rf "${ROOT}"
-  # 私钥在共享身份 `identity/gateway/private`；store/配置在 `configs/gateway/state`（两处口径不同）。
-  mkdir -p "${ROOT}/configs/gateway/state" "${ROOT}/identity/gateway/private" "${ROOT}/data-plane-run"
+  # 私钥在共享身份 `identity/gateway/private`；store/配置在 `configs/gateway/state`（两处口径不同）；
+  # 栈根密钥文件 `.wist/sec-value.yml` 由 init-gateway.sh 生成，初始就是 600。
+  mkdir -p "${ROOT}/configs/gateway/state" "${ROOT}/identity/gateway/private" "${ROOT}/data-plane-run" "${ROOT}/.wist"
   printf -- '-----BEGIN PRIVATE KEY-----\nx\n' > "${ROOT}/identity/gateway/private/gateway-ca.key.pem"
   printf 'admin_api_token = "s"\n' > "${ROOT}/configs/gateway/wist-gateway.toml"
+  printf 'admin_token: deadbeef\n' > "${ROOT}/.wist/sec-value.yml"
   chown -R "${DEPLOY_UID}:${DEPLOY_GID}" "${ROOT}"
   chmod 600 "${ROOT}/identity/gateway/private/gateway-ca.key.pem"
   chmod 644 "${ROOT}/configs/gateway/wist-gateway.toml"
+  chmod 600 "${ROOT}/.wist/sec-value.yml"
   chmod 755 "${ROOT}/configs/gateway" "${ROOT}/configs/gateway/state" \
-    "${ROOT}/identity" "${ROOT}/identity/gateway" "${ROOT}/identity/gateway/private" "${ROOT}/data-plane-run"
+    "${ROOT}/identity" "${ROOT}/identity/gateway" "${ROOT}/identity/gateway/private" "${ROOT}/data-plane-run" "${ROOT}/.wist"
 }
 
 echo "== 1) 全新现场 → 对齐（模拟 sudo：euid=0，属主仍取部署账号）=="
@@ -89,20 +92,24 @@ chk "configs/gateway 权限" "2770" "$(st "${ROOT}/configs/gateway" | cut -d: -f
 chk "configs/gateway/state 权限" "2770" "$(st "${ROOT}/configs/gateway/state" | cut -d: -f3)"
 chk "私钥 属组:权限（600→640）" "999:640" "$(st "${ROOT}/identity/gateway/private/gateway-ca.key.pem" | cut -d: -f2,3)"
 chk "toml 属组:权限（644→640）" "999:640" "$(st "${ROOT}/configs/gateway/wist-gateway.toml" | cut -d: -f2,3)"
+chk ".wist 权限" "2755" "$(st "${ROOT}/.wist" | cut -d: -f3)"
+chk "栈根密钥文件 属组:权限（600→640）" "999:640" "$(st "${ROOT}/.wist/sec-value.yml" | cut -d: -f2,3)"
 
-echo "== 2) 容器身份 999:999：写运行目录 / 建库 / 读私钥与 toml =="
+echo "== 2) 容器身份 999:999：写运行目录 / 建库 / 读私钥、toml 与栈根密钥文件 =="
 as "${CONT_GID}" touch "${ROOT}/data-plane-run/.run/.wparse.lock"; chk "999 建 .wparse.lock" "0" "$?"
 chk "  锁文件属组=999（setgid 继承）" "999" "$(st "${ROOT}/data-plane-run/.run/.wparse.lock" | cut -d: -f2)"
 as "${CONT_GID}" sh -c "printf x > ${ROOT}/configs/gateway/state/store.db"; chk "999 在 state/ 建 store.db" "0" "$?"
 as "${CONT_GID}" cat "${ROOT}/identity/gateway/private/gateway-ca.key.pem" >/dev/null; chk "999 读私钥" "0" "$?"
 as "${CONT_GID}" cat "${ROOT}/configs/gateway/wist-gateway.toml" >/dev/null; chk "999 读 toml" "0" "$?"
+as "${CONT_GID}" cat "${ROOT}/.wist/sec-value.yml" >/dev/null; chk "999 读栈根密钥文件" "0" "$?"
 
 echo "== 3) 部署账号 1000:1000：能读私钥（备份/恢复不需提权）、能改配置 =="
 as "${DEPLOY_UID}" cat "${ROOT}/identity/gateway/private/gateway-ca.key.pem" >/dev/null; chk "1000 读私钥" "0" "$?"
 as "${DEPLOY_UID}" sh -c "printf 'x' >> ${ROOT}/configs/gateway/wist-gateway.toml"; chk "1000 改 toml" "0" "$?"
 
-echo "== 4) 无关宿主账号 1001：读不到私钥、连 state/ 都进不去 =="
+echo "== 4) 无关宿主账号 1001：读不到私钥与栈根密钥文件、连 state/ 都进不去 =="
 as "${OTHER_UID}" cat "${ROOT}/identity/gateway/private/gateway-ca.key.pem" >/dev/null 2>&1; chk_nz "1001 读私钥被拒" "$?"
+as "${OTHER_UID}" cat "${ROOT}/.wist/sec-value.yml" >/dev/null 2>&1; chk_nz "1001 读栈根密钥文件被拒" "$?"
 as "${OTHER_UID}" ls "${ROOT}/configs/gateway/state" >/dev/null 2>&1; chk_nz "1001 进不去 state/" "$?"
 
 echo "== 5) 幂等：部署账号（**不提权**）再跑 → 不写盘、exit 0 =="

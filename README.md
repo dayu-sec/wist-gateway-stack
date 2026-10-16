@@ -107,7 +107,7 @@ wist-gateway-stack/
     init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     init-web-conf.sh        # 前端站点配置的渲染值 configs/web/nginx.value.json（幂等；域名取 WEB_DOMAIN）
-    align-host-perms.sh     # 宿主属主/权限对齐（属主=部署账号、属组=容器 gid 999、目录 2770、私钥 640；幂等）
+    align-host-perms.sh     # 宿主属主/权限对齐（属主=部署账号、属组=容器 gid 999、目录 2770、私钥与 .wist/sec-value.yml 640；幂等）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
     import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
     init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
@@ -197,12 +197,13 @@ compose 还挂这些路径：
 
 ### 权限与运行身份（Linux 必读）
 
-两个业务镜像**固定以 `999:999` 运行**（`gateway` 镜像里的 `wist`、`wparse` 镜像里的 `wparse`；compose 里 `user:` 已显式钉死）。bind 挂载在 Linux 上**不改变属主**，所以宿主侧必须显式对齐，否则必然出现两个稳定故障：
+两个业务镜像**固定以 `999:999` 运行**（`gateway` 镜像里的 `wist`、`wparse` 镜像里的 `wparse`；compose 里 `user:` 已显式钉死）。bind 挂载在 Linux 上**不改变属主**，所以宿主侧必须显式对齐，否则必然出现三个稳定故障：
 
 | 症状 | 现场表现 | 根因 |
 |---|---|---|
 | wparse 无限重启 | `flock: cannot open lock file /data/.run/.wparse.lock: Permission denied`，容器 `Exited (75)` | `data-plane-run/{data,.run}` 对 uid 999 不可写 |
 | gateway 无限重启 | `failed to read install script signing key …: Permission denied (os error 13)` | `identity/gateway/private/*`（600 且属主不是 999）容器读不到 |
+| gateway 无限重启 | `failed to load secrets /secrets/sec-value.yml: system error`（`-> Info: read file`） | `.wist/sec-value.yml` 被 `init-gateway.sh` 以 `600` 生成，uid 999 读不到 |
 
 （web 跟着起不来、报 `host not found in upstream "gateway"` 只是被网关拖累，网关一好它自愈。）
 
@@ -210,7 +211,7 @@ compose 还挂这些路径：
 
 - **属主 = 部署账号**（取 `SUDO_UID`/`SUDO_GID`）：它要改配置、跑备份/恢复 —— 所以 `backup-gateway.sh` / `restore-gateway.sh` **不需要提权**；
 - **属组 = 容器 gid `999`**：容器进程天然在这个组里；
-- 挂载目录分两档：**需要容器写**的 `2770`（组可写 + **setgid**，目录里新建的文件/目录自动继承该组）、**容器只读**的 `2755`；私钥与含密钥的 `wist-gateway.toml` 为 `640`（不放宽到全局：其它宿主账号连 `2770` 目录都进不去）；
+- 挂载目录分两档：**需要容器写**的 `2770`（组可写 + **setgid**，目录里新建的文件/目录自动继承该组）、**容器只读**的 `2755`；私钥、含密钥的 `wist-gateway.toml` 与栈根密钥文件 `.wist/sec-value.yml` 为 `640`（不放宽到全局：其它宿主账号连 `2770` 目录都进不去）；
 - **SQLite 库**（`state/*.db*`）：容器自建的（`999:999`）**不碰** —— 否则每次 `localize` 都要提权；但**恢复搬过来的库**属主是部署账号，会放开到属组可写（`660`）—— 不然网关只能读不能写，报 `unable to open database file` / `readonly database`；
 - `identity/**/private/*.srl`（CA 序列号）归部署账号：宿主 `openssl` 重新签叶时要写它，曾被 root 跑过就会卡住后续非 root 的签叶；
 - **不依赖「目录是谁创建的」**：`docker compose up` 会把缺失的挂载源目录建成 `root:root`，本脚本把属主/属组一并纠回来；

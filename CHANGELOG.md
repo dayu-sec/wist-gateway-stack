@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.37-alpha] - 2026-10-16
+
+### 变更
+
+- **镜像 tag 跟进**：网关 `v0.11.0-alpha`（前端仍 `v0.7.0-alpha`）。
+  本轮带来：**容器部署下宿主侧常驻（`wist-gwlinkd`）连不上网关**的修复 —— 网关在容器里时，
+  本机环回面（自述面 / 接入请求 / gwlinkd 心跳 / agent 包下发）曾把宿主自己的连接当成「外来」
+  而一律 403（表现为 `journalctl -u wist-gwlinkd` 每 30s 一对 `LinkRequestFailed` /
+  `LinkdStatusPushFailed`、网关页报「未检测到 gwlinkd 心跳」）；现在会把**容器所在网络的网关**
+  （= 宿主在该网络上的地址）也认作本机，**外部客户端仍被拒**。另新增 `[server] self_face_allow`
+  （非标准网络兜底；`/0` 拒启）。排查入口：网关启动日志 `event=LocalHostPeers …`。
+
 ## [0.1.36-alpha] - 2026-10-15
 
 ### 变更

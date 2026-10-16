@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.38-alpha] - 2026-10-16
+
+### 修复
+
+- **Linux 上网关因读不到栈根密钥文件而无限重启**：`.wist/sec-value.yml`（网关 admin token 的来源）
+  由 `scripts/init-gateway.sh` 以 `600` 生成，而网关容器固定以 `999:999` 运行 —— 属主是部署账号或
+  root 时容器读不到，网关以 `failed to load secrets /secrets/sec-value.yml: system error` 反复退出
+  （前端随后报 `host not found in upstream "gateway"`，它只是被拖累）。现在 `gops sys localize` 会把
+  `.wist/`（2755）与 `.wist/sec-value.yml`（640）一并纳入宿主权限对齐，与 `configs/`、`identity/`
+  同一套口径。**已部署的宿主机升级后跑一次 `gops sys localize`（或栈根 `scripts/align-host-perms.sh`）
+  即可恢复**；macOS 因 bind 挂载不校验属主，没有这个问题。
+
 ## [0.1.37-alpha] - 2026-10-16
 
 ### 变更

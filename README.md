@@ -97,14 +97,14 @@ wist-gateway-stack/
       gateway/              # 开发态 wist-gateway.toml + state/（store 库）；admin token 在栈根 .wist/sec-value.yml
                             #   其 identity 是指向栈根 ../../../identity/gateway 的 symlink（配置按相对路径读身份）
   identity/                 # **站点身份（dev/prod 共用一份）**：CA / 证书 / 私钥 / 对外域名；不入 git / 不入包
-    gateway/{public,private}/  # 网关：CA、叶证书、agent CA、签名私钥（私）、wist-gateway-pub.toml（公）
+    gateway/{public,private}/  # 网关：CA、叶证书、agent CA、私钥（私）、wist-gateway-pub.toml（公）
     web/{public,private}/      # 前端（浏览器）侧：web CA + 叶证书（公）、CA 私钥（私）
   configs/                  # 运行期资源（现场生成，不入 git / 不入包）
     gateway/                # 发布态：wist-gateway.toml（由模板渲染）+ wist-gateway.value.json + state/（**只剩 store 库**）
     web/                    # 发布态：nginx.conf（由模板渲染）+ nginx.value.json
   packages/                 # 安装包投放目录（宿主；只读挂到网关 /packages；不入 git）
   scripts/                  # 发布态初始化脚本
-    init-gateway.sh         # 网关 CA/叶证书/签名密钥/渲染值（幂等；由 localize 阶段流程调用）
+    init-gateway.sh         # 网关 CA/叶证书/渲染值（幂等；由 localize 阶段流程调用）
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     init-web-conf.sh        # 前端站点配置的渲染值 configs/web/nginx.value.json（幂等；域名取 WEB_DOMAIN）
     align-host-perms.sh     # 宿主属主/权限对齐（属主=部署账号、属组=容器 gid 999、目录 2770、私钥与 .wist/sec-value.yml 640；幂等）
@@ -117,7 +117,7 @@ wist-gateway-stack/
   README.md
 ```
 
-> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `dev/configs/gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（**现只剩 store 库**），与运行期临时目录分离，清 `.run` 不会丢 agents 注册表。**证书 / 私钥 / 信任锚 / 签名密钥不在这里**，而在 dev/prod 共用的栈根 `identity/gateway/{public,private}`（见上「谁分、谁不分」）。发布态通过 `sys/docker-compose.yml` 把 `configs/gateway`（挂 `/config`）与 `./identity/gateway`（挂 `/config/identity`，只读）一起挂进容器。
+> **数据目录**：**开发态与发布态分开两个目录** —— 开发态（`./dev/svc.sh start`）落 `dev/configs/gateway/`，发布态挂 `configs/gateway/`（两边需要的值不同：`victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等）。两者都是 `wist-gateway.toml` + `state/`（**现只剩 store 库**），与运行期临时目录分离，清 `.run` 不会丢 agents 注册表。**证书 / 私钥 / 信任锚不在这里**，而在 dev/prod 共用的栈根 `identity/gateway/{public,private}`（见上「谁分、谁不分」）。发布态通过 `sys/docker-compose.yml` 把 `configs/gateway`（挂 `/config`）与 `./identity/gateway`（挂 `/config/identity`，只读）一起挂进容器。
 
 > **持久化**：网关把 Agent 注册表与注册 Token 存在内嵌 SQLite 库里（默认 `configs/gateway/state/wist-gateway.db`，即已挂载的卷内），**不需要额外容器或端口**，compose 无需改动；schema 在启动时自动迁移。**这个库不用备份**：库丢了，持有效客户端证书的 agent 会在重连时自动重新登记（mTLS 自愈）——真正不可再生的只有 PEM（见「备份与恢复」）。若将来要多副本负载均衡，需换成共享数据库（网关支持用 `WIST_GATEWAY_DATABASE_URL` 指定 DSN，当前实现只支持 `sqlite:`）。
 
@@ -171,7 +171,7 @@ gops sys localize
 
 **`localize` 还会跑项目自己的阶段流程**：写完 `.env` 后，若系统定义了 `localize` 流程，`gops sys localize` 就执行 `gx run localize`（galaxy-ops ≥ 1.3.4 / galaxy-flow ≥ 0.14）。本栈把它定义在 `sys/workflows/operators.gxl`（**本地定义**，不引外部 ops-gxl），由 `_gal/work.gxl` 的 `mod main : operators` 纳入；合并后的值以**环境变量**注入该流程（用 `$(printenv XXX)` 读）。流程里做六件**幂等**的事：
 
-1. 备料：身份材料（Ed25519 签名密钥、网关 CA / TLS 证书，写入栈根 `identity/gateway/{public,private}`）与渲染值 `configs/gateway/wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
+1. 备料：身份材料（网关 CA / TLS 证书，写入栈根 `identity/gateway/{public,private}`）与渲染值 `configs/gateway/wist-gateway.value.json`（`scripts/init-gateway.sh`，缺什么补什么）；
 2. 渲染 `configs/gateway/wist-gateway.toml`（模板在 `sys/configs/gateway/wist-gateway.toml.tpl`）；
 3. 生成前端站点 TLS 证书（`scripts/init-web-tls.sh`，存在即跳过；域名取 `WEB_DOMAIN`）；
 4. 写前端站点配置的**渲染值** `configs/web/nginx.value.json`（`scripts/init-web-conf.sh`；域名取 `WEB_DOMAIN`）；
@@ -229,7 +229,7 @@ compose 还挂这些路径：
 gops sys update && gops sys localize
 
 # 它做六件事（都幂等）：
-#   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) + Ed25519 签名密钥 → identity/gateway；value.json → configs/gateway
+#   scripts/init-gateway.sh configs/gateway   # 网关 CA + 叶证书(CA签) → identity/gateway；value.json → configs/gateway
 #   gx.tpl 渲染 sys/configs/gateway/wist-gateway.toml.tpl → configs/gateway/wist-gateway.toml
 #   scripts/init-web-tls.sh $WEB_DOMAIN       # 前端站点证书
 #   scripts/init-web-conf.sh $WEB_DOMAIN      # 前端站点配置的渲染值 nginx.value.json
@@ -267,7 +267,7 @@ docker compose --project-directory . -f sys/docker-compose.yml restart gateway
 
 ### B. 容器自动初始化（零配置）
 
-bootstrap 镜像首次启动会自己生成 config + 自签证书 + 签名密钥，并把 `listen_addr` 改成 `0.0.0.0:3000`：
+bootstrap 镜像首次启动会自己生成 config + 自签证书，并把 `listen_addr` 改成 `0.0.0.0:3000`：
 
 ```bash
 cd ../wist-gateway/docker
@@ -280,7 +280,7 @@ gops sys update && gops sys localize
 gops run start
 ```
 
-生成物落在挂载卷 `configs/gateway/` 里，所以能复用；**不挂卷就会每次重启换一套**（新证书 + 新 admin token + 新签名密钥，已发出的安装命令和 agent 凭据全部失效）。
+生成物落在挂载卷 `configs/gateway/` 里，所以能复用；**不挂卷就会每次重启换一套**（新证书 + 新 admin token，已发出的安装命令和 agent 凭据全部失效）。
 
 ### 起停与排查
 
@@ -358,7 +358,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 
 ## 已知坑
 
-1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥、Ed25519 签名私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
+1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
 2. **信任锚走文件，且是 CA 根**。配置写 `agent.trust_bundle_file = identity/public/gateway-ca.crt.pem`（**相对配置目录**，经配置目录下的 `identity` symlink / 挂载落到栈根 `identity/gateway/public/`），由 `scripts/init-gateway.sh` 生成；网关启动时读该文件，并把它下发给 agent（写进 `install.sh` / `agentd.toml`）。旧的 `agent.trust_bundle = """..."""` 内联写法已移除。
 3. **叶证书必须带 `basicConstraints=CA:FALSE`（叶形态）、且由网关 CA 签**。`openssl req -x509` 的旧默认会打 `CA:TRUE`，rustls/webpki 会以 `CaUsedAsEndEntity` 拒收；`scripts/init-gateway.sh` 生成的叶证书是 `CA:FALSE` + `serverAuth`，并由网关 CA 签发。**轮换叶证书（换域名 / 续期）是安全的**——锚 = CA 根不变，agent 无感；只有当**锚本身**变了（换 CA / 删掉 `gateway-ca.*` 重生成）才需要**重跑安装**（仅重新注册不刷新锚）。
 4. **改证书/配置后要重启网关容器**：`gops run start`（`up -d`）**不会**因挂载文件变化而重建容器，网关只在**启动时**读 `wist-gateway.toml` 与证书。用：`docker compose --project-directory . -f sys/docker-compose.yml restart gateway`。
@@ -383,9 +383,9 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 ./scripts/restore-gateway.sh <备份文件> [--to .] [--pem-only] [--force] [--restart]
 ```
 
-- **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`identity/gateway/private/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`identity/gateway/private/agent-ca.key.pem`＝签客户端证书的 CA；叶证书 / 签名密钥，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
+- **可重建级**（`--level rebuild`，默认）：把网关**重新立起来**所需的全部 —— 身份 PEM（`identity/gateway/private/gateway-ca.key.pem`＝信任锚，丢了 = 全队 agent 用新 CA 重装；`identity/gateway/private/agent-ca.key.pem`＝签客户端证书的 CA；叶证书，带上省一次重签）＋ 渲染好的 `wist-gateway.toml`。恢复后**直接起网关即可**，无需再跑 `gops sys localize`。
 - **可还原级**（`--level restore`）：在可重建级之上，再带 `wist-gateway.value.json`（渲染源；保住原 admin token，便于重渲染）与 **SQLite 库**（派活、安装包录入、用途与上送绑定等**管理面状态**）—— 按原样还原运行状态。
-- **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 签名私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
+- **只搬身份**：`restore-gateway.sh --pem-only` 只恢复 `.pem`（CA / 叶证书 / 私钥），跳过 toml / value.json / 库。**注意**：库里存着 agent 的**凭据**，只搬 PEM 会让老 agent **401**。
 - 两级都**不含**（都可重生成/重导入）：指标历史（VictoriaMetrics 卷）、安装包缓存、页面证书、`content/`。
 - 恢复后重启网关即可，持有效证书的 agent **自动回来，无需逐台重装**。
 - 开发态：身份就是栈根这份共享身份，`./scripts/backup-gateway.sh --from .` 即可收身份（+ 渲染配置）；注意 dev 的**运行态**（`dev/configs/gateway/state/` 下的 store 库）不在这套相对栈根的固定条目里。

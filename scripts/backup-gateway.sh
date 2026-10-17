@@ -78,7 +78,6 @@ collect_files() {
     identity/gateway/public/gateway-ca.crt.pem  identity/gateway/private/gateway-ca.key.pem \
     identity/gateway/public/agent-ca.crt.pem    identity/gateway/private/agent-ca.key.pem \
     identity/gateway/public/admin-tls.crt.pem   identity/gateway/private/admin-tls.key.pem \
-    identity/gateway/private/install-script-signing-ed25519.pkcs8.pem \
     identity/gwlinkd/gwlinkd-pub.toml          identity/gwlinkd/control-center.pem \
     identity/gwlinkd/credential.json             identity/gwlinkd/.env \
     configs/gateway/wist-gateway.toml; do

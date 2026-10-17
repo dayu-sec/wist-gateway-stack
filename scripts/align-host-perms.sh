@@ -7,8 +7,8 @@
 #   Linux 上**不改变属主**（宿主是谁，容器里就是谁），于是三种稳定故障：
 #     · data-plane-run/{data,.run} 属主是 root/部署账号且 755 → 容器写不出锁文件
 #       （flock: cannot open lock file /data/.run/.wparse.lock: Permission denied）→ wparse 以 75 退出、无限重启；
-#     · configs/gateway/state/*.pem 是 600 且属主不是 999 → 容器读不到签名私钥 / CA
-#       （failed to read install script signing key ...: Permission denied）→ 网关拒绝启动；
+#     · identity/gateway/private/* 是 600 且属主不是 999 → 容器读不到 CA 私钥 / 叶证书私钥
+#       （failed to read ...: Permission denied）→ 网关拒绝启动；
 #     · 栈根 `.wist/sec-value.yml` 由 init-gateway.sh 以 600 生成且属主不是 999 → 容器读不到密钥文件
 #       （failed to load secrets /secrets/sec-value.yml: system error）→ 网关拒绝启动、无限重启。
 #   更麻烦的是：Docker 在 `up` 时会**自行**把缺失的 bind 源目录建成 root:root 755 ——
@@ -95,7 +95,6 @@ TARGET_DIRS=(
 #   注：`wist-gateway.value.json` 是**渲染源**，容器不读它，保持 init-gateway 的 600，这里不动。
 TARGET_FILES_SECRET=(
   identity/gateway/private/*.key.pem
-  identity/gateway/private/*.pkcs8.pem
   identity/gateway/private/*.srl
   identity/web/private/*.key.pem
   identity/web/private/*.srl

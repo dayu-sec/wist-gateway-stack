@@ -23,7 +23,6 @@
 #   <栈根>/identity/gateway/private/gateway-ca.key.pem          # 网关 CA 私钥（**务必备份**）
 #   <栈根>/identity/gateway/{public,private}/agent-ca.*.pem     # agent CA（签 agent 客户端证书；私钥务必备份）
 #   <栈根>/identity/gateway/{public,private}/admin-tls.*.pem    # 网关叶证书（CA 签；可轮换）
-#   <栈根>/identity/gateway/private/install-script-signing-ed25519.pkcs8.pem  # 安装脚本签名私钥（可重生）
 #   <dir>/wist-gateway.value.json                           # 渲染模板用的值（url / 验签公钥）
 #   <栈根>/.wist/sec-value.yml                                # 密钥文件：admin token（网关 `${SEC_ADMIN_TOKEN}` 的来源）
 #
@@ -65,7 +64,6 @@ CA_KEY="$PRIV/gateway-ca.key.pem"
 CA_CRT="$PUB/gateway-ca.crt.pem"
 TLS_CRT="$PUB/admin-tls.crt.pem"
 TLS_KEY="$PRIV/admin-tls.key.pem"
-SIGNING_KEY="$PRIV/install-script-signing-ed25519.pkcs8.pem"
 VALUE_JSON="$DIR/wist-gateway.value.json"
 CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
@@ -171,17 +169,7 @@ EOF
   note "已用 CA 签发网关叶证书：${TLS_CRT}（SAN: ${domain},localhost,127.0.0.1）"
 fi
 
-# ③ 安装脚本签名私钥（Ed25519 PKCS#8）。模板 `signing_key_file` 引用它，
-#    网关启动要求它**存在**（缺失即拒绝启动）；缺则生成（幂等）。可重生：只影响之后签发的安装脚本。
-if [[ -f "$SIGNING_KEY" ]]; then
-  note "签名私钥已存在，跳过：${SIGNING_KEY}"
-else
-  openssl genpkey -algorithm ED25519 -out "$SIGNING_KEY" >/dev/null 2>&1
-  chmod 600 "$SIGNING_KEY"
-  note "已生成安装脚本签名私钥（Ed25519 PKCS#8）：${SIGNING_KEY}"
-fi
-
-# ④ 管理 token 落**密钥文件**（不进配置、不进 value.json）：网关用 `${SEC_ADMIN_TOKEN}` 从它解析
+# ③ 管理 token 落**密钥文件**（不进配置、不进 value.json）：网关用 `${SEC_ADMIN_TOKEN}` 从它解析
 #    （键 `admin_token` → orion-sec 规范成 `SEC_ADMIN_TOKEN`）。**确保该键存在**：
 #    文件缺就建、键缺就补（已有的其它键与已有 token 一律保留）。
 mkdir -p "$SEC_DIR"
@@ -203,7 +191,7 @@ print("  已在密钥文件写入 admin_token：", path)
 PY
 chmod 600 "$SEC_FILE"
 
-# ⑤ 渲染值文件（public_base_url / victoria_metrics_url / 验签公钥）——**不含 admin token**。
+# ④ 渲染值文件（public_base_url / victoria_metrics_url / 验签公钥）——**不含 admin token**。
 #    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变，**每轮都对齐到当前值**，
 #    免得「复用已有 value.json」把错值一直带进渲染结果（症状：网关跑在宿主时「数据采集」页 502）。
 if [[ ! -f "$VALUE_JSON" ]]; then

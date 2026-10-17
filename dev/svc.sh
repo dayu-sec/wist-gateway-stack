@@ -486,18 +486,10 @@ for old, new in {
     "agent_ca_cert_file": "ca_cert_file",
     "agent_ca_key_file": "ca_key_file",
     "bootstrap_token_ttl_seconds": "bootstrap_ttl_seconds",
-    "install_script_signing_private_key_file": "signing_key_file",
-    "install_script_signing_key_file": "signing_key_file",
 }.items():
     text = re.sub(rf"(?m)^([ \t]*){re.escape(old)}([ \t]*=)", rf"\g<1>{new}\g<2>", text)
-# `signing_key_file` 是必填键（无默认）：老配置完全没有时，按模板默认补一行。
-if not re.search(r"(?m)^\s*signing_key_file\s*=", text):
-    default_signing = 'signing_key_file = "identity/private/install-script-signing-ed25519.pkcs8.pem"'
-    text, replaced = re.subn(r"(?m)^(\[agent\]\s*)$", lambda m: m.group(1) + "\n" + default_signing, text, count=1)
-    if replaced != 1:
-        sys.exit("配置里找不到 [agent] 段，无法写入 signing_key_file")
 
-# 证书/私钥/信任锚/签名密钥：真身在**共享身份**（栈根 identity/），配置里写相对配置目录的路径
+# 证书/私钥/信任锚：真身在**共享身份**（栈根 identity/），配置里写相对配置目录的路径
 # （经 dev home 的 identity symlink 落地）。store/logs/content 仍留 dev home，不动。
 cert_dirs = {
     "gateway-ca.crt.pem": "identity/public",
@@ -507,7 +499,6 @@ cert_dirs = {
     "gateway-ca.key.pem": "identity/private",
     "agent-ca.key.pem": "identity/private",
     "admin-tls.key.pem": "identity/private",
-    "install-script-signing-ed25519.pkcs8.pem": "identity/private",
 }
 
 def _to_identity(match):

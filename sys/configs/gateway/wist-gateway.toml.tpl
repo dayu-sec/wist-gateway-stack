@@ -51,7 +51,6 @@ bootstrap_ttl_seconds = 900
 credential_ttl_seconds = 2592000
 store_file = "state/wist-gateway-store.json"
 trust_bundle_file = "identity/public/gateway-ca.crt.pem"
-signing_key_file = "identity/private/install-script-signing-ed25519.pkcs8.pem"
 
 # 数据面（wparse）内部接入端点，仅 compose 内网可达。绑容器网卡（非默认的环回）是为了让
 # wparse 容器连得上；明文 HTTP。

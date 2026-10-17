@@ -13,7 +13,7 @@
 #
 #   <备份文件>   scripts/backup-gateway.sh 产出的 .tar.gz
 #   --to <栈根>  解包目标（默认 `.`，即栈根；条目相对栈根，别给 `configs/gateway`）
-#   --pem-only   只恢复 **PEM**（CA / 叶证书 / 签名私钥，即 `identity/**/*.pem`）；跳过 toml / value.json / 库
+#   --pem-only   只恢复 **PEM**（CA / 叶证书 / 私钥，即 `identity/**/*.pem`）；跳过 toml / value.json / 库
 #   --no-config  恢复除**配置**（`configs/gateway/wist-gateway.{toml,value.json}`）外的一切 = 身份 PEM + SQLite 库
 #   --force      覆盖目标里已存在的同名文件（默认拒绝）
 #   --restart    解包后重启网关（走 stack 根的 compose：docker compose … restart gateway）

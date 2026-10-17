@@ -3,6 +3,27 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.39-alpha] - 2026-10-17
+
+### 变更
+
+- **镜像 tag 跟进：网关 `v0.12.0-alpha`**（前端仍 `v0.7.0-alpha`）。本轮网关侧：
+  **安装命令不再要求目标机有 OpenSSL ≥ 3** —— 改用「命令内嵌的脚本 sha256」校验
+  （`sha256sum`，缺失时 `shasum`），一致才执行。此前 EL7/8、Ubuntu 16.04–20.04、Debian 8–11
+  一律报 `pkeyutl: Option unknown option -rawin`，agent 装不上。现在底线是「curl + systemd」的
+  老发行版（Ubuntu 20.04+ / Debian 11+ / EL8+ / macOS 11+）。
+- **不再生成 / 备份 / 对齐「安装脚本签名私钥」**：网关 0.12.0 移除了 `.sig` 与
+  `[agent] signing_key_file`，栈侧同步：`init-gateway.sh` 不再生成
+  `identity/gateway/private/install-script-signing-ed25519.pkcs8.pem`，模板去掉该键，
+  `backup-gateway.sh` 与 `align-host-perms.sh` 不再引用它。
+
+### 升级说明
+
+- 旧部署**无需迁移**：配置里残留的 `signing_key_file` 会被新网关静默忽略；
+- 磁盘上旧的 `identity/gateway/private/install-script-signing-ed25519.pkcs8.pem` 已无消费者，
+  **升级到本版本后可以删除**（它属于 `identity/` 契约，留着会一直被收进 contract 导出）；
+- 已发出的旧安装命令（若还留着）会因摘要不匹配而拒跑 —— 重新复制一次命令即可。
+
 ## [0.1.38-alpha] - 2026-10-16
 
 ### 修复

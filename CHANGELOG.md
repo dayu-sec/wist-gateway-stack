@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.44-alpha] - 2026-10-18
+
+### 变更
+
+- **网关镜像 tag 跟进 `v0.16.0-alpha`**：新增环回端点
+  `POST /api/v1/gateway/knowledge-package`（中心下发知识库包的接收面）。
+
+### 升级说明
+
+- **知识库下发要求三层都就位**：网关 `v0.16.0-alpha` → gwlinkd `0.13.0-alpha` →
+  中心 `0.16.0-alpha` / 前端 `0.9.0-alpha`。
+- **旧 gwlinkd（< 0.13.0）会把 `push-knowledge-package` 当 `upgrade` 执行**，拿知识库包去跑 gops
+  （报「未知系统 `wist-knowledge`」）。如果已经派过这样的计划：先把 gwlinkd 升到 0.13.0
+  （它会跳过未知动作并落游标，不再每轮重试），再重派计划。
+
 ## [0.1.43-alpha] - 2026-10-18
 
 ### 变更

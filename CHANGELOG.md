@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.46-alpha] - 2026-10-18
+
+### 变更（组件版本）
+
+- **WarpParse `0.29.1-alpha → 0.30.0-alpha`**：新增 OML 内联脱敏（`mask` / `hash` / `tokenize` / `remove`）
+  与零配置脱敏密钥（`.warp_parse/sec_key.toml`）；随 `wp-motor 1.30.0`。**无破坏性变更**，
+  `data-plane/` 的 conf / connectors / models / topology 不需要同步修改。
+  镜像 tag 仍是不带 `v` 的 `0.30.0-alpha`（上游惯例）。
+- **VictoriaMetrics `v1.153.0 → v1.154.0`**（常规小版本）。
+
+### 备注
+
+- 网关 / 前端 / gwlinkd 的版本不在本栈钉：网关 `v0.17.0-alpha`、前端 `v0.11.0-alpha` 不变，
+  gwlinkd 由中心推送（当前 `0.14.0-alpha`）。
+
 ## [0.1.45-alpha] - 2026-10-18
 
 ### 变更

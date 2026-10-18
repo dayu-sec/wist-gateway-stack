@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.45-alpha] - 2026-10-18
+
+### 变更
+
+- **网关镜像 tag 跟进 `v0.17.0-alpha`**：gwlinkd 心跳新增 `gops_version` / `gx_version`
+  （宿主侧依赖工具版本），网关落库并在「接入代理」明细里展示。
+
+### 升级说明
+
+- 这次是**数据可见性**变更：不改变采集 / 上报行为。页面要看到 gops / gx 版本，需要
+  网关 ≥ `v0.17.0-alpha` + gwlinkd ≥ `0.14.0-alpha`（由中心推送，不在本栈内钉版本）。
+
 ## [0.1.44-alpha] - 2026-10-18
 
 ### 变更

@@ -3,6 +3,50 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.48-alpha] - 2026-10-18
+
+### 组件版本
+
+- WarpParse `0.30.0-alpha`（沿用工作区既有值；VictoriaMetrics `v1.154.0`、网关 `v0.17.0-alpha`、
+  前端 `v0.11.0-alpha` 不变）。
+
+### 修复
+
+- **权限漂移（日志 500 / `readonly database` / 安装包无法覆盖）统一交给 `gops sys perms`**：
+  它从 `docker compose config` 派生 bind 挂载，递归覆盖运行态新文件，不再靠本仓维护名单。
+  现场已检出的类型：`state/install-package/{current,history}/*`、`state/logs/*.ndjson*`、
+  `logs/wist-gateway.log` 为 `root:999 644`（容器只能读，写不进去）。
+  `localize` 的阶段流程把它放在**最后**：`gx.download` / 初始知识库解包产生的文件也会被覆盖到。
+- **备份恢复 / root 跑过的现场，网关日志写不进去**：`configs/gateway/logs/*.log`、
+  `state/logs/*.ndjson*` 属主是 `root`、属组 999、模式 `644` —— 容器（uid 999）只剩属组这条路，
+  append 失败后报 `log_ingest_append_failed … Permission denied`（启动时还会 `打开日志文件 … 失败`）。
+  现由上面的 `gops sys perms` 覆盖。
+- **网关重启时 web 连带重启循环**：web 的 nginx 原先写死 `proxy_pass https://gateway:3000`，
+  upstream 只在启动时解析一次，网关没起来（或容器换 IP）就 `[emerg] host not found in upstream "gateway"`
+  直接退出，`restart: unless-stopped` 于是反复拉起。现在改为 `resolver 127.0.0.11 valid=10s` +
+  变量式 `proxy_pass`，运行时解析：网关短暂不在时 `/api` 回 502，web 不再重启；网关重建/IP 变化 10s 内生效。
+
+### 变更
+
+- **网关配置按语义拆开挂载**（compose 契约 = 真实意图）：`wist-gateway.toml`、`knowledge/` 只读；
+  `state/`（store 库 / agent 日志 / 安装包与知识库副本）、`logs/`（进程日志）各自读写。
+  不再把 `configs/gateway` 整目录 rw 挂到 `/config`。因此：
+  - `gops sys perms`（gops ≥ 2.7）能把配置/知识库精确对齐成 `0640/2750`，而不是放宽成可写；
+  - **「本地来源」不再接受 `/config/<文件名>`**：安装包统一放 `packages/`，填 `/packages/<文件名>`；
+  - `wist-gateway.value.json` 不再进容器（渲染源，容器不读）。
+  - `configs/gateway/` **本身不再是挂载源**：必须由 `gops sys localize` 以部署账号创建；
+    **不要先 `docker compose up` 再 localize**（Docker 会以 root 建源，且缺失的 `wist-gateway.toml`
+    会被建成同名目录）。
+- **权限对齐统一为 `gops sys perms`**（gops ≥ 2.7，本栈硬要求）：localize 流程、
+  `run start` preflight、`prj restore` / `prj upgrade` 自动 apply 均由 gops 提供；
+  `sys-prj.yml` 已加 `perms:` 覆盖项说明（rootless / 根外路径）。**不再提供仓内 fallback**。
+
+### 移除
+
+- `scripts/align-host-perms.sh` 与 `dev/tests/align-host-perms.test.sh` 删除：
+  权限逻辑由 gops 的 `sys perms` 承接（上游有自己的单测）；本栈不再维护第二套实现。
+- **破坏性要求**：`gops` 必须 **≥ 2.7**（旧版没有 `sys perms`；`localize` 会直接失败并提示）。
+
 ## [0.1.47-alpha] - 2026-10-18
 
 ### 修复（组件版本）

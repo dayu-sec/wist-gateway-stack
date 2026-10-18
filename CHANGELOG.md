@@ -3,6 +3,14 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.47-alpha] - 2026-10-18
+
+### 修复（组件版本）
+
+- **WarpParse 回退 `0.30.0-alpha → 0.29.1-alpha`**：本栈暂不发布 `0.30.0-alpha`，
+  数据面回到上一稳定版本；`data-plane/` 工程配置无需改动。
+- VictoriaMetrics 保持 `v1.154.0`；网关 `v0.17.0-alpha`、前端 `v0.11.0-alpha` 不变。
+
 ## [0.1.46-alpha] - 2026-10-18
 
 ### 变更（组件版本）

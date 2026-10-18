@@ -3,6 +3,12 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 变更
+
+- **web 的 resolver 缓存 `10s → 3s`**：网关重建 / 换 IP 后最多 3s 生效（`resolver 127.0.0.11 valid=3s`）。
+
 ## [0.1.48-alpha] - 2026-10-18
 
 ### 组件版本

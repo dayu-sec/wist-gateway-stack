@@ -18,8 +18,8 @@ server {
     index index.html;
 
     # Docker 内嵌 DNS：upstream 名在**运行时**解析（配合下面的变量式 proxy_pass）。
-    # valid=10s：网关重建 / 换 IP 后最多 10s 生效，不需要重启 web 容器。
-    resolver 127.0.0.11 valid=10s ipv6=off;
+    # valid=3s：网关重建 / 换 IP 后最多 3s 生效，不需要重启 web 容器。
+    resolver 127.0.0.11 valid=3s ipv6=off;
 
     # 静态资源 + SPA 深链回退：找不到实体文件就交给前端路由（index.html）。
     location / {

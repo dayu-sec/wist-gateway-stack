@@ -130,6 +130,7 @@ wist-gateway-stack/
 |---|---|---|
 | Docker + Compose V2 | `docker compose` 是 **CLI 插件**；只有老的 `docker-compose` v1 不够 | `docker compose version` 能打印 `v2.x` |
 | gops | **必须 ≥ 2.7**（权限对齐由 `gops sys perms` 提供；旧版没有该子命令） | `gops -V` |
+| gx | **≥ 0.14**（`localize` 阶段流程；缺失时 `localize` 只写 `.env`，权限 `--apply` 也不会执行） | `gx -V` |
 | 执行账号 | 普通账号 + **已加入 `docker` 组**（等价于本机高权限，按安全要求评估）；部署目录由它拥有 | `id -nG`（输出里应含 `docker`） |
 | 端口 | 宿主 `443`（网关，agentd 直连）、`8443`（页面）、`9000`（数据面）、`18429`（指标） | 见 `sys/setting/vars.yml` |
 
@@ -181,7 +182,8 @@ gops sys localize
 > 第 6 步必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录自行建成 `root:root`，
 > 属主一旦是 root，之后的部署账号就写不动了（见「权限与运行身份」）。
 
-`gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过。
+`gops sys localize --no-flow` 可跳过该流程；未装 gx 或无该流程时静默跳过（此时权限 `--apply` 也不会执行，
+但 `gops run start` 的 preflight 会拦住未对齐的启动）。
 
 > 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，键 `admin_token`，只读挂进网关容器、`WIST_GATEWAY_SEC_FILE` 指定）；该文件由 `scripts/init-gateway.sh` 生成、`.gitignore`。其它密钥如需，仍可用 `${SEC_xxx}` 占位由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入、不落盘。
 
@@ -230,6 +232,9 @@ gops sys perms --apply    # 幂等修复
 - 不跟随符号链接、不碰 named volume；**仅 Linux**（macOS / OrbStack 打印 `[SKIP]`）。
 
 生命周期：`gops sys localize` 末尾做一次**只告警**的自检；`gops run start` preflight（未对齐即停）；`gops prj restore` / `prj upgrade` 自动 `--apply`。`localize` 的阶段流程也会在最后跑一次 `gops sys perms --apply`，保证「localize 完就能 start」。
+
+> **这些保证只覆盖 gops 入口**：`gops sys localize`（阶段流程 apply）、`gops run start`（preflight）、
+> `gops prj restore/upgrade`（自动 apply）。直接 `docker compose up` 会绕过全部检查 —— 部署请始终走 gops。
 
 > `web` 容器是 **root** 运行（镜像没有 `user:`）：`gops sys perms` 会提示「身份无法确定」并跳过它的两个只读挂载，这是**预期的**（root 不需要属主对齐），不影响 `localize` / `start`。
 

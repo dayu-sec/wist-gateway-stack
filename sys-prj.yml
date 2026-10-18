@@ -2,6 +2,16 @@ test_envs:
   dep_root: ''
   deps: []
 
+# 宿主 bind 挂载权限（`gops sys perms`，gops ≥ 2.7）：
+#   缺省 = 从 compose 派生（服务 `user:` + `volumes.read_only`），不需要配置。
+#   只有两种现场才要写：rootless / userns-remap（容器 uid ↔ 宿主 uid 不等价），
+#   或把 bind source 放到了系统根之外。
+# perms:
+#   container_uid: 100999     # rootless / userns-remap 的宿主映射（必须与 gid 同时给）
+#   container_gid: 100999
+#   allow_external:           # 允许对齐系统根之外的 bind source
+#     - /srv/shared/packages
+
 # `gops sys package` 打包时排除的路径（glob，相对系统根；默认模式与 `--full` **都生效**）。
 #
 # 站点身份（CA / 证书 / 私钥 / 对外域名）**不在资源树里**，它们是**站点级、dev/prod 共用**的唯一一份，

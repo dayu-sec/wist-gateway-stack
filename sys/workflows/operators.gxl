@@ -65,14 +65,6 @@ mod operators {
       dst  : "./configs/web/nginx.conf",
       file : "./configs/web/nginx.value.json"
     );
-    // ④b 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
-    //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
-    //     **不改属主** —— 未对齐就是两个稳定故障：wparse 写不出 /data/.run 的锁（以 75 无限重启）、
-    //     网关读不到 identity/private/ 下的私钥（拒绝启动）。
-    //     还必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录建成 root:root，
-    //     属主一旦是 root，之后的部署账号就写不动了。
-    //     幂等：已对齐时不写盘、也不要任何权限；确需修正而当前没权限时本步失败，并给出那一行 sudo 命令。
-    gx.cmd ( "./scripts/align-host-perms.sh" );
     // ⑤ 初始知识库内容包（出厂自带）：把 ARTIFACT_HOME + "/" + KNOWLEDGE_PATH 拼出的地址拉到投放目录 packages/。
     //     该目录只读挂给网关的 /packages，界面「知识库」页「本地来源」填 /packages/<文件名> 即可录入
     //     —— 录入 ≠ 生效，还要点激活。
@@ -97,6 +89,18 @@ mod operators {
     //     而不是装出一个表面体面、实际什么都不采的网关。
     //     放在 if 外还有一个好处：万一 gx.download 失败被吞，这里也会当场拦住。
     gx.cmd ( "./scripts/install-initial-knowledge.sh" );
+    // ⑥ 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
+    //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
+    //     **不改属主** —— 未对齐会稳定地造成：wparse 写不出 /data/.run 的锁（以 75 无限重启）、
+    //     网关读不到私钥 / 密钥文件（拒绝启动）、写不进 store 与日志（500）。
+    //     用 `gops sys perms --apply`（gops ≥ 2.7，本栈硬要求）：它从 `docker compose config`
+    //     派生「哪些挂载要写、哪些只读」，不需要本仓维护名单。
+    //     必须放在 localize **最后**：上面的 download / 解包会在 packages/ 与
+    //     configs/gateway/knowledge/ 里新建文件（umask 可能使其对容器不可读）。
+    //     还必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录建成 root:root，
+    //     属主一旦是 root，之后的部署账号就写不动了。
+    //     幂等：已对齐时不写盘、也不要任何权限；`gops sys perms --check` 可单独做只读自检。
+    gx.cmd ( "gops sys perms --help >/dev/null 2>&1 || { echo '错误：本栈需要 gops >= 2.7（gops sys perms）'; exit 1; }; gops sys perms --apply" );
   }
 
 }

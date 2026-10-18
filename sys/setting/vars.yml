@@ -36,7 +36,7 @@ system:
   # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
   # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: 0.29.1-alpha
+    value: 0.30.0-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT
@@ -84,7 +84,7 @@ system:
   #   .run/：引擎状态（pid / authority.sqlite / rule_mapping.dat）
   # 与开发态的 data-plane/{data,.run} 分开，避免两个引擎同写一份运行态。
   # 注意：Linux 上这两个目录必须对容器用户（uid 999 = wparse）可写 —— **不要手工 chown**，
-  # 由 scripts/align-host-perms.sh 统一对齐（属主=部署账号、属组=999、2770 setgid；localize 会自动跑）。
+  # localize 阶段流程会用 `gops sys perms --apply`（gops ≥ 2.7）统一对齐。
   - name: WPARSE_RUN_DATA
     value: ./data-plane-run/data
   - name: WPARSE_RUN_STATE

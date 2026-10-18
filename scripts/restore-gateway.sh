@@ -154,11 +154,17 @@ fi
 # 恢复出来的文件属主/属组是「解包账号」，**不是**容器 gid（tar 以非 root 解包无法保留属主）——
 # 不对齐的话，发布态网关读不到私钥（症状与首次安装的 Permission denied 一模一样）。
 # 这一步幂等，且只动属主/属组/权限，不碰内容。只在目标是**栈根**时自动跑（对齐脚本以栈根为参数）。
-if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}" && -x "${SCRIPT_DIR}/align-host-perms.sh" ]]; then
+if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}" ]]; then
   echo
   echo "  对齐宿主属主/权限（容器以 999:999 运行）："
-  "${SCRIPT_DIR}/align-host-perms.sh" "${STACK_ROOT}" ||
-    echo "  提示：属主对齐未完成，网关可能读不到私钥，请执行：sudo ${SCRIPT_DIR}/align-host-perms.sh ${STACK_ROOT}" >&2
+  if command -v gops >/dev/null 2>&1 && gops sys perms --help >/dev/null 2>&1; then
+    # gops ≥ 2.7：从 compose 派生（含**挂载拆分**后的 ro/rw 语义，比按文件名列举更准）
+    ( cd "${STACK_ROOT}" && gops sys perms --apply ) ||
+      echo "  提示：属主对齐未完成，网关可能读不到私钥，请执行：cd ${STACK_ROOT} && gops sys perms --apply" >&2
+  else
+    echo "  错误：本栈需要 gops ≥ 2.7（gops sys perms）。恢复后请升级 gops 再执行：" >&2
+    echo "    cd ${STACK_ROOT} && gops sys perms --apply" >&2
+  fi
 fi
 
 if [[ "${RESTART}" == "1" ]]; then

@@ -17,13 +17,15 @@
 #   - 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，只读挂进网关容器）；
 #     其它密钥如需，仍可用 `${SEC_xxx}` 占位、由 `gops run start` 注入、不落盘。
 
-# 运行身份（与宿主侧权限的对接口径；改这里要同时改 scripts/align-host-perms.sh 的 CONTAINER_GID）：
+# 运行身份（与宿主侧权限的对接口径；容器身份以这里的 `user:` 为准，`gops sys perms` 直接读它）：
 #   两个业务镜像都**固定以 999:999 运行**（gateway 镜像里的 wist、wparse 镜像里的 wparse）。
 #   这里**显式钉死**而不是依赖镜像声明的用户：将来镜像重建换了 uid，宿主侧按 999 对齐的目录
 #   就会对不上，而症状只是「容器无限重启」——不如让它成为一处显式契约。
-#   bind 挂载在 Linux 上**不改变属主**，所以宿主侧要 scripts/align-host-perms.sh 对齐：
-#   属主=部署账号、属组=999、目录 2770(setgid)、私钥 640。localize 流程会自动跑它；
-#   注意 `docker compose up` 会自行把**缺失**的挂载源目录建成 root:root，所以那一步必须在 up 之前。
+#   bind 挂载在 Linux 上**不改变属主**，所以宿主侧必须用 `gops sys perms`（gops ≥ 2.7，本栈硬要求）
+#   对齐：属主=部署账号、属组=999、读写挂载 0660/2770(setgid)、只读挂载 0640/2750。
+#   它从 compose 派生（服务 `user:` + `volumes.read_only`），**新增挂载只需在 compose 里声明**，
+#   不需要改任何名单。注意 `docker compose up` 会自行把**缺失**的挂载源建成 root:root，
+#   所以对齐必须在 up 之前（`gops sys localize` 的阶段流程会自动跑）。
 #
 # 单实例保障（发布态这一半）：**一个操作系统上只允许跑一套本栈**。
 #
@@ -72,7 +74,7 @@ services:
   # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker
   # 在宿主运行目录里建出一堆空白挂载点目录；改成直接挂 /data/data 与 /data/.run 后，所有
   # 挂载点都建在容器层里，宿主运行目录保持干净。
-  # 运行态用**宿主目录 bind 挂载**（不是命名卷）：属主/权限由 scripts/align-host-perms.sh 对齐
+  # 运行态用**宿主目录 bind 挂载**（不是命名卷）：属主/权限由 `gops sys perms` 对齐
   # （属主=部署账号、属组=999、2770 setgid）——不靠「目录是谁创建的」。
   #
   # 单实例保障：引擎自身**没有**单实例保护（同名 work root 起两个会互写 .run/ 与输出），
@@ -128,7 +130,17 @@ services:
       # 接口层（现场态，dev/prod 共用）：对外基址 / 归属。不在主配置旁，故显式指定。
       WIST_GATEWAY_PUB_CONFIG: /config/identity/public/wist-gateway-pub.toml
     volumes:
-      - ${GATEWAY_CONFIG_DIR}:/config
+      # 配置**按语义拆开挂**，而不是整目录 rw 挂到 /config：
+      #   · 只读：wist-gateway.toml（含渲染值）、knowledge/（启动期知识源）
+      #   · 读写：state/（store 库 / agent 日志 / 安装包与知识库副本）、logs/（进程日志与轮转）
+      # 这样 compose 本身就把「哪些要写、哪些只读」声明清楚了：
+      # `gops sys perms` 能精确对齐成 0640/2770，而不会把配置/知识库也放宽成可写。
+      # 注意：`wist-gateway.toml` 是**文件**挂载，必须由 localize 先生成；
+      # 缺文件时 Docker 会把它建成同名**目录**（下一次 gx.tpl 渲染会失败，删掉目录重跑即可）。
+      - ${GATEWAY_CONFIG_DIR}/wist-gateway.toml:/config/wist-gateway.toml:ro
+      - ${GATEWAY_CONFIG_DIR}/knowledge:/config/knowledge:ro
+      - ${GATEWAY_CONFIG_DIR}/state:/config/state
+      - ${GATEWAY_CONFIG_DIR}/logs:/config/logs
       # 站点身份（dev/prod 共用，只读）：证书 / 私钥 / 信任锚 / 签名密钥 / 对外配置。
       # 从资源树拆出（见 sys-prj.yml 的 contract / backup）—— 不可重建，不该跟渲染物一起被升级覆盖。
       - ./identity/gateway:/config/identity:ro

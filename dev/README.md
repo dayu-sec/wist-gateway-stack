@@ -403,9 +403,8 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
    （仅重新注册/enroll 不刷新它）。
 10. **`setup-domain.sh` 只改配置/证书，不重启 gateway**：改完记得 `./dev/svc.sh stop gateway && ./dev/svc.sh start gateway`。
 11. **开发态不需要宿主属主对齐**：这里跑的是本地二进制、以你自己的身份读写，没有「容器固定 999:999 +
-    bind 挂载不改属主」那套问题。`scripts/align-host-perms.sh` 只属于**发布态**（在 `gops sys localize`
-    里自动跑），且在 macOS/OrbStack 上直接跳过。要回归它的语义（setgid 继承、组权限、chgrp 的权限要求），
-    用 `dev/tests/align-host-perms.test.sh`（借一个一次性 Linux 容器换内核跑）。
+    bind 挂载不改属主」那套问题。发布态由 `gops sys perms --apply`（gops ≥ 2.7）在 `gops sys localize`
+    里自动跑，macOS/OrbStack 上直接跳过。
 
 ## 目录
 
@@ -419,8 +418,7 @@ dev/
   gwlinkd.sh                    # 按需：在**服务那份配置**上跑 gwlinkd 子命令（省掉三串长路径；--paths 看落点）
   push-images.sh                # 按需：把 compose 里非 wist* 的上游镜像（VM / wparse）同步到腾讯云 TCR
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
-  tests/                        # 回归测试（开发态工具；align 需要 docker，knowledge 纯本地）
-    align-host-perms.test.sh    #   发布态宿主属主/权限对齐的语义回归（在一次 Linux 容器里跑）
+  tests/                        # 回归测试（开发态工具；knowledge 纯本地）
     install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位
   bin/                          # wparse 等本地二进制（不入 git）
 

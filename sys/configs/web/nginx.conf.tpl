@@ -17,15 +17,22 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Docker 内嵌 DNS：upstream 名在**运行时**解析（配合下面的变量式 proxy_pass）。
+    # valid=10s：网关重建 / 换 IP 后最多 10s 生效，不需要重启 web 容器。
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     # 静态资源 + SPA 深链回退：找不到实体文件就交给前端路由（index.html）。
     location / {
         try_files $uri $uri/ /index.html;
     }
 
     # /api 反代到网关（容器内 3000，自签 HTTPS）。
-    # proxy_pass 不带 URI、也不 rewrite —— 原样透传 /api/... （与 vite 代理一致）。
+    # **必须走变量**：字面量 proxy_pass 只在 nginx 启动时解析一次，网关没起来（或容器换 IP）
+    # 就会 `[emerg] host not found in upstream "gateway"` 直接退出 → web 跟着网关反复重启。
+    # 走变量后每个请求由 resolver 解析；不带 URI 仍然原样透传 /api/...（与 vite 代理一致）。
     location /api/ {
-        proxy_pass https://gateway:3000;
+        set $gateway_upstream https://gateway:3000;
+        proxy_pass $gateway_upstream;
         proxy_ssl_server_name on;
         proxy_ssl_verify off; # 网关是自签证书，内网直连，不做证书链校验
         proxy_set_header X-Real-IP $remote_addr;

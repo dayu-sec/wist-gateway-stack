@@ -3,6 +3,28 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.42-alpha] - 2026-10-18
+
+### 变更
+
+- **镜像 tag 跟进：网关 `v0.14.0-alpha`、前端 `v0.10.0-alpha`**。本轮：
+  - 网关：采集单元明细随目录接口曝光；`match` 支持 `path_exists`（三态求值）；
+    按目录里的 `path_exists` 条件推导 `probe_paths` 随发现策略下发；事实落库参与 `fact-v2` 摘要。
+  - 前端：`/knowledge` 新增「采集面」全景 tab（`?view=families`），可展开看每个面具体采什么。
+- **初始知识库包跟进 `wist-knowledge v0.3.0`**（`KNOWLEDGE_PATH`）：`catalog_version` 7；
+  `linux-privilege-exec` 拆为 `linux-sudo-log`（`path_exists:/var/log/sudo.log` 门控）
+  与 `linux-auditd-exec`（`auditd-execve` 导出器）。
+
+### 升级说明
+
+- **顺序固定：网关 → agentd → 知识包**。
+  - 新 agentd 会多报 `probed_paths` / `present_paths`，旧网关是 `deny_unknown_fields`，会拒整份
+    事实上报 —— 所以网关必须先升（`v0.14.0-alpha`）；
+  - 旧 agentd 不探路径，`path_exists` 永远是「无法判定」，相关单元按 `fact_not_collected` 排除，
+    所以知识包最后上（agentd ≥ 0.5.0）。
+- 策略拉取有轮询节流，新增路径条件最多滞后一个周期；这段时间里对应单元显式可见为未采，
+  不是静默不采。
+
 ## [0.1.41-alpha] - 2026-10-18
 
 ### 变更

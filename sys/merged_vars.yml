@@ -10,9 +10,9 @@ system:
 - name: WEB_TAG
   value: v0.11.0-alpha
 - name: VM_TAG
-  value: v1.153.0
+  value: v1.154.0
 - name: WPARSE_TAG
-  value: 0.29.1-alpha
+  value: 0.30.0-alpha
 - name: GATEWAY_PORT
   value: 443
 - name: WEB_PORT

@@ -31,12 +31,12 @@ system:
     value: v0.11.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
-    value: v1.153.0
+    value: v1.154.0
   # wparse 版本与 data-plane 工程强耦合（conf/connectors/models/topology 随引擎版本变），
   # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
   # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: 0.29.1-alpha
+    value: 0.30.0-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.43-alpha] - 2026-10-18
+
+### 变更
+
+- **镜像 tag 跟进：网关 `v0.15.0-alpha`、前端 `v0.11.0-alpha`**。本轮：
+  - 网关：新增 `POST /api/v1/admin/cos/resolve`，按 `桶/组件/版本` 前缀展开各平台制品
+    （无凭据：公有读桶 + 对象元数据里的 sha256；region 未给时逐个探测，整体 60s 上限）。
+  - 前端：安装包 / 知识库录入页新增「COS 路径」一键填充（与 GitHub Release 同形）；
+    修复 `/gwlinkd`、`/revocations` 面包屑落到「未知页面」；补齐版式尺度 token。
+
+### 升级说明
+
+- 本栈内网关与前端**必须成对升**：0.11.0 的 COS 一键填充调网关 0.15.0 的新接口，
+  旧网关会 404（其余功能不受影响，仅「解析」按钮报错）。
+
 ## [0.1.42-alpha] - 2026-10-18
 
 ### 变更

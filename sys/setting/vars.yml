@@ -26,9 +26,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.12.0-alpha
+    value: v0.13.0-alpha
   - name: WEB_TAG
-    value: v0.8.0-alpha
+    value: v0.9.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.153.0
@@ -111,7 +111,7 @@ system:
   - name: ARTIFACT_HOME
     value: https://github.com/dayu-sec
   - name: KNOWLEDGE_PATH
-    value: wist-knowledge/releases/download/v0.1.6/wist-knowledge-0.1.6.tar.gz
+    value: wist-knowledge/releases/download/v0.2.0/wist-knowledge-0.2.0.tar.gz
   # 内网 / 镜像源示例（把上面两段**一起**换）：
   #   ARTIFACT_HOME: https://wist-1347593047.cos.ap-guangzhou.myqcloud.com
   #   KNOWLEDGE_PATH: wist-knowledge/v0.1.5/wist-knowledge-0.1.5.tar.gz
@@ -153,6 +153,8 @@ system:
   - name: GATEWAY_SELF_CA
     value: ""
   # gwlinkd 的升级执行器（空 = 不渲染该项，用 gwlinkd 内置缺省 `gops`）
+  # **用绝对路径**：gwlinkd 作为系统服务运行时 PATH 只有系统目录（不含 ~/bin），
+  # 写相对名 `gops` 会在 spawn 时 ENOENT（os error 2）。
   - name: GWLINKD_UPGRADER_PROGRAM
     value: ""
   # gops 工程根（含 ops-prj.yml）：gwlinkd 用 gops 执行器升级时**必配**（gops 从 cwd 解析工程）。

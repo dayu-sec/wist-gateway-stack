@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.41-alpha] - 2026-10-18
+
+### 变更
+
+- **镜像 tag 跟进：网关 `v0.13.0-alpha`、前端 `v0.9.0-alpha`**。本轮：
+  - 网关：采集面词表改由知识库装载（`[[families]]`），**新增采集面不再发网关**；激活知识包时
+    做追加式校验（删面 / 改名即拒，回滚除外）；`GET /api/v1/admin/content` 返回 `families`。
+  - 前端：面名与说明改从内容目录取词，删除前端硬编码的 18 条文案表。
+- **初始知识库包跟进 `wist-knowledge v0.2.0`**（`KNOWLEDGE_PATH`）：包内新增 18 个采集面的
+  词表（ID / 平台归属 / 中英文名称与说明），`catalog_version` 6。
+
+### 升级说明
+
+- **必须先把网关升到 `v0.13.0-alpha`，再激活 `wist-knowledge v0.2.0`**：旧网关的目录结构是
+  `deny_unknown_fields`，遇到 `[[families]]` 会拒载整包。
+
 ## [0.1.40-alpha] - 2026-10-17
 
 ### 变更

@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.50-alpha] - 2026-10-19
+
+### 组件版本
+
+- 网关 `v0.18.1-alpha`、前端 `v0.12.1-alpha`；WarpParse / VictoriaMetrics 不变。
+
+### 变更
+
+- 主机列表摘要带出 `maxFilesystemUsageMount`；前端列表显示「最紧张挂载点路径」，详情页磁贴
+  改为「最紧张挂载点」。
+
 ## [0.1.49-alpha] - 2026-10-19
 
 ### 组件版本

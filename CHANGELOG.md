@@ -3,11 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.49-alpha] - 2026-10-19
+
+### 组件版本
+
+- 网关 `v0.18.0-alpha`、前端 `v0.12.0-alpha`；WarpParse `0.30.0-alpha`、
+  VictoriaMetrics `v1.154.0` 不变。
+
+### 新增
+
+- **数据面透传逐挂载点容量标签**：`agent_uplink` 的指标帧增加可选 `mount` / `fstype`，
+  随网关 / 前端一起把 `system.filesystem.*` 落进 VictoriaMetrics；非文件系统指标不写空标签。
+  新增回归脚本 `dev/tests/agent-uplink-metric-labels.test.sh`。
 
 ### 变更
 
 - **web 的 resolver 缓存 `10s → 3s`**：网关重建 / 换 IP 后最多 3s 生效（`resolver 127.0.0.11 valid=3s`）。
+- COS 示例桶名对齐当前对象存储：`wist-1347593047` → `github-1347593047`。
 
 ## [0.1.48-alpha] - 2026-10-18
 

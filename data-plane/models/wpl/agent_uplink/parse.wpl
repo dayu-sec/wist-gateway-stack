@@ -54,6 +54,9 @@ package agent_uplink {
         chars@metric/target_ref:metric_target_ref,
         opt(chars)@metric/resource_ref:metric_resource_ref,
         chars@metric/unit:metric_unit,
+        // 逐挂载点指标（system.filesystem.*）的可选标签；旧帧没有这两个字段。
+        opt(chars)@metric/mount:metric_mount,
+        opt(chars)@metric/fstype:metric_fstype,
         array@values:metric_values,
         array@timestamps:metric_timestamps,
       )

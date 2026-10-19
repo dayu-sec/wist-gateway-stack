@@ -26,9 +26,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.17.0-alpha
+    value: v0.18.0-alpha
   - name: WEB_TAG
-    value: v0.11.0-alpha
+    value: v0.12.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.154.0
@@ -113,7 +113,7 @@ system:
   - name: KNOWLEDGE_PATH
     value: wist-knowledge/releases/download/v0.3.0/wist-knowledge-0.3.0.tar.gz
   # 内网 / 镜像源示例（把上面两段**一起**换）：
-  #   ARTIFACT_HOME: https://wist-1347593047.cos.ap-guangzhou.myqcloud.com
+  #   ARTIFACT_HOME: https://github-1347593047.cos.ap-hongkong.myqcloud.com
   #   KNOWLEDGE_PATH: wist-knowledge/v0.1.5/wist-knowledge-0.1.5.tar.gz
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──

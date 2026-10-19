@@ -8,6 +8,9 @@ metric = object {
     target_ref = read(metric_target_ref);
     resource_ref = read(metric_resource_ref);
     unit = read(metric_unit);
+    // 逐挂载点指标的可选标签；非文件系统指标为空。
+    mount = read(metric_mount);
+    fstype = read(metric_fstype);
 };
 values = read(metric_values);
 timestamps = read(metric_timestamps);

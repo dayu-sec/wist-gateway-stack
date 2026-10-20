@@ -45,21 +45,35 @@ target = "*"
 enabled = false
 
 [project_remote]
-enabled = false
+# 规则/配置从 Center Git Proxy 拉取（Gateway 不持有 CNB 凭据）。
+# 容器启动时把 data-plane/ 作为只读种子复制到 data-plane-run/work，本段会写工作根。
+enabled = true
 repo = ""
 init_version = ""
 
+[project_remote.models]
+# 由 Gateway 容器环境注入（Gateway 主机视角的 Center Git Proxy 地址）。
+repo = "${WPARSE_PROJECT_MODELS_REPO}"
+init_version = ""
+
+[project_remote.infra]
+repo = "${WPARSE_PROJECT_INFRA_REPO}"
+init_version = ""
+
 [admin_api]
-enabled = false
-bind = "127.0.0.1:19090"
+# 容器内绑 0.0.0.0 + TLS（非回环绑定必须 TLS）；宿主只发布 127.0.0.1:19090。
+# 由本机 gwlinkd 调用，用于 WarpStation 的发布/状态查询。
+enabled = true
+bind = "0.0.0.0:19090"
 request_timeout_ms = 15000
 max_body_bytes = 4096
 
 [admin_api.tls]
-enabled = false
-cert_file = ""
-key_file = ""
+enabled = true
+cert_file = "/data/identity/admin-tls.crt.pem"
+key_file = "/data/identity/admin-tls.key.pem"
 
 [admin_api.auth]
 mode = "bearer_token"
-token_file = "${HOME}/.warp_parse/admin_api.token"
+# 相对工作根 /data；由 scripts/init-wparse-admin.sh 生成（600/gops perms 对齐）。
+token_file = ".run/admin_api.token"

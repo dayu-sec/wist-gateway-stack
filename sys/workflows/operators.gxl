@@ -89,6 +89,10 @@ mod operators {
     //     而不是装出一个表面体面、实际什么都不采的网关。
     //     放在 if 外还有一个好处：万一 gx.download 失败被吞，这里也会当场拦住。
     gx.cmd ( "./scripts/install-initial-knowledge.sh" );
+    // ⑥' WarpParse 管理面（WarpStation 发布链路）：可写运行根 + admin API token。
+    //     容器内绑 0.0.0.0:19090 + TLS，宿主只发布 127.0.0.1；token 落在
+    //     data-plane-run/.run/admin_api.token（进不了 data-plane/ 只读种子）。
+    gx.cmd ( "./scripts/init-wparse-admin.sh" );
     // ⑥ 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
     //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
     //     **不改属主** —— 未对齐会稳定地造成：wparse 写不出 /data/.run 的锁（以 75 无限重启）、

@@ -69,7 +69,8 @@ services:
   # ── 数据平台：WarpParse（ELT 引擎）──
   # WPARSE_IMAGE 来自上游镜像仓库，客户可用 values/value.yml 覆盖成内网镜像仓库。
   # 挂载约定（镜像里 /data 属非 root 用户 wparse(uid 999)）：
-  #   - 配置（conf/connectors/models/topology）从 data-plane/ 只读共用，它是唯一源；
+  #   - 配置从 data-plane/（只读种子）复制到 data-plane-run/work（可写运行根）：
+  #     `[project_remote]` 会把 Git 内容写进工作根，所以不能直接只读挂载当工作根。
   #   - 运行态直接挂到 /data 下的两个子路径：/data/data（输出）与 /data/.run（引擎状态）。
   # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker
   # 在宿主运行目录里建出一堆空白挂载点目录；改成直接挂 /data/data 与 /data/.run 后，所有
@@ -77,43 +78,104 @@ services:
   # 运行态用**宿主目录 bind 挂载**（不是命名卷）：属主/权限由 `gops sys perms` 对齐
   # （属主=部署账号、属组=999、2770 setgid）——不靠「目录是谁创建的」。
   #
+  # 管理面（WarpStation 发布链路）：容器内 0.0.0.0:19090 + TLS；宿主**只发布 127.0.0.1**，
+  # 由本机 gwlinkd 调用。证书复用 identity/gateway 的 admin-tls。
+  # token 权限：WarpParse 要求 token 文件 **0600 且属主为运行用户**；而 `gops sys perms` 会把
+  # bind 挂载里的文件统一成 0660。因此把 `/data/.run` 改成**命名卷**（不受 perms 管理），
+  # 由 wparse-run-init 在容器内以 999 身份从宿主 `.run/admin_api.token.host` 复制并 chmod 600；
+  # 宿主那份 `.host` 留给 gwlinkd 读（属主=部署账号）。
+  #
   # 单实例保障：引擎自身**没有**单实例保护（同名 work root 起两个会互写 .run/ 与输出），
-  # 所以 entrypoint 先用 flock 独占 /data/.run/.wparse.lock（落在宿主 WPARSE_RUN_STATE 内）再把引擎交给 PID 1：
+  # 所以 entrypoint 先用 flock 独占 /data/.run/.wparse.lock（落在命名卷内）再把引擎交给 PID 1：
   #   -F（不 fork）→ wparse 自己就是 PID 1，docker stop 的 SIGTERM 直达引擎、能优雅退出；
   #   -n → 拿不到锁立即失败（不排队），避免“默默等锁”看不出配错了；
   #   --verbose + -E 75 → 失败时日志打 `flock: failed to get lock`、容器以 75 退出。
   # 开发态脚本（dev/svc.sh）用同一把锁，所以容器与宿主也不会同时跑。
   # 这层包装是绕过：引擎自身应当持锁 —— 已提上游 wp-labs/warp-parse#365，
   # 上游实现后这里的 entrypoint 可以直接去掉。
+  wparse-run-init:
+    container_name: wist-gateway-stack-wparse-run-init
+    image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
+    user: "999:999"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        # 首次：把宿主旧 .run/ 作为种子复制进命名卷（存在不覆盖）。
+        if [ -z "$$(ls -A /run 2>/dev/null)" ]; then
+          cp -a /seed/. /run/ 2>/dev/null || true
+        fi
+        # WarpParse 要求 token 0600 且属主=运行用户；这里在卷内重建一份。
+        [ -s /seed/admin_api.token.host ] || {
+          echo "missing /seed/admin_api.token.host; run gops sys localize" >&2
+          exit 1
+        }
+        cp -f /seed/admin_api.token.host /run/admin_api.token
+        chmod 600 /run/admin_api.token
+        echo "wparse run volume ready: /run/admin_api.token (0600)"
+    volumes:
+      - wparse-run:/run
+      - ${WPARSE_RUN_STATE}:/seed:ro
+
   wparse:
     container_name: wist-gateway-stack-wparse
     image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
     # 运行身份显式钉死（镜像里是 wparse）；宿主侧按同一 gid 对齐权限，见文件头「运行身份」
     user: "999:999"
     restart: unless-stopped
-    entrypoint: ["/usr/bin/flock", "--verbose", "-n", "-E", "75", "-F", "/data/.run/.wparse.lock", "/usr/local/bin/wparse"]
-    command: ["daemon", "--work-root", "/data"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /data/data /data/.run
+        # 只读种子 → 可写工作根：只补缺失，不覆盖现场（项目远端会更新工作根）。
+        for d in conf connectors models topology; do
+          mkdir -p "/data/$$d"
+          cp -an "/seed/$$d/." "/data/$$d/"
+        done
+        exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
+          /usr/local/bin/wparse daemon --work-root /data
     environment:
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
       # 数据面 sink（agent-facts / agent-logs）用的网关内部接入端点；
       # 与网关配置的 [ingest].listen_addr 对应（明文 HTTP，只走 compose 内网）。
       WPARSE_GATEWAY_ENDPOINT: http://gateway:3001
+      # project_remote 的两个仓库（Center Git Proxy，Gateway 不持有 CNB 凭据）。
+      WPARSE_PROJECT_MODELS_REPO: ${WPARSE_PROJECT_MODELS_REPO}
+      WPARSE_PROJECT_INFRA_REPO: ${WPARSE_PROJECT_INFRA_REPO}
+      # 信任 Center CA（Git Proxy 的 TLS 证书由中心 CA 签发）。
+      GIT_SSL_CAINFO: /data/identity/control-center.pem
+      SSL_CERT_FILE: /data/identity/control-center.pem
     volumes:
-      # 配置源（唯一源，只读共用）
-      - ${WPARSE_WORK_DIR}/conf:/data/conf:ro
-      - ${WPARSE_WORK_DIR}/connectors:/data/connectors:ro
-      - ${WPARSE_WORK_DIR}/models:/data/models:ro
-      - ${WPARSE_WORK_DIR}/topology:/data/topology:ro
-      # 运行态：宿主目录直接挂到 /data 的子路径（不挂父 /data）
+      # 配置种子（唯一源，只读）
+      - ${WPARSE_WORK_DIR}:/seed:ro
+      # 可写运行根（配置 + project_remote 同步内容）
+      - ${WPARSE_RUN_WORK}:/data
+      # 运行态：命名卷（token 需要 0600，不能跟 perms 管理的 bind 文件混在一起）
+      - wparse-run:/data/.run
+      # 输出目录继续用宿主 bind（便于现场查看/备份）
       - ${WPARSE_RUN_DATA}:/data/data
-      - ${WPARSE_RUN_STATE}:/data/.run
+      # 管理面 TLS（复用网关 admin-tls）与 Center CA
+      - ./identity/gateway/public/admin-tls.crt.pem:/data/identity/admin-tls.crt.pem:ro
+      - ./identity/gateway/private/admin-tls.key.pem:/data/identity/admin-tls.key.pem:ro
+      - ./identity/gwlinkd/control-center.pem:/data/identity/control-center.pem:ro
     ports:
       # agent 数据面入口（wparse source tcp_1）。明文，需对 agent 可达；
       # 管控面 agent 上送地址由网关下发（/api/v1/admin/agent/uplink），要与这里一致。
       - "${WPARSE_PORT}:9000"
+      # 管理面只发布回环：gwlinkd 是本机宿主进程；**不要**写成 0.0.0.0。
+      - "127.0.0.1:${WPARSE_ADMIN_PORT}:19090"
+    extra_hosts:
+      # 单机部署：Center 域名在宿主 /etc/hosts 指向 127.0.0.1，容器通过 DNS 继承后
+      # 会把 Center Git Proxy 解析成容器自己���git clone 失败）。这里改指宿主网关。
+      # CENTER_DOMAIN 为空时映射一个无效占位名，不影响真实 DNS 部署。
+      - "${CENTER_DOMAIN:-center.invalid}:host-gateway"
     depends_on:
       victoria-metrics:
         condition: service_healthy
+      wparse-run-init:
+        condition: service_completed_successfully
 
   # ── 控制面后端 ──
   gateway:
@@ -129,6 +191,8 @@ services:
       WIST_GATEWAY_SEC_FILE: /secrets/sec-value.yml
       # 接口层（现场态，dev/prod 共用）：对外基址 / 归属。不在主配置旁，故显式指定。
       WIST_GATEWAY_PUB_CONFIG: /config/identity/public/wist-gateway-pub.toml
+      # 全栈版本（页面左下角展示）：直接读挂进来的 `version.txt`，不在环境里复制一份版本号。
+      WIST_GATEWAY_STACK_VERSION_FILE: /config/stack-version.txt
     volumes:
       # 配置**按语义拆开挂**，而不是整目录 rw 挂到 /config：
       #   · 只读：wist-gateway.toml（含渲染值）、knowledge/（启动期知识源）
@@ -138,6 +202,9 @@ services:
       # 注意：`wist-gateway.toml` 是**文件**挂载，必须由 localize 先生成；
       # 缺文件时 Docker 会把它建成同名**目录**（下一次 gx.tpl 渲染会失败，删掉目录重跑即可）。
       - ${GATEWAY_CONFIG_DIR}/wist-gateway.toml:/config/wist-gateway.toml:ro
+      # 全栈版本（展示用）：`version.txt` 是唯一真值，只读挂进容器；
+      # 镜像只是通道，不在镜像/环境变量里复制版本号。
+      - ./version.txt:/config/stack-version.txt:ro
       - ${GATEWAY_CONFIG_DIR}/knowledge:/config/knowledge:ro
       - ${GATEWAY_CONFIG_DIR}/state:/config/state
       - ${GATEWAY_CONFIG_DIR}/logs:/config/logs
@@ -173,4 +240,9 @@ services:
 
 volumes:
   metrics_data:
+    driver: local
+  # wparse 运行态（含 0600 admin token 与引擎状态）。命名卷不受 `gops sys perms` 管理，
+  # 由 wparse-run-init 在容器内保持 999:999 / 目录 2770 / token 0600。
+  wparse-run:
+    name: wist-gateway-stack-wparse-run
     driver: local

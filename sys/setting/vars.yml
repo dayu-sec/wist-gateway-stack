@@ -54,6 +54,10 @@ system:
   # 数据面入口端口：agentd 往这台上送日志/遥测（容器内是 wparse 的 source tcp_1:9000）
   - name: WPARSE_PORT
     value: 9000
+  # wparse 管理面（WarpStation 发布链路）：容器内绑 0.0.0.0:19090 + TLS，
+  # 宿主**只发布回环** `127.0.0.1:${WPARSE_ADMIN_PORT}`，由本机 gwlinkd 访问。
+  - name: WPARSE_ADMIN_PORT
+    value: 19090
 
   # 指标保留期（月）与时区
   - name: RETENTION_PERIOD
@@ -65,6 +69,13 @@ system:
   # —— 只是**默认值**；现场值走 values/value.yml（改那里 localize 即生效）
   - name: WEB_DOMAIN
     value: gw.example.com
+
+  # Center 的对外域名（单机部署时与 WEB_DOMAIN 相同）。
+  # 仅用于让 **wparse 容器**把该域名解析到宿主网关：
+  #   宿主 /etc/hosts 常把该域名指到 127.0.0.1，容器通过 DNS 继承后会把 Center 解析成自己。
+  # 多机部署（Center 真实 DNS 可达）留空即可，不会注入映射。
+  - name: CENTER_DOMAIN
+    value: ''
 
   # 挂载源路径（按部署环境摆放）
   - name: GATEWAY_CONFIG_DIR
@@ -89,6 +100,16 @@ system:
     value: ./data-plane-run/data
   - name: WPARSE_RUN_STATE
     value: ./data-plane-run/.run
+  # project_remote 的工作根（可写）：启动时从只读种子 data-plane/ 复制配置进来，
+  # 之后 wparse 的 models/conf/topology/connectors 都在这里被 Git 同步更新。
+  - name: WPARSE_RUN_WORK
+    value: ./data-plane-run/work
+  # Gateway 拉取规则仓库的地址（Center Git Proxy，**Gateway 主机视角**）。
+  # 留空 = project_remote 关闭；现场在 values/ 里按 Center 实际可达地址覆盖。
+  - name: WPARSE_PROJECT_MODELS_REPO
+    value: ''
+  - name: WPARSE_PROJECT_INFRA_REPO
+    value: ''
 
   # 安装包投放目录（宿主），只读挂到网关容器的 /packages；界面「本地来源」填 /packages/<文件名>
   - name: PACKAGE_DIR

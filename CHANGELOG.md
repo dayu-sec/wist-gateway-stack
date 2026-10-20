@@ -3,6 +3,35 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.51-alpha] - 2026-10-20
+
+### 新增
+
+- **WarpStation 规则发布链路（网关侧）**：`wparse` 管理面启用 TLS + bearer token
+  （容器内 `0.0.0.0:19090`，宿主**只发布** `127.0.0.1:${WPARSE_ADMIN_PORT}`）；gwlinkd 新增
+  `[wparse_relay]`，按 1.5s 短轮询 Center 命令队列，用本机 HTTPS + admin token 调 wparse，
+  结果回传中心。网关仍然**不开放任何入站控制端口**。
+  - 需要 **gwlinkd ≥ 0.15.0**；旧版会忽略 `[wparse_relay]`，表现为 WarpStation 设备探活超时、
+    Center `gateway_commands` 一直 `pending`。
+  - 路径白名单两端各自校验：只放行 `/admin/v1/runtime/status` 与 `/admin/v1/reloads/model`。
+- **`wparse-run-init` + `wparse-run` 命名卷**：wparse 的 `/data/.run` 从 bind 改成命名卷。
+  原因：WarpParse 要求 token 文件 `0600` 且属主=运行用户，而 `gops sys perms` 会把 bind
+  文件统一成 `0660`，两者冲突。现在由 init 容器以 999 身份把宿主 seed 里的 token 复制进卷并
+  `chmod 600`；宿主那份 `.host` 留给 gwlinkd 读。
+- **可写运行根 `WPARSE_RUN_WORK`**：`data-plane/` 降为只读种子，启动时复制到
+  `data-plane-run/work`，`[project_remote]` 才能把 Git 同步内容写进去。
+- **`[project_remote]` 接入 Center Git Proxy**：`WPARSE_PROJECT_MODELS_REPO` /
+  `WPARSE_PROJECT_INFRA_REPO`（Gateway 主机视角），网关不持有 CNB 凭据；
+  `CENTER_DOMAIN` 用于单机部署时把 Center 域名在 wparse 容器里指回宿主网关（`extra_hosts`）。
+- **`scripts/init-wparse-admin.sh`**：建可写运行根 + 生成 admin API token（缺失才生成，`0600`）。
+
+### 变更
+
+- `data-plane/conf/wparse.toml`：`[admin_api]` 打开（容器内非回环绑定 + TLS，证书复用网关
+  admin-tls），`[project_remote]` 打开并分 models / infra 两个仓库。
+- 网关页面左下角的全栈版本改读只读挂载的 `version.txt`（`WIST_GATEWAY_STACK_VERSION_FILE`），
+  不再在环境变量里复制一份版本号。
+
 ## [0.1.50-alpha] - 2026-10-19
 
 ### 组件版本

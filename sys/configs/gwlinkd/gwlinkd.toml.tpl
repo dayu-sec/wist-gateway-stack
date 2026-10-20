@@ -55,3 +55,16 @@ agent_package_drop_dir = "{{agent_package_drop_dir}}"
 {{#if agent_package_container_dir}}
 agent_package_container_dir = "{{agent_package_container_dir}}"
 {{/if}}
+
+# ── WarpParse 管理面中继（WarpStation 发布链路）──
+# Center 的 wparse-proxy 把发布/状态请求写入命令队列；gwlinkd 轮询取命令，
+# 用本机回环 HTTPS + admin token 调 wparse（容器内 0.0.0.0:19090，宿主只发布 127.0.0.1）。
+# **注意**：该段需要在支持 `[wparse_relay]` 的 gwlinkd 版本上才生效；旧版会忽略。
+[wparse_relay]
+enabled = {{{wparse_relay_enabled}}}
+upstream = "{{{wparse_relay_upstream}}}"
+ca_file = "{{{wparse_relay_ca}}}"
+token_file = "{{{wparse_relay_token}}}"
+poll_interval_ms = 1500
+request_timeout_ms = 20000
+allowed_paths = ["/admin/v1/reloads/model", "/admin/v1/runtime/status"]

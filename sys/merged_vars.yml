@@ -23,12 +23,16 @@ system:
   value: http://victoria-metrics:8428
 - name: WPARSE_PORT
   value: 9000
+- name: WPARSE_ADMIN_PORT
+  value: 19090
 - name: RETENTION_PERIOD
   value: 6
 - name: TZ
   value: Asia/Shanghai
 - name: WEB_DOMAIN
   value: gw.example.com
+- name: CENTER_DOMAIN
+  value: ''
 - name: GATEWAY_CONFIG_DIR
   value: ./configs/gateway
 - name: WEB_NGINX_CONF
@@ -39,6 +43,12 @@ system:
   value: ./data-plane-run/data
 - name: WPARSE_RUN_STATE
   value: ./data-plane-run/.run
+- name: WPARSE_RUN_WORK
+  value: ./data-plane-run/work
+- name: WPARSE_PROJECT_MODELS_REPO
+  value: ''
+- name: WPARSE_PROJECT_INFRA_REPO
+  value: ''
 - name: PACKAGE_DIR
   value: ./packages
 - name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR

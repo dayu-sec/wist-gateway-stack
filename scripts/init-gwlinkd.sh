@@ -32,6 +32,8 @@ set -euo pipefail
 
 OUT_DIR="${1:-configs/gwlinkd}"
 VALUE_JSON="${OUT_DIR}/gwlinkd.value.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 note() { echo "  $*"; }
 
@@ -48,11 +50,13 @@ python3 - "$VALUE_JSON" \
   "${PACKAGE_DIR:-./packages}" \
   "${GWLINKD_AGENT_PACKAGE_CONTAINER_DIR:-/packages}" \
   "${GWLINKD_UPGRADER_PROGRAM:-}" \
-  "${GWLINKD_UPGRADE_PROJECT_DIR:-}" <<'PY'
+  "${GWLINKD_UPGRADE_PROJECT_DIR:-}" \
+  "${STACK_ROOT}" \
+  "${WPARSE_ADMIN_PORT:-19090}" <<'PY'
 import json, os, sys, tempfile
 
 path = sys.argv[1]
-state, identity, self_ep, self_ca, drop_raw, container, upgrader, upgrade_dir = sys.argv[2:10]
+state, identity, self_ep, self_ca, drop_raw, container, upgrader, upgrade_dir, stack_root, admin_port = sys.argv[2:12]
 # 投放目录给 gwlinkd 用：空 = 不启用（不渲染）；相对路径 → **绝对**（gwlinkd 的 cwd 不定）。
 drop = "" if not drop_raw else (drop_raw if os.path.isabs(drop_raw) else os.path.abspath(drop_raw))
 value = {
@@ -64,6 +68,11 @@ value = {
     "agent_package_container_dir": container,
     "upgrader_program": upgrader,
     "upgrade_project_dir": upgrade_dir,
+    # WarpParse 管理面中继（WarpStation 发布链路）。gwlinkd 实现 [wparse_relay] 后生效。
+    "wparse_relay_enabled": "true",
+    "wparse_relay_upstream": f"https://127.0.0.1:{admin_port}",
+    "wparse_relay_ca": os.path.join(stack_root, "identity/gateway/public/gateway-ca.crt.pem"),
+    "wparse_relay_token": os.path.join(stack_root, "data-plane-run/.run/admin_api.token.host"),
 }
 text = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 if os.path.exists(path):

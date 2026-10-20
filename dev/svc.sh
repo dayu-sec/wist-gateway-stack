@@ -768,6 +768,8 @@ start_gateway() {
   (
     export WIST_GATEWAY_CONFIG="${GW_HOME}/wist-gateway.toml"
     export WIST_GATEWAY_SEC_FILE="${GATEWAY_SEC_FILE}"
+    # 全栈版本（页面左下角展示）：开发态没有 compose 挂载，直接指向栈根 `version.txt`。
+    export WIST_GATEWAY_STACK_VERSION_FILE="${STACK_ROOT}/version.txt"
     exec nohup "${gw_bin}" >"/tmp/wist-gateway-server.log" 2>&1
   ) &
   local pid=$!

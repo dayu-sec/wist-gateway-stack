@@ -38,14 +38,20 @@
 |---|---|---|---|
 | `gateway` | 控制面后端（HTTPS API，rustls） | `${GATEWAY_PORT}:3000` | `dy-sec.tencentcloudcr.com/cloud/wist-gateway` |
 | `web` | 前端入口（nginx：TLS + 静态 + `/api` 反代） | `${WEB_PORT}:443`（HTTPS） | `dy-sec.tencentcloudcr.com/cloud/wist-gateway-web` |
-| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
+| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口）<br>`127.0.0.1:${WPARSE_ADMIN_PORT}:19090`（本机管理面） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
 | `victoria-metrics` | 指标存储 | `${VM_PORT}:8428` | `victoriametrics/victoria-metrics` |
 
 > **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量：改**产品默认**改 `sys/setting/vars.yml`（默认 TCR），改**本环境用什么**改 `values/value.yml`（推荐，一条命令生效，见「变量与本地化」）。
 >
 > **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.26.0-beta`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `data-plane/` 一起升**。
 >
-> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：配置从 `data-plane/` 按目录**只读**挂到 `/data/<name>`（`WPARSE_WORK_DIR`）；运行态**直接挂到 `/data` 的两个子路径**——`${WPARSE_RUN_DATA} → /data/data`、`${WPARSE_RUN_STATE} → /data/.run`。**不挂 `/data` 这一整根**：把运行目录挂成 `/data`、再把配置嵌进去，会让 Docker 在宿主运行目录里建出一堆空白挂载点目录；直接挂两个子路径后，挂载点都建在容器层，宿主目录保持干净。**Linux 部署要保证这两个目录对 uid 999 可写**（`chown -R 999:999 data-plane-run`；OrbStack 会自动放行，Linux 不会）。
+> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：`data-plane/` 是**只读种子**，
+> 启动时把 `conf/connectors/models/topology` 复制到可写运行根 `${WPARSE_RUN_WORK} → /data`
+> （`cp -an`，只补缺失，`[project_remote]` 会更新这里）；输出 `${WPARSE_RUN_DATA} → /data/data`；
+> 运行态 `${WPARSE_RUN_STATE}` 只作为**一次性种子**复制进命名卷 `wist-gateway-stack-wparse-run`
+> （`/data/.run`）—— 因为 admin token 必须是 0600，而 `gops sys perms` 会把 bind 文件改成 0660。
+> **Linux 部署要保证 `data-plane-run/work` 与 `data-plane-run/data` 对 uid 999 可写**
+> （`gops sys perms --apply` 会从 compose 派生并对齐；也可手工 `chown -R 999:999`）。
 >
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
@@ -70,6 +76,28 @@
 > **端口口径**：网关那侧 **HTTPS**（宿主 `443` → 容器 `3000`，**agentd 直连**，不经代理）；前端那侧 `8443:443`，nginx **自己终止 TLS**（证书是**页面自己的**，`scripts/init-web-tls.sh` 生成），入口 `https://<host>:8443`。两个入口各自独立：页面 nginx 只把浏览器的 `/api` 反代回网关，agentd 直接走网关端口。
 >
 > **数据面入口**：agent 上送日志/遥测是打到 **wparse 的 `9000`**（`${WPARSE_PORT}:9000`，明文 TCP，需对 agent 网络可达）——和控制面 `443` 是两条独立的通道；agent 用的上送地址由网关管理面下发（`/api/v1/admin/agent/uplink`），要与这个对外端口一致。
+
+## 规则发布（WarpStation / Center）
+
+数据面支持由 `wist-center-stack` 的 WarpStation 做规则维护、版本化与发布：
+
+- **配置来源**：`data-plane/` 是只读**种子**；容器启动时复制到 `data-plane-run/work`（可写运行根），
+  之后 `[project_remote]` 从 **Center Git Proxy** 拉取 `wp-rules`（models）/ `wp-infra`（infra），
+  真实地址由容器环境 `WPARSE_PROJECT_MODELS_REPO` / `WPARSE_PROJECT_INFRA_REPO` 注入。
+  Gateway **不持有 CNB 凭据**；只为 `wparse` 挂载 Center CA（`GIT_SSL_CAINFO`）。
+- **管理面**：容器内绑 `0.0.0.0:19090` + TLS（复用 `identity/gateway` 的 admin-tls）；
+  宿主**只发布** `127.0.0.1:${WPARSE_ADMIN_PORT}:19090`，由本机 `gwlinkd` 调用。
+  **不要**改成 `0.0.0.0:19090:19090`。
+  TLS **不能关**：WarpParse 硬校验 `non-loopback admin_api.bind '<bind>' requires admin_api.tls.enabled=true`；
+  而容器内绑回环后宿主又访问不到（bridge 网络），所以没有“HTTP 也能通”的方案。
+- **admin token**：`scripts/init-wparse-admin.sh` 生成宿主侧
+  `data-plane-run/.run/admin_api.token.host`（0600，gwlinkd 读）；`wparse-run-init` 在容器内
+  以 999 身份复制到命名卷并 `chmod 600`（WarpParse 要求 owner-only）。
+- **上线顺序**：两个 CNB 仓库需先有 baseline 内容（models/ 与 conf/topology/connectors/），
+  再让 Gateway 以 `project_remote.enabled = true` 启动；远端为空时 wparse 会因
+  `load ... route confs` 起不来。
+
+> 完整设计与安全约束见 `wist-design/doc/design/center/warpstation-rule-publishing.md`。
 
 ## 目录
 
@@ -365,6 +393,10 @@ wist-gateway-stack-<tag>.tar.gz
   version.txt
   README.md / .gitignore
 ```
+
+> 全栈版本也会显示在管理界面左下角：compose 把栈根的 `version.txt` 只读挂进网关
+> （`/config/stack-version.txt`），网关在 `GET /api/v1/version` 里以 `stack_version` 返回，
+> 前端「全栈版本」一行取它。网关/前端镜像需为支持该字段的版本；旧镜像不返回该字段时显示 `—`。
 
 > 包内**不要加顶层目录前缀**：`gops` 解包时会自建同名目录（`~/ds-package/<包名>/`），包内再套一层会导致 `prj import` 找不到 `sys/sys_model.yml`。
 >

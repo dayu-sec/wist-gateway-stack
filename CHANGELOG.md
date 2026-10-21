@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.55-alpha] - 2026-10-21
+
+### 新增
+
+- **gwlinkd 的本机组件目录（`[[upgrade.component]]`）**：`galaxy-ops` / `galaxy-flow` 声明为
+  `install = "tool-copy"`（宿主二进制 `gops` / `gx`）。中心派来的这两个组件升级会**就地覆盖二进制**，
+  不再落到 `gops prj upgrade <组件名>` 而以「未知系统或无效版本 spec：galaxy-ops」失败。
+
+### 升级注意
+
+- 该段是**模板渲染物**：`gops sys localize`（含 `gops prj upgrade` 的 regenerate 阶段）会自动重渲补齐，
+  站点不需要配任何新变量。
+- gwlinkd **只在启动时**读配置：升级本栈后要重启 gwlinkd（服务管理器或中心「重启 gwlinkd」），
+  组件目录才生效。
+- `binary` 取 `upgrader_program`（未配则 `gops`）；`gx` 按 `$HOME/bin` → `PATH` 定位，
+  找不到就停在前置校验里（fail-closed，不会猜）。
+
 ## [0.1.54-alpha] - 2026-10-21
 
 ### 新增

@@ -107,4 +107,16 @@ mod operators {
     gx.cmd ( "gops sys perms --help >/dev/null 2>&1 || { echo '错误：本栈需要 gops >= 2.7（gops sys perms）'; exit 1; }; gops sys perms --apply" );
   }
 
+  // 体检（`gops run diagnose`）：本系统专属的「期望」检查。
+  //
+  // gops 负责通用事实（容器 / 挂载 / 端口 / 日志），这里只补它**不可能知道**的业务语义：
+  // 发布/同步是否只落了一半（clone 有、/data 没有），以及 state 说的版本与克隆 HEAD 是否一致。
+  //
+  // 契约（galaxy-ops `docs/design/run-diagnose.md` §5/§6）：读 `GOPS_DIAGNOSE_CONTEXT`，
+  // 把 `checks[]` 写到 `GOPS_DIAGNOSE_RESULT`。**只读**：不改 /data、不 chmod、不重启。
+  // 注意：GXL 里读 gops 注入的环境变量要用 $(printenv X)（`${X}` 取的是流程变量空间）。
+  flow diagnose {
+    gx.cmd ( "./scripts/diagnose-wparse-drift.sh" );
+  }
+
 }

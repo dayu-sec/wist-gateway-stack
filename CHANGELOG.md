@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0-alpha] - 2026-10-22
+
+### 变更（**破坏性：目录布局**）
+
+- **wparse 工程种子 `data-plane/` → `sys/data-plane/`**。它只是发布态的只读种子（挂到容器 `/seed`，
+  启动时 `cp -an` 到工作根），放到 `sys/` 才符合“系统定义随包交付”；打包/交付行为不变。
+- **开发态运行根独立**：`dev/svc.sh` 的工作根从 `data-plane/` 改为 `data-plane-run/dev/`，
+  启动时从 `sys/data-plane/` 补缺（`cp -an`，与发布态同口径）；可用 `WPARSE_SEED` /
+  `WPARSE_WORK_ROOT` 覆盖。开发态的 `data/`、`.run/` 不再落在种子目录里。
+- 发布态路径不变：`sys/data-plane/` → `data-plane-run/work/`（可写运行根），运行态
+  `data-plane-run/{data,.run}/` 与命名卷 `wist-gateway-stack-wparse-run` 不变。
+
+### 升级注意
+
+- 现场升级后执行 `gops sys update && gops sys localize`（`WPARSE_WORK_DIR` 默认值变了，`.env` 会重新生成），
+  再 `gops run start` / 重建 `wparse` 容器；旧的 `data-plane/` 可删除。
+- `data-plane-run/` 在 `sys-prj.yml` 的 `protect`/`ignore` 里，工作根与运行态不会被升级覆盖；
+  若你手工在旧 `data-plane/{data,.run}` 里留有开发产物，需要自己挪到 `data-plane-run/dev/`。
+
 ## [0.1.55-alpha] - 2026-10-21
 
 ### 新增

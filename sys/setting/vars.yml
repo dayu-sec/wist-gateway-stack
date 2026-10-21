@@ -36,7 +36,7 @@ system:
   # 不能跟 latest：必须与 data-plane/ 当前配套的版本一起升（上游 tag 无 v 前缀，同版本
   # 的 latest 与 <version> 指向同一个 digest）。
   - name: WPARSE_TAG
-    value: 0.30.0-alpha
+    value: 0.31.1-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

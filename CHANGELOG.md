@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.52-alpha] - 2026-10-21
+
+### 变更
+
+- **数据面引擎 `WPARSE_TAG` `0.30.0-alpha` → `0.31.1-alpha`**。
+
+  升级前做过的验证（不是只看版本号）：
+  - `wproj check -w <data-plane>` 全绿：Engine config、9 个 source / 24 个 sink 连接器、
+    Sources 结构与 runtime、Sink targets、WPL 1/1、OML 1/1、语义词典、内网网段、wpgen；
+  - 用新镜像 **真起 daemon**（同一份 `conf/wparse.toml`）并打两个管理面路径：
+    `/admin/v1/runtime/status` 返回结构与 0.30 一致（`instance_id` / `version` /
+    `accepting_commands` / `reloading` / `last_reload_*`）；`/admin/v1/reloads/model` 正常
+    受理并回显 `X-Request-Id` —— **gwlinkd `[wparse_relay]` 的双白名单路径没变**。
+
+  数据面工程（conf / connectors / models / topology）无需改动。
+
+### 注意
+
+- 升级后 `data-plane-run/work` 里的可写副本**不会**被覆盖（`cp -an` 只补缺失）。现场如果
+  改过 `conf/`，新引擎的默认项不会自动生效 —— 需要时按变更点手动合。
+- WarpStation 工具链（center-stack 的 `WARPPARSE_IMAGE_TAG`）已同步到 `0.31.1-alpha`，
+  两边必须对齐（规则在网关上跑、在 station 里校验）。
+
 ## [0.1.51-alpha] - 2026-10-20
 
 ### 新增

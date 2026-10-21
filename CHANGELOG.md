@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.53-alpha] - 2026-10-21
+
+### 新增
+
+- **`scripts/show-wparse-state.sh`（排障脚本）**：查看运行态命名卷里 `remote-models` / `remote-infra`
+  的克隆信息（origin / state / HEAD / tag），并与工作根（`models` / `conf` / `topology` / `connectors`）
+  **逐文件 sha256 比对**，直接回答「发布版本和引擎实际在跑的内容是否一致」。
+  - 容器在跑走 `docker exec`（Linux 不需要 sudo 翻 `/var/lib/docker`）；容器没起时回退
+    OrbStack 卷视图 / 可读的 Mountpoint，两种环境都能用。
+  - `--raw` 打 `project_remote_state.json` 原文，`--logs N` 看发布日志，`--copy DIR` 把克隆导出给宿主 git / IDE。
+  - 起因：`/data/.run` 是命名卷（admin token 要求 0600/属主 999），`data-plane-run/` 下看不到 git 仓库。
+
+### 注意
+
+- 本次**不改组件 tag**（gateway `v0.18.1-alpha` / web `v0.12.1-alpha` / wparse `0.31.1-alpha` /
+  VM `v1.154.0` 均不变），升级只需替换 stack 包。
+- TCR 里 `warp-parse:0.31.1-alpha` 仍未同步（本轮 `dev/push-images.sh` 推送 401：当前登录账号
+  没有 `cloud/warp-parse` 的 push 权限）；只拉 TCR 的现场升级前，先用有权限的账号补推。
+
 ## [0.1.52-alpha] - 2026-10-21
 
 ### 变更

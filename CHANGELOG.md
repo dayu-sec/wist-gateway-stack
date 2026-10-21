@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.54-alpha] - 2026-10-21
+
+### 新增
+
+- **`flow diagnose`（`gops run diagnose` 的系统扩展）**：一条命令就能回答“工作目录跟远端仓库到底差在哪”。
+  - `wparse.work_drift`：`remote-models/models` 与 `remote-infra/{conf,topology,connectors}` 对比 `/data`，
+    逐文件 sha256；区分 `only-clone` / `only-work` / `changed`，并跟上次结果比出“本次新增 / 已修复”。
+  - `wparse.applied_version.{models,infra}`：`project_remote_state.json` 的 revision 与克隆 HEAD 是否一致。
+  - 典型现场：发布/同步只更新了 clone、`/data` 没落到底 —— 规则静默不生效；现在一眼看出来。
+
+### 注意
+
+- 需要 `gops >= 2.10`（`gops run diagnose`）；老 gops 不会调用该流程，无副作用。
+- **只读**：容器里只 `find` + 算 hash，不写 `/data`、不改权限、不重启。
+- 豁免：`WPARSE_DRIFT_IGNORE` 或 `sys/diagnose/drift-ignore.txt` 可声明不参与全等比对的文件
+  （典型：模版渲染出来的配置）。
+
 ## [0.1.53-alpha] - 2026-10-21
 
 ### 新增

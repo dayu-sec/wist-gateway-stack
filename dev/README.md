@@ -11,9 +11,10 @@
 
 ```
 wist-gateway-stack/
-  data-plane/     # wparse 工程（conf/connectors/models/topology），开发态与发布态共用
-  dev/            # 本目录：svc.sh + 一次性工具 + 本地二进制
   sys/            # gops 系统定义（发布态）
+  sys/data-plane/ # wparse 工程（只读种子：conf/connectors/models/topology），开发态与发布态共用
+  data-plane-run/ # wparse 运行态根（发布态 data/.run/work；开发态 dev/）
+  dev/            # 本目录：svc.sh + 一次性工具 + 本地二进制
 ```
 
 下文用 `$WIST` 表示各仓父目录，即本目录的 `../..`：
@@ -24,7 +25,7 @@ x-topology/wist/                  <- $WIST
   wist-agentd/                     采集端 crate
   wist-gateway-web/                前端
   wist-gateway-stack/
-    data-plane/                    共用 wparse 工程
+    sys/data-plane/                共用 wparse 工程（只读种子）
     dev/                           <- 本目录（ROOT_DIR = $WIST，比栈根多一层）
 ```
 
@@ -76,7 +77,7 @@ x-topology/wist/                  <- $WIST
 | 组件 | 是什么 | 前台/后台 | 说明 |
 |---|---|---|---|
 | `vm` | VictoriaMetrics（`18429`） | 后台（**Docker 容器**） | 第三方依赖，无本地二进制；走 `sys/docker-compose.yml` |
-| `wparse` | 数据面 ELT 引擎 | 后台常驻 | 本地 `dev/bin/wparse`；工程在 `../data-plane` |
+| `wparse` | 数据面 ELT 引擎 | 后台常驻 | 本地 `dev/bin/wparse`；种子在 `../sys/data-plane`，运行根在 `../data-plane-run/dev` |
 | `web` | 前端 vite dev server（`5174`） | 后台常驻 | `npm run dev`，工作目录 `$WIST/wist-gateway-web` |
 | `gateway` | 控制面后端（HTTPS `:3000`） | 后台常驻 | 跑在最后；`./dev/svc.sh stop gateway` 停 |
 | `forward` | `443 → 网关端口` 纯 TCP 转发 | 后台常驻 | **在默认 `start` 里**（绑 443 要 sudo；`--no-forward` 摘掉）；见下面「组件 forward」一节 |
@@ -139,7 +140,7 @@ graph TD
 |---|---|---|
 | gateway | `/tmp/wist-gateway-server.log` | `/tmp/wist-gateway.pid`（**网关进程自身**的 pid） |
 | web | `/tmp/wist-gateway-web.log` | `/tmp/wist-gateway-web.pid`（npm 的 pid） |
-| wparse | `data-plane/data/logs/wparse-daemon.log`、`wparse.log` | `data-plane/data/logs/wparse.pid` |
+| wparse | `data-plane-run/dev/data/logs/wparse-daemon.log`、`wparse.log` | `data-plane-run/dev/data/logs/wparse.pid` |
 | wist-agentd | `~/.wist-agentd/log/agentd.out` | `~/.wist-agentd/log/agentd.pid` |
 
 gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 web/wparse 同一口径）：`svc.sh stop gateway`
@@ -151,7 +152,7 @@ gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 
 |---|---|---|
 | gateway | `dev/configs/gateway/`（= `$WIST_GATEWAY_HOME`，默认） | `wist-gateway.toml`；`state/`：SQLite 库、`install-package/`；证书/私钥/信任锚/签名密钥在**共享身份**（见下） |
 | wist-agentd | `~/.wist-agentd/` | `agentd.toml`、`tasks/`、`state/agent_runtime.json`（`wic_` 凭据）、`log/` |
-| wparse | `data-plane/{data,.run}/` | 运行期数据与临时产物 |
+| wparse | `data-plane-run/dev/{data,.run}/` | 运行期数据与临时产物 |
 
 **开发态与发布态的网关持久数据是分开两个目录**：开发态在 `<栈根>/dev/configs/gateway`，发布态挂
 `configs/gateway/`（两边 `victoria_metrics_url`、`public_base_url`、是否装 `[content]` 等不同，分开才各自自洽）。
@@ -166,8 +167,8 @@ gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 
 > **开发态** `dev/configs/gateway/wist-gateway.toml` 里那个，**不是**发布态容器用的
 > `configs/gateway/wist-gateway.toml`（两份同名、都是 `.gitignore` 的本地生成物，容易拿错）。
 > 别翻文件：`./dev/svc.sh token`（只认开发态 home，顺带打印 token 出处）。
-wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf,connectors,models,topology}`（发布态只读挂载），
-运行态开发态在 `data-plane/{data,.run}`、发布态在 `../data-plane-run/`。
+wparse 侧则是**配置共用、运行态分开**：配置在 `sys/data-plane/{conf,connectors,models,topology}`（只读种子，发布态挂进容器），
+运行态开发态在 `data-plane-run/dev/{data,.run}`、发布态在 `../data-plane-run/`。
 
 网关注册表存在内嵌 SQLite 里（`state/wist-gateway-store.db`，由 `agent.store_file` 默认值 `.json`
 改后缀而来），启动时自动迁移。若库中**既无 Agent 也无注册 token**，会一次性导入遗留的
@@ -190,7 +191,8 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `data-plane/{conf
 | `WEB_LOG` / `WEB_PIDFILE` | 前端日志与 pidfile | `/tmp/wist-gateway-web.log` / `.pid` |
 | `WARP_INSIGHT_WEB_PROXY_TARGET` | vite 的 `/api` 反代目标 | 从网关配置推导（见下） |
 | `WPARSE_BIN` | wparse 可执行文件 | `dev/bin/wparse` |
-| `WPARSE_WORK_ROOT` | wparse 工程根目录 | `dev/../data-plane` |
+| `WPARSE_SEED` | wparse 只读种子（conf/connectors/models/topology） | `<栈根>/sys/data-plane` |
+| `WPARSE_WORK_ROOT` | wparse 开发工作根（启动时从种子 `cp -an` 补缺） | `<栈根>/data-plane-run/dev` |
 | `WPARSE_VM_ENDPOINT` | wparse 写指标的 VM 端点 | `http://127.0.0.1:18429` |
 | `WPARSE_GATEWAY_ENDPOINT` | wparse 的 agent-facts sink 端点 | `http://127.0.0.1:3001` |
 | `GATEWAY_LISTEN` | `setup-domain.sh` 写进配置的监听地址 | `0.0.0.0:443` |
@@ -317,8 +319,13 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 - **沿用服务现有的发布态配置**：`--config` / `--pub-config` 直接从已装的 plist/unit 里读出来（读不到才退回本栈的
   `<栈根>/configs/gwlinkd/gwlinkd.toml`、`<栈根>/identity/gwlinkd/gwlinkd-pub.toml`）；要换用别的加
   `WIST_GWLINKD_DEV_CONFIG` / `WIST_GWLINKD_DEV_PUB_CONFIG`。
-- **拷到服务的位置**：默认 `/usr/local/bin/wist-gwlinkd`（`WIST_GWLINKD_DEV_BIN` 可改）；覆盖前先 `cp -p` 备份成
-  `*.bak-<时间戳>`，换完用 sha256 校验（不一致即报错），`--rollback` 换回最近一次。
+- **拷到服务的位置**：默认入口 `/usr/local/bin/wist-gwlinkd`（`WIST_GWLINKD_DEV_BIN` 可改）。中心装的那份
+  入口是**符号链接**，真身在 `/usr/local/lib/wist-gwlinkd/wist-gwlinkd`（目录与文件都归运行用户）；
+  本脚本会顺链接换**真身**，不会把链接改成普通文件。覆盖前先 `cp -p` 备份成 `*.bak-<时间戳>`，
+  换完用 sha256 校验（不一致即报错），`--rollback` 换回最近一次。
+- **换完还体检自更新布局**：gwlinkd 的自更新要在进程内“同目录写临时文件 + rename”覆盖真身，**目录**必须对
+  运行用户可写。落在 `/usr/local/bin`（root 拥有）时会 `[warn] 自更新会失败`，并提示重跑中心「只装 gwlinkd」——
+  别把链接换成 root 的普通文件，那正是这条警告的成因。
 - **运行身份仍是部署用户**（`--run-as $(id -un)`）：别让服务以 root 跑 —— gwlinkd 会回写配置、落身份、驱动
   `gops` 升级，那些都该是部署用户的属主（与中心安装脚本同一口径）。
 - **gwlinkd 只归这一个服务**：`svc.sh` 已不管它（不构建、不起、不停）。本脚本装服务前只兜底清掉
@@ -379,11 +386,11 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
    `npm run dev` 起过前端，注意它可能是 Vite 默认的 **5173**（本目录固定 **5174** `--strictPort`），
    两者不是同一个实例，别互相误停。
 4. **`dev/bin/` 不入 git**（约 92M），随发布包也不带。里面只有 `wparse` 被脚本使用；`wpadm` / `wpgen`
-   / `wpl-check` / `wprescue` 是**手工 WPL 开发工具**，无脚本引用（见 `../data-plane/models/wpl/mac/README.md`）。
-5. **`../data-plane/` 是 wparse 配置的唯一源**，开发态与发布态共用，且由发布态 compose 按目录只读挂载
+   / `wpl-check` / `wprescue` 是**手工 WPL 开发工具**，无脚本引用（见 `../sys/data-plane/models/wpl/mac/README.md`）。
+5. **`../sys/data-plane/` 是 wparse 配置的唯一源（只读种子）**，开发态与发布态共用，且由发布态 compose 按目录只读挂载
    （`${WPARSE_WORK_DIR}/conf → /data/conf` 等）。改它等于同时改两条运行路径；改动后若影响变量，
-   要重跑 `gops sys update && gops sys localize`。**运行态不共享**：开发态写 `data-plane/{data,.run}`，
-   发布态写 `../data-plane-run/{data,.run}`（`WPARSE_RUN_DATA` / `WPARSE_RUN_STATE`）。
+   要重跑 `gops sys update && gops sys localize`。**运行态不共享**：开发态写 `data-plane-run/dev/{data,.run}`，
+   发布态写 `../data-plane-run/{data,.run}`（`WPARSE_RUN_DATA` / `WPARSE_RUN_STATE`）；开发启动时会从种子 `cp -an` 补缺。
 6. **同一 work root 只能跑一个 wparse 引擎**（引擎自身没有单实例保护，实测两个实例会互写
    `.run/authority.sqlite` 与输出）。两道保障：`svc.sh` 先拿**与容器同一位置**的锁
    `<work-root>/.run/.wparse.lock`（macOS 没 `flock(1)`，用 python3 的 `fcntl`，锁 fd 设成可继承才能跨
@@ -422,7 +429,8 @@ dev/
     install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位
   bin/                          # wparse 等本地二进制（不入 git）
 
-../data-plane/                  # wparse 工程（开发态与发布态共用的唯一源，不属 dev）
+../sys/data-plane/              # wparse 工程（开发态与发布态共用的只读种子，属 sys/）
   conf/ connectors/ topology/ models/
+../data-plane-run/              # wparse 运行态根（发布态 data/.run/work；开发态 dev/）
 ../identity/gateway/{public,private}/  # 站点身份（CA/证书/私钥）—— dev 与发布态共用；dev home 的 identity 是它的 symlink
 ```

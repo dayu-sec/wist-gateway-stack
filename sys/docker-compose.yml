@@ -69,7 +69,7 @@ services:
   # ── 数据平台：WarpParse（ELT 引擎）──
   # WPARSE_IMAGE 来自上游镜像仓库，客户可用 values/value.yml 覆盖成内网镜像仓库。
   # 挂载约定（镜像里 /data 属非 root 用户 wparse(uid 999)）：
-  #   - 配置从 data-plane/（只读种子）复制到 data-plane-run/work（可写运行根）：
+  #   - 配置从 sys/data-plane/（只读种子）复制到 data-plane-run/work（可写运行根）：
   #     `[project_remote]` 会把 Git 内容写进工作根，所以不能直接只读挂载当工作根。
   #   - 运行态直接挂到 /data 下的两个子路径：/data/data（输出）与 /data/.run（引擎状态）。
   # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker

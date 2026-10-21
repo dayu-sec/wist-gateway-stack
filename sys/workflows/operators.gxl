@@ -91,7 +91,7 @@ mod operators {
     gx.cmd ( "./scripts/install-initial-knowledge.sh" );
     // ⑥' WarpParse 管理面（WarpStation 发布链路）：可写运行根 + admin API token。
     //     容器内绑 0.0.0.0:19090 + TLS，宿主只发布 127.0.0.1；token 落在
-    //     data-plane-run/.run/admin_api.token（进不了 data-plane/ 只读种子）。
+    //     data-plane-run/.run/admin_api.token（进不了 sys/data-plane/ 只读种子）。
     gx.cmd ( "./scripts/init-wparse-admin.sh" );
     // ⑥ 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
     //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载

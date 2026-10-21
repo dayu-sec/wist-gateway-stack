@@ -13,7 +13,7 @@ set -euo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 STACK_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
 WPARSE="${WPARSE:-${STACK_ROOT}/dev/bin/wparse}"
-DATA_PLANE="${STACK_ROOT}/data-plane"
+DATA_PLANE="${STACK_ROOT}/sys/data-plane"
 
 if [[ ! -x "${WPARSE}" ]]; then
   echo "skip: wparse not found or not executable: ${WPARSE}" >&2

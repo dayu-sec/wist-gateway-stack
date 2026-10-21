@@ -27,7 +27,8 @@ ignore:
   # 栈根现场密钥文件：`WIST_GATEWAY_SEC_FILE` 默认指向 `.wist/sec-value.yml`（网关 admin token）。
   # 密钥绝不进交付包；默认模式靠 `.gitignore` 挡住，这条是 **`--full` 模式的护栏**。
   - .wist
-  # wparse 运行态根（WPARSE_RUN_DATA / WPARSE_RUN_STATE）：pid / 锁 / 引擎自带的 sqlite 与输出。
+  # wparse 运行态根（发布态 WPARSE_RUN_DATA / WPARSE_RUN_STATE / WPARSE_RUN_WORK，
+  # 开发态 dev/）：pid / 锁 / 引擎自带的 sqlite、输出与工作副本。
   - data-plane-run
   # 开发态资源：本地二进制（~92M，随平台而异）+ dev 运行态（含 store / 日志 / 渲染物）。
   - dev/bin

@@ -9,8 +9,8 @@
 - **发布态**：Docker 编排（gops 系统，`kind: docker-compose`），`gops run start` 拉起整个栈 —— 变量定义与本地化见「发布态」。
 - **开发态**：不依赖 Docker，用本地编译的二进制直接跑（`dev/`）。
 
-两者共享**同一份 wparse 业务配置**（`data-plane/{conf,connectors,models,topology}`，在栈根；发布态只读挂载），环境差异（VictoriaMetrics 地址）通过 `WPARSE_VM_ENDPOINT` 注入，不产生两份配置漂移。
-**运行态各自独立**：发布态落 `data-plane-run/data`（`WPARSE_RUN_DATA`）与 `data-plane-run/.run`（`WPARSE_RUN_STATE`），开发态落 `data-plane/{data,.run}` —— 两个引擎可以同时跑，不会互踩。
+两者共享**同一份 wparse 业务配置**（`sys/data-plane/{conf,connectors,models,topology}`，在系统定义树 `sys/` 下；发布态只读挂载），环境差异（VictoriaMetrics 地址）通过 `WPARSE_VM_ENDPOINT` 注入，不产生两份配置漂移。
+**运行态各自独立**：发布态落 `data-plane-run/data`（`WPARSE_RUN_DATA`）与 `data-plane-run/.run`（`WPARSE_RUN_STATE`），开发态落 `data-plane-run/dev/{data,.run}` —— 两个引擎可以同时跑，不会互踩。
 
 ### 配置与运行态：谁分、谁不分
 
@@ -24,13 +24,13 @@
   已从资源树里拆出来放**栈根** `identity/gateway/{public,private}`（前端那份是 `identity/web/{public,private}`）——
   这样换域名 / 重签叶证书只动**一处**，两边看到的是同一张 CA 与信任锚。配置里按相对配置目录的
   `identity/public|private/…` 引用它（开发态靠 `dev/configs/gateway/identity` 这个 symlink 解析回栈根）。
-- **`data-plane/` —— 不用分开**：`data-plane/{conf,connectors,models,topology}` 是 warp-parse 的
-  **业务配置**，开发态与发布态**共用同一份**（发布态只读挂载）；环境差异靠
+- **`sys/data-plane/` —— 不用分开**：`sys/data-plane/{conf,connectors,models,topology}` 是 warp-parse 的
+  **业务配置（只读种子）**，开发态与发布态**共用同一份**（发布态只读挂载）；环境差异靠
   `WPARSE_VM_ENDPOINT` / `WPARSE_GATEWAY_ENDPOINT` 注入，不复制配置、也就不产生漂移。
 
 其中**运行态一律各自独立**（运行态不是配置）：网关 `dev/configs/gateway/state` ↔ `configs/gateway/state`
 （现在只剩每部署一份的 **store 库** —— 证书 / 私钥已在共享身份 `identity/` 里）；wparse
-`data-plane/{data,.run}` ↔ `data-plane-run/{data,.run}` —— 两侧可同时跑、不互踩。
+`data-plane-run/dev/{data,.run}` ↔ `data-plane-run/{data,.run}` —— 两侧可同时跑、不互踩。
 
 ## 组件
 
@@ -43,9 +43,9 @@
 
 > **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量：改**产品默认**改 `sys/setting/vars.yml`（默认 TCR），改**本环境用什么**改 `values/value.yml`（推荐，一条命令生效，见「变量与本地化」）。
 >
-> **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.26.0-beta`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `data-plane/` 一起升**。
+> **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `sys/data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.26.0-beta`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `sys/data-plane/` 一起升**。
 >
-> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：`data-plane/` 是**只读种子**，
+> **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：`sys/data-plane/` 是**只读种子**，
 > 启动时把 `conf/connectors/models/topology` 复制到可写运行根 `${WPARSE_RUN_WORK} → /data`
 > （`cp -an`，只补缺失，`[project_remote]` 会更新这里）；输出 `${WPARSE_RUN_DATA} → /data/data`；
 > 运行态 `${WPARSE_RUN_STATE}` 只作为**一次性种子**复制进命名卷 `wist-gateway-stack-wparse-run`
@@ -81,7 +81,7 @@
 
 数据面支持由 `wist-center-stack` 的 WarpStation 做规则维护、版本化与发布：
 
-- **配置来源**：`data-plane/` 是只读**种子**；容器启动时复制到 `data-plane-run/work`（可写运行根），
+- **配置来源**：`sys/data-plane/` 是只读**种子**；容器启动时复制到 `data-plane-run/work`（可写运行根），
   之后 `[project_remote]` 从 **Center Git Proxy** 拉取 `wp-rules`（models）/ `wp-infra`（infra），
   真实地址由容器环境 `WPARSE_PROJECT_MODELS_REPO` / `WPARSE_PROJECT_INFRA_REPO` 注入。
   Gateway **不持有 CNB 凭据**；只为 `wparse` 挂载 Center CA（`GIT_SSL_CAINFO`）。
@@ -118,9 +118,9 @@ wist-gateway-stack/
       web/nginx.conf.tpl    # 前端站点配置模板（localize 渲染出 configs/web/nginx.conf，注入 WEB_DOMAIN）
       gateway/wist-gateway.toml.tpl   # 网关配置模板（gx.tpl 渲染出 configs/gateway/wist-gateway.toml）
       gwlinkd/gwlinkd.toml.tpl        # gwlinkd（宿主侧常驻）配置模板（渲染出 configs/gwlinkd/gwlinkd.toml）
-  data-plane/               # wparse 工程：配置的唯一源（conf/connectors/models/topology；开发态与发布态共用）
-    conf/ connectors/ topology/ models/
-  data-plane-run/           # 发布态 wparse 运行态根（data/ + .run/ 分别挂到容器 /data/data、/data/.run；不入 git）
+    data-plane/               # wparse 工程（只读种子）：配置的唯一源（conf/connectors/models/topology）
+      conf/ connectors/ topology/ models/
+  data-plane-run/           # wparse 运行态根：发布态 data/ + .run/ + work/；开发态 dev/（都不入 git）
   dev/                      # 开发态：单一入口 + 本地二进制
     svc.sh                  # 起/停/看 全栈（vm | wparse | web | gateway）
     setup-domain.sh         # 按需：切域名（建/复用 dev CA + 签叶证书 + 改配置）
@@ -391,7 +391,7 @@ dev 态由 `./dev/svc.sh start` 带起它，**配置驱动**：读 `dev/configs/
 ```bash
 wist-gateway-stack-<tag>.tar.gz
   sys/ + sys-prj.yml          # gops 系统定义 + 声明文件（docker-compose.yml、sys_model、setting/vars.yml、resolved_vars.yml、configs/{web/nginx.conf.tpl,gateway/*.tpl}）
-  data-plane/                 # wparse 工程（conf/connectors/models/topology）
+    data-plane/               # wparse 工程（只读种子：conf/connectors/models/topology）
   dev/                        # 开发态启停脚本（bin/ 不入 git）
   _gal/                       # gx 工作流
   version.txt
@@ -406,7 +406,7 @@ wist-gateway-stack-<tag>.tar.gz
 >
 > 包里的变量解析产物 `sys/merged_vars.yml`（`prj import` 缺了会报“系统变量未解析”）：gops 文档标注它**需入库**，所以它随仓库一起进包 —— **改了 `sys/setting/vars.yml` 后要本地跑一次 `gops sys update` 并提交它**，否则包里带的是旧值。CI 里不跑 gops，包内容完全由 `git archive` 决定。
 
-用 `git archive` 出包，只收 git 跟踪的内容 —— `dev/bin/`（约 92M 二进制）、`data-plane/{data,.run}/`、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
+用 `git archive` 出包，只收 git 跟踪的内容 —— `dev/bin/`（约 92M 二进制）、`data-plane-run/`（发布态与开发态运行根）、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 
 包里**含 `sys/configs/web/nginx.conf.tpl`**（前端站点配置随仓走）**但不含任何私钥/证书**：站点身份（`identity/gateway/`、`identity/web/`）与运行配置（`configs/gateway/`、`configs/web/`）都在目标机现场生成。下载解压后跑一次 `gops sys update && gops sys localize` 即可（备料 + 渲染 + 页面证书一步到位，见「发布态 A」）。
 

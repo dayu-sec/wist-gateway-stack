@@ -44,7 +44,7 @@
 #   SKIP_BUILD=1 等价 --no-build；SKIP_FORWARD=1 等价 --no-forward
 #   WIST_GATEWAY_HOME（默认 <栈根>/dev/configs/gateway）  GATEWAY_PIDFILE  GATEWAY_PORT（覆盖停网关时的端口；默认读配置）
 #   WEB_URL  WEB_DIR  WEB_LOG  WEB_PIDFILE  WARP_INSIGHT_WEB_PROXY_TARGET
-#   WPARSE_BIN  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
+#   WPARSE_BIN  WPARSE_SEED  WPARSE_WORK_ROOT  WPARSE_VM_ENDPOINT  WPARSE_GATEWAY_ENDPOINT
 #   WIST_KNOWLEDGE_DIR（默认 <wist 仓组>/wist-knowledge；策展内容源）
 #   WIST_GATEWAY_LOCK_FILE（网关单实例锁路径；默认 /tmp/wist-gateway.lock ——
 #     同一台机器上要有意并行两套时才改它，改了就真的会有两个网关同时在跑）
@@ -86,7 +86,11 @@ WEB_DIR="${WEB_DIR:-${ROOT_DIR}/wist-gateway-web}"
 WEB_LOG="${WEB_LOG:-/tmp/wist-gateway-web.log}"
 WEB_PIDFILE="${WEB_PIDFILE:-/tmp/wist-gateway-web.pid}"
 # ── 数据面 wparse ──
-WPARSE_WORK_ROOT="${WPARSE_WORK_ROOT:-${STACK_ROOT}/data-plane}"
+# 只读种子（随包交付、随版本升级）与开发工作根（可写）分开：
+#   种子     sys/data-plane          conf/connectors/models/topology
+#   开发工作根 data-plane-run/dev    data/ 与 .run/ 是运行态（不入 git，也受 sys-prj protect）
+WPARSE_SEED="${WPARSE_SEED:-${STACK_ROOT}/sys/data-plane}"
+WPARSE_WORK_ROOT="${WPARSE_WORK_ROOT:-${STACK_ROOT}/data-plane-run/dev}"
 WPARSE_BIN="${WPARSE_BIN:-${SCRIPT_DIR}/bin/wparse}"
 WPARSE_PIDFILE="${WPARSE_WORK_ROOT}/data/logs/wparse.pid"
 export WPARSE_VM_ENDPOINT="${WPARSE_VM_ENDPOINT:-http://127.0.0.1:18429}"
@@ -211,7 +215,7 @@ stop_vm() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# wparse 数据面（本地二进制；工程在 ../data-plane，开发态与发布态共用配置）
+# wparse 数据面（本地二进制；种子在 ../sys/data-plane，开发运行根在 ../data-plane-run/dev）
 # ────────────────────────────────────────────────────────────────────────────
 wparse_up() {
   [[ -f "${WPARSE_PIDFILE}" ]] || return 1
@@ -245,7 +249,17 @@ start_wparse() {
     return 0
   fi
   [[ -x "${WPARSE_BIN}" ]] || die "找不到可执行的 wparse：${WPARSE_BIN}（dev/bin/wparse）"
-  [[ -f "${WPARSE_WORK_ROOT}/conf/wparse.toml" ]] || die "缺少 wparse 配置：${WPARSE_WORK_ROOT}/conf/wparse.toml"
+
+  # 只读种子 → 开发工作根：只补缺失，不覆盖（与发布态 entrypoint 同口径）。
+  if [[ -d "${WPARSE_SEED}" ]]; then
+    mkdir -p "${WPARSE_WORK_ROOT}/data" "${WPARSE_WORK_ROOT}/.run"
+    for d in conf connectors models topology; do
+      mkdir -p "${WPARSE_WORK_ROOT}/${d}"
+      cp -an "${WPARSE_SEED}/${d}/." "${WPARSE_WORK_ROOT}/${d}/"
+    done
+  fi
+
+  [[ -f "${WPARSE_WORK_ROOT}/conf/wparse.toml" ]] || die "缺少 wparse 配置：${WPARSE_WORK_ROOT}/conf/wparse.toml（种子：${WPARSE_SEED}）"
 
   local lock="${WPARSE_WORK_ROOT}/.run/.wparse.lock"
   local log_dir="${WPARSE_WORK_ROOT}/data/logs"

@@ -38,7 +38,7 @@ system:
 - name: WEB_NGINX_CONF
   value: ./configs/web/nginx.conf
 - name: WPARSE_WORK_DIR
-  value: ./data-plane
+  value: ./sys/data-plane
 - name: WPARSE_RUN_DATA
   value: ./data-plane-run/data
 - name: WPARSE_RUN_STATE

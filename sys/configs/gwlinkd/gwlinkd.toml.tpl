@@ -45,6 +45,25 @@ upgrader_program = "{{upgrader_program}}"
 {{#if upgrade_project_dir}}
 upgrade_project_dir = "{{upgrade_project_dir}}"
 {{/if}}
+# 本机组件目录（`[[upgrade.component]]`）：中心计划里的**组件名** → 本机安装机制。
+# galaxy-ops / galaxy-flow 是**宿主二进制**（gops / gx），不是 gops 工程里的系统：
+# 标 `tool-copy` 就地覆盖原二进制；不标就会落到 `gops prj upgrade <组件名>`，
+# 以「未知系统或无效版本 spec：galaxy-ops」失败（中心发来的是发布组件名，不是系统名）。
+{{#if upgrader_program}}
+[[upgrade.component]]
+name = "galaxy-ops"
+install = "tool-copy"
+binary = "{{upgrader_program}}"
+{{else}}
+[[upgrade.component]]
+name = "galaxy-ops"
+install = "tool-copy"
+binary = "gops"
+{{/if}}
+[[upgrade.component]]
+name = "galaxy-flow"
+install = "tool-copy"
+binary = "gx"
 # 发布 ②「Agent 包交付」：gwlinkd 取到中心包后，落到宿主投放目录（agent_package_drop_dir），
 # 再把**容器内路径**（agent_package_container_dir/<文件名>）交给网关托管。
 # 两项指向**同一份**目录（宿主写法 vs 容器写法）—— 容器里的路径就是 compose 里 `:/packages`。

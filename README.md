@@ -96,6 +96,10 @@
 - **上线顺序**：两个 CNB 仓库需先有 baseline 内容（models/ 与 conf/topology/connectors/），
   再让 Gateway 以 `project_remote.enabled = true` 启动；远端为空时 wparse 会因
   `load ... route confs` 起不来。
+- **排障**：`./scripts/show-wparse-state.sh` 对比 `remote-models` / `remote-infra` 的克隆
+  （origin / state / HEAD / tag）与工作目录（`models` / `conf` / `topology` / `connectors`）是否逐文件一致；
+  `--raw` 打状态文件原文，`--logs 50` 看发布日志，`--copy DIR` 把克隆导出给宿主 git / IDE。
+  git 克隆在**命名卷**（`wist-gateway-stack-wparse-run`）里，不在 `data-plane-run/` 下。
 
 > 完整设计与安全约束见 `wist-design/doc/design/center/warpstation-rule-publishing.md`。
 

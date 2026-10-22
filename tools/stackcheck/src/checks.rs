@@ -590,7 +590,9 @@ pub fn package_pairing(stack: &Stack) -> Vec<Finding> {
                 "最新知识库包缺签名",
                 format!("{} 旁边没有 .sig（导入会 422 package_signature_invalid）", newest_name),
             )
-            .with_hint("把发布侧的 *.tar.gz.sig 一起放进 packages/；签名是 base64 文本"),
+            .with_hint("把发布侧的 *.tar.gz.sig 一起放进 packages/；签名是 base64 文本")
+            // 不阻断：它会让「以后导入」失败，但当前跑着的栈是好的 —— 不该因此拦下升级。
+            .non_blocking(),
         );
     }
 

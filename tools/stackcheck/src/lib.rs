@@ -46,6 +46,11 @@ impl Status {
 pub struct Finding {
     pub code: String,
     pub status: Status,
+    /// 它「修不好就别升级 / 别启动」吗？
+    ///
+    /// `Fail` 但**不阻断**的典型例子：知识库包缺 `.sig` —— 它会让「以后导入」失败，
+    /// 但当前跑着的栈是好的，不能因此拦下一个升级。
+    pub blocking: bool,
     pub title: String,
     pub detail: String,
     pub hint: String,
@@ -60,6 +65,7 @@ impl Finding {
         Self {
             code: code.into(),
             status: Status::Ok,
+            blocking: false,
             title: title.into(),
             detail: detail.into(),
             hint: String::new(),
@@ -84,8 +90,15 @@ impl Finding {
     ) -> Self {
         Self {
             status: Status::Fail,
+            blocking: true,
             ..Self::ok(code, title, detail)
         }
+    }
+
+    /// 标记「失败但不阻断升级/启动」（见 [`Finding::blocking`]）。
+    pub fn non_blocking(mut self) -> Self {
+        self.blocking = false;
+        self
     }
 
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
@@ -130,4 +143,28 @@ pub fn worst(findings: &[Finding]) -> Status {
         .map(|finding| finding.status)
         .max()
         .unwrap_or(Status::Ok)
+}
+
+/// 是否存在**阻断类**失败（`--gate` 的判据）。
+pub fn has_blocking_failure(findings: &[Finding]) -> bool {
+    findings
+        .iter()
+        .any(|finding| finding.status == Status::Fail && finding.blocking)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocking_flag_separates_gate_failures_from_soft_ones() {
+        let soft = Finding::fail("package.knowledge_signature", "t", "").non_blocking();
+        let warn = Finding::warn("package.knowledge_signature.history", "t", "");
+        assert!(!has_blocking_failure(&[soft.clone(), warn.clone()]));
+        // 对体检（diagnose）而言它仍然是 FAIL：该修。
+        assert_eq!(worst(&[soft, warn]), Status::Fail);
+
+        let hard = Finding::fail("package.drop_dir", "t", "");
+        assert!(has_blocking_failure(&[hard]));
+    }
 }

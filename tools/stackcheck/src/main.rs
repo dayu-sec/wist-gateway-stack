@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use wist_stackcheck::{Finding, Stack, Status, run, worst};
+use wist_stackcheck::{Finding, Stack, Status, has_blocking_failure, run, worst};
 
 const USAGE: &str = "\
 wist-stackcheck — 栈级配置检查
@@ -24,10 +24,13 @@ wist-stackcheck — 栈级配置检查
   --format <fmt>   text（缺省，人读）| json（Flow Result v1）
   --result <file>  另写一份 JSON 结果；也认环境变量 GOPS_DIAGNOSE_RESULT
                    （**追加**到已有 `checks[]`：同一份体检里可以多个流程段各自报）
+  --gate           闸门模式：只有**阻断类** FAIL 才非零退出（WARN / 非阻断 FAIL 都放行）。
+                   给 `flow localize` 用 —— 渲染完就守门，别把坏配置带进 `up`。
   -h, --help       本帮助
 
 退出码：
   写了结果文件（diagnose 模式）→ 始终 0，结论看 checks[]；
+  --gate → 0（无阻断类 FAIL）/ 2（有）；
   否则 → 0 全好 / 1 有 WARN / 2 有 FAIL。
 ";
 
@@ -53,8 +56,20 @@ fn main() -> ExitCode {
         print_text(&findings, verdict);
     }
 
+    // 闸门模式（`flow localize`）：只拦「阻断类」失败 —— WARN 与「失败但不阻断」
+    // 都不应该让一次升级/部署停下来。
+    let gate_verdict = if has_blocking_failure(&findings) {
+        Status::Fail
+    } else {
+        Status::Ok
+    };
+
     let Some(path) = &args.result else {
-        return ExitCode::from(verdict.exit_code());
+        return ExitCode::from(if args.gate {
+            gate_verdict.exit_code()
+        } else {
+            verdict.exit_code()
+        });
     };
     if let Err(err) = write_result(path, &to_json(&findings)) {
         eprintln!("写结果文件失败 {}：{err}", path.display());
@@ -99,6 +114,7 @@ fn write_result(path: &std::path::Path, mine: &serde_json::Value) -> std::io::Re
 struct Args {
     root: PathBuf,
     json: bool,
+    gate: bool,
     result: Option<PathBuf>,
 }
 
@@ -106,11 +122,13 @@ impl Args {
     fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Self>, String> {
         let mut root: Option<PathBuf> = None;
         let mut format = String::from("text");
+        let mut gate = false;
         let mut result: Option<PathBuf> = None;
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(None),
+                "--gate" => gate = true,
                 "--root" => {
                     let value = args.next().ok_or("--root 需要一个路径")?;
                     root = Some(PathBuf::from(value));
@@ -143,6 +161,7 @@ impl Args {
         Ok(Some(Self {
             root: root.unwrap_or_else(|| PathBuf::from(".")),
             json,
+            gate,
             result,
         }))
     }
@@ -181,6 +200,9 @@ fn print_text(findings: &[Finding], verdict: Status) {
         }
         if !finding.hint.trim().is_empty() {
             println!("       → {}", finding.hint);
+        }
+        if finding.status == Status::Fail && !finding.blocking {
+            println!("       （不阻断升级/启动）");
         }
     }
 

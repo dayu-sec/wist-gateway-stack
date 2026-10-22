@@ -108,6 +108,14 @@ mod operators {
     //     前置进子进程 PATH（非交互场景 gwlinkd / systemd 同理，自 galaxy-ops 2.10.1 起）。
     //     注意：`${VAR}` 是 GXL 流程变量空间（会被 gx 提前替换），shell 变量要写 `$VAR`。
     gx.cmd ( "gops sys perms --help >/dev/null 2>&1 || { echo '错误：本栈需要 gops >= 2.7（gops sys perms）'; exit 1; }; gops sys perms --apply" );
+
+    // ⑦ 配置守门（**必须最后**）：刚渲染完的配置立刻自检，**阻断类 FAIL 直接让 localize 失败**。
+    //    为什么在这里：`gops prj upgrade` 的 `regenerate` 阶段调的就是 `gops sys localize` ——
+    //    于是「新模板渲染出来是错的」会在 **pull / up 之前** 暴露，并由 `--on-failure rollback-all`
+    //    回滚，而不是等升级完成、现场跑了两天才发现一个键掉进了别的 TOML 段。
+    //    闸门语义：WARN 与「失败但不阻断」（如知识库包缺 .sig）都不拦，只有真会把栈弄坏的才拦。
+    //    首次部署也一样：`docker compose up` 之前就把错误的渲染拦下来。
+    gx.cmd ( "./scripts/check-stack.sh --gate" );
   }
 
   // 体检（`gops run diagnose`）：本系统专属的「期望」检查。

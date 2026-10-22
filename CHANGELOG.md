@@ -25,6 +25,14 @@
   结果文件已有合法 Flow Result 时追加而不是覆盖，所以一个 flow 里多个诊断动作不会互相吞掉。
   注：栈级检查必须排在重建者之后。
 
+- **升级/部署守门**：`flow localize` 末尾力 `scripts/check-stack.sh --gate`。
+  因为 `gops prj upgrade` 的 `regenerate` 阶段跑的就是 `gops sys localize` ——
+  **新模板渲染出来是错的，会在 `pull` / `up` 之前就暴露**，并由 `--on-failure rollback-all` 回滚；
+  首次部署也一样（`docker compose up` 之前就拦）。升级前的 `diagnose` 步本身已对 FAIL 拒绝升级。
+
+  闸门只看**阻断类**失败：WARN、以及「失败但不阻断」都不拦。目前唯一的不阻断项是
+  知识库包缺 `.sig` —— 它让「以后导入」失败，但当前跑着的栈是好的，不该因此卡住升级。
+
 ### 修复
 
 - **`public_base_url` 是派生值但只在新建时写**（`scripts/init-gateway.sh`）：
@@ -54,6 +62,8 @@
 
 - 旧部署的交付文件还在 `packages/` 根下；升级后重派一次 `push-agent-package` 计划即可
   （网关按 platform **upsert**，不会留重复条目），随后可手工清掉根目录里的旧文件。
+- **`localize` 现在会因配置阻断类 FAIL 而失败**（升级时即回滚）。如果现场被拦，按输出里的
+  `code` 逐条处理；确认是误判时先用 `scripts/check-stack.sh` 手工跑一遍看全文。
 
 ## [0.2.4-alpha] - 2026-10-22
 

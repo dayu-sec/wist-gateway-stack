@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 工程
+
+- **`tools/stackcheck` 的通用引擎抽到公共仓 `wist-stack-tools/stackcheck-core`**（tag 固定）：
+  Flow Result / CLI / 渲染/密钥/端口/镜像/compose/x509 只有一份实现；本仓保留 gateway profile、
+  package / knowledge / identity / prereq / TLS 策略与薄 main。
+- 共享引擎顺带修掉两栈已经分叉的边界（判据数量不变，仍 19 项）：
+  - `docker ps --format` 多行输出按 `,` + `\n` 切分（之前每行第一个发布端口会被静默漏掉，导致
+    本栈端口误报冲突）；
+  - 端口短语法支持 `[::1]:…` 与行内 `ports: […]`（之前静默跳过 = 假绿）；
+  - `.env` 存在但不可读/为空时不再静默回落默认值；
+  - 只有渲染产物、找不到值文件/模板时报 WARN（不再报 OK）；
+  - 端口按 compose 的 bind IP 探测，镜像探测去重。
+- 本地自检：`cargo test --manifest-path tools/stackcheck/Cargo.toml` 现在会拉取公共 core（首次需网络）。
+
 ## [0.2.6-alpha] - 2026-10-23
 
 ### 修复

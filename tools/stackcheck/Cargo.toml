@@ -3,16 +3,14 @@ name = "wist-stackcheck"
 version = "0.2.6" #@gxl:set(version)
 edition = "2024"
 license = "Apache-2.0"
-description = "Stack-level config checks for the wist gateway stack: layout/mount consistency, render freshness, placeholders, secret perms, package pairing."
+description = "Stack-level config checks for the wist gateway stack: profile + gateway-specific package/knowledge/prereq checks; engine is wist-stackcheck-core."
 publish = false
 
 [dependencies]
+# 本地开发用 path；发布前切成共享仓的 git rev/tag（见 README）。
+wist-stackcheck-core = { git = "https://github.com/dayu-sec/wist-stack-tools.git", tag = "v0.1.0" }
 serde_json = "1"
 toml = "0.8"
-# 证书 SAN / 有效期解析：只读 PEM，不验签（验签是 openssl/网关的事）。
-# 用它而不是 shell 出 `openssl x509`：一是工具不依赖外部命令，二是原来的
-# `grep -q "DNS:${domain}"` 是子串匹配（`gw.example.com.evil` 也会过）。
-x509-parser = "0.16"
 
 [profile.release]
 opt-level = "z"

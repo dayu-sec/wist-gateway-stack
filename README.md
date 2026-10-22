@@ -393,8 +393,12 @@ dev 态由 `./dev/svc.sh start` 带起它，**配置驱动**：读 `dev/configs/
 ```bash
 ./dev/lint.sh                    # shellcheck（错误/警告 + 反引号 SC2006），CI 跑的是同一条命令
 dev/tests/*.test.sh              # 脚本回归测试：**故意用守护进程的最小 PATH** 跑
-cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测
+cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测（通用引擎在 wist-stack-tools/stackcheck-core）
 ```
+
+> `tools/stackcheck` 现在只保留 gateway profile 与 package / knowledge / identity / prereq / TLS
+> 策略；渲染/密钥/端口/镜像/compose/x509 的通用实现在公共仓
+> [`wist-stack-tools`](https://github.com/dayu-sec/wist-stack-tools) 的 `stackcheck-core`，按 tag 固定。
 
 > 为什么测试要换 PATH：升级流程由 gwlinkd 派生，它的 PATH 里没有 `/opt/homebrew/bin` ——
 > 2026-10-23 的升级事故就是「交互式跑得过、升级跑不过」（macOS 自带的 LibreSSL 不认 `x509 -ext`）。

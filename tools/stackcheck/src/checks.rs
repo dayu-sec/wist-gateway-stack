@@ -3,7 +3,6 @@
 //! 判据全部来自**栈自己生成的东西**：`sys/merged_vars.yml`（变量）、`configs/*`（渲染产物）、
 //! `sys/docker-compose.yml`（挂载）、`packages/`（投放区）、`identity/`（密钥）。
 
-use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,115 +11,14 @@ use std::time::SystemTime;
 
 use crate::{Finding, Stack};
 
-// ── 通用工具 ────────────────────────────────────────────────────────────────
+// 通用引擎（变量 / compose / 端口 / 镜像 / x509）来自共享 crate；本文件只保留
+// gateway 专属判据（package / knowledge / identity / prereq / TLS 策略）。
+pub use wist_stackcheck_core::checks::*;
+pub use wist_stackcheck_core::x509::*;
 
-/// 读 `sys/merged_vars.yml` 的 `- name: / value:` 对。
-///
-/// 用行扫描而不是引入 YAML 依赖：该文件由 gops 生成、形状固定（`- name: X` 紧接
-/// `  value: Y`）。读不到时返回 `Err` —— 让检查报 FAIL，而不是静默当成「没配」。
-fn merged_vars(stack: &Stack) -> Result<BTreeMap<String, String>, String> {
-    let path = stack.at("sys/merged_vars.yml");
-    let text = fs::read_to_string(&path)
-        .map_err(|err| format!("读不到 {}：{err}", path.display()))?;
-    let mut out = BTreeMap::new();
-    let mut name: Option<String> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("- name:") {
-            name = Some(unquote(rest.trim()).to_string());
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("value:")
-            && let Some(current) = name.take()
-        {
-            out.insert(current, unquote(rest.trim()).to_string());
-        }
-    }
-    // 文件在但一条也没解出来 = 形状变了（改名 / 截断 / 换成别的 YAML 风格）。
-    // 不能静默返回空表：下面的检查会回落到缺省值，于是「什么都没配」看起来像「配对了」。
-    if out.is_empty() {
-        return Err(format!(
-            "{} 里没有任何 `- name:` / `value:` 条目（格式不认识）",
-            path.display()
-        ));
-    }
-    Ok(out)
-}
+// ── 通用工具（来自 wist-stackcheck-core）─────────────────────────────────────
 
-/// 读**生效值**。
-///
-/// `gops sys localize` 把合并后的生效值写在栈根 `.env`；`sys/merged_vars.yml` 存的是
-/// **默认值**（`gops sys` 输出里叫 INITIAL，不是 EFFECTIVE）。拿默认值去判会错：
-/// 站点一旦覆盖 `PACKAGE_DIR`（完全合法的现场选择），路径自洽就永远对不上，
-/// 而这条一旦误判就变成「升级被闸门拦住」。
-fn effective_vars(stack: &Stack) -> Result<(BTreeMap<String, String>, &'static str), String> {
-    let env = stack.at(".env");
-    if let Ok(text) = fs::read_to_string(&env) {
-        let mut out = BTreeMap::new();
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                out.insert(key.trim().to_string(), unquote(value.trim()).to_string());
-            }
-        }
-        if !out.is_empty() {
-            return Ok((out, ".env"));
-        }
-    }
-    // 还没 localize 过（首次部署）：只能拿默认值，并在 detail 里写明来源。
-    Ok((merged_vars(stack)?, "sys/merged_vars.yml（默认值）"))
-}
-
-fn unquote(value: &str) -> &str {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2
-        && ((bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
-            || (bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"'))
-    {
-        &value[1..value.len() - 1]
-    } else {
-        value
-    }
-}
-
-/// 在 TOML 文档里定位某个键，返回它**所在段的路径**（文档根 = 空串）。
-///
-/// 这是「键被渲染进错误的段」这类故障的判据：TOML 里段头（`[table]` / `[[array]]`）之后
-/// 的键归属该段，写在 `[[upgrade.component]]` 之后就会变成最后一个元素的字段，
-/// 组件在文档根读到的是 `None`。
-fn locate_key(value: &toml::Value, key: &str, prefix: &str) -> Option<String> {
-    match value {
-        toml::Value::Table(table) => {
-            if table.contains_key(key) {
-                return Some(prefix.to_string());
-            }
-            for (name, child) in table {
-                let child_prefix = if prefix.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{prefix}.{name}")
-                };
-                if let Some(hit) = locate_key(child, key, &child_prefix) {
-                    return Some(hit);
-                }
-            }
-            None
-        }
-        toml::Value::Array(items) => {
-            for (index, child) in items.iter().enumerate() {
-                if let Some(hit) = locate_key(child, key, &format!("{prefix}[{index}]")) {
-                    return Some(hit);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
+/// 文档根上的字符串值。
 fn root_str(doc: &toml::Value, key: &str) -> Option<String> {
     doc.as_table()?.get(key)?.as_str().map(str::to_string)
 }
@@ -128,39 +26,6 @@ fn root_str(doc: &toml::Value, key: &str) -> Option<String> {
 /// 文档根上的原始值（用于判「是不是字符串」）。
 fn root_value<'a>(doc: &'a toml::Value, key: &str) -> Option<&'a toml::Value> {
     doc.as_table()?.get(key)
-}
-
-fn modified(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path).ok().and_then(|meta| meta.modified().ok())
-}
-
-/// 渲染产物早于它的值文件 = 改了值没重渲。
-fn render_is_stale(rendered: SystemTime, source: SystemTime) -> bool {
-    rendered < source
-}
-
-fn trim_slash(value: &str) -> &str {
-    value.trim_end_matches('/')
-}
-
-/// 词法归一：去掉 `.` 分量并折叠 `..`。
-///
-/// 不能用 `canonicalize`：被检查的路径可能还不存在（现场首次部署），而且它会把符号链接
-/// 解析成真身 —— 而这里要比的是「配置里写的那个路径」。
-fn normalize(path: &Path) -> PathBuf {
-    use std::path::Component;
-
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 // ── 0. 环境前置条件（prereq）─────────────────────────────────────────────
@@ -688,23 +553,6 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
 }
 
 /// compose 文件的发现顺序（与 gops 的 `compose_invocation` 同口径）。
-fn compose_file(stack: &Stack) -> Option<PathBuf> {
-    const CANDIDATES: &[&str] = &[
-        "sys/docker-compose.yml",
-        "sys/docker-compose.yaml",
-        "sys/compose.yml",
-        "sys/compose.yaml",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-        "compose.yml",
-        "compose.yaml",
-    ];
-    CANDIDATES
-        .iter()
-        .map(|name| stack.at(name))
-        .find(|path| path.is_file())
-}
-
 /// 从 compose 文本里取 `${PACKAGE_DIR}:<target>[:ro]` 的 target（短语法），
 /// 兼容长语法（`source: ${PACKAGE_DIR}` 附近的 `target:`）。
 fn package_mount_target(compose: &str) -> Option<String> {
@@ -744,261 +592,7 @@ fn package_mount_target(compose: &str) -> Option<String> {
     None
 }
 
-// ── 2. 渲染产物新鲜度 ──────────────────────────────────────────────────────
-
-/// 渲染产物（`gx.tpl` 的输出）必须不早于它的值文件 —— 否则就是「改了值没重渲」。
-pub fn render_freshness(stack: &Stack) -> Vec<Finding> {
-    const PAIRS: &[(&str, &str, &str)] = &[
-        (
-            "render.freshness.gwlinkd",
-            "configs/gwlinkd/gwlinkd.toml",
-            "configs/gwlinkd/gwlinkd.value.json",
-        ),
-        (
-            "render.freshness.gateway",
-            "configs/gateway/wist-gateway.toml",
-            "configs/gateway/wist-gateway.value.json",
-        ),
-        (
-            "render.freshness.web",
-            "configs/web/nginx.conf",
-            "configs/web/nginx.value.json",
-        ),
-    ];
-
-    let mut out = Vec::new();
-    for &(code, rendered_rel, source_rel) in PAIRS {
-        let rendered = stack.at(rendered_rel);
-        let source = stack.at(source_rel);
-        let (rendered_at, source_at) = (modified(&rendered), modified(&source));
-        match (rendered_at, source_at) {
-            // 两侧都在：正常判。
-            (Some(rendered_at), Some(source_at)) => {
-                if render_is_stale(rendered_at, source_at) {
-                    out.push(
-                        Finding::fail(
-                            code,
-                            "渲染产物比它的值文件旧",
-                            format!("{rendered_rel} 早于 {source_rel}"),
-                        )
-                        .with_hint("跑一次 `gops sys localize`（改了值必须重渲才生效）"),
-                    );
-                } else {
-                    out.push(Finding::ok(
-                        code,
-                        "渲染产物不早于值文件",
-                        rendered_rel.to_string(),
-                    ));
-                }
-            }
-            // 只有值文件：渲染没生成 → 该跑 localize（不能当成「这个组未部署」而静默跳过）。
-            (None, Some(_)) => out.push(Finding::warn(
-                code,
-                "值文件在，但渲染产物缺失",
-                rendered_rel.to_string(),
-            )
-            .with_hint("跑一次 `gops sys localize`")),
-            // 只有渲染产物：判不了新旧（但说明目录对得上，不必报）。
-            (Some(_), None) => out.push(Finding::ok(
-                code,
-                "无值文件，跳过新鲜度比较",
-                rendered_rel.to_string(),
-            )),
-            // 两侧都没有：这个组未部署，静默跳过。
-            (None, None) => {}
-        }
-    }
-    out
-}
-
-// ── 3. 占位符 ──────────────────────────────────────────────────────────────
-
-/// 渲染产物里不该留占位值（`example.com` 之类）—— 否则脚本会拿它当真值去连。
-pub fn render_placeholders(stack: &Stack) -> Vec<Finding> {
-    const FILES: &[&str] = &[
-        "configs/gwlinkd/gwlinkd.toml",
-        "configs/gwlinkd/gwlinkd.value.json",
-        "configs/gateway/wist-gateway.toml",
-        "configs/gateway/wist-gateway.value.json",
-        "configs/web/nginx.conf",
-        // 接口层（现场态）：对外基址 / 客户归属 —— 现场没填过就是模板占位值。
-        "identity/gateway/public/wist-gateway-pub.toml",
-    ];
-    const PATTERNS: &[&str] = &["example.com", "CHANGEME", "changeme"];
-
-    let mut hits = Vec::new();
-    let mut scanned = 0usize;
-    for rel in FILES {
-        let Ok(text) = fs::read_to_string(stack.at(rel)) else {
-            continue;
-        };
-        scanned += 1;
-        for (index, line) in text.lines().enumerate() {
-            for pattern in PATTERNS {
-                if line.contains(pattern) {
-                    hits.push(format!("{rel}:{}: {pattern}", index + 1));
-                }
-            }
-        }
-    }
-
-    if hits.is_empty() {
-        // 一个文件都没扫到 = `--root` 指错了，或配置根本还没渲染。不能报绿：
-        // 那会让「什么都没查」看起来像「都没问题」。
-        if scanned == 0 {
-            return vec![Finding::warn(
-                "render.placeholder",
-                "找不到任何渲染产物，跳过占位值检查",
-                "configs/ 下没有可读的配置文件（--root 指对了吗？跑过 localize 吗？）",
-            )];
-        }
-        return vec![Finding::ok(
-            "render.placeholder",
-            "渲染产物里没有占位值",
-            format!("扫描 {scanned} 个文件"),
-        )];
-    }
-    let shown = hits.iter().take(10).cloned().collect::<Vec<_>>().join("；");
-    vec![
-        Finding::fail(
-            "render.placeholder",
-            "渲染产物里还有占位值",
-            format!("{} 处：{shown}", hits.len()),
-        )
-        .with_hint("把 WEB_DOMAIN 等站点值写进 values/ 后重渲；占位值会让脚本连到不存在的域名"),
-    ]
-}
-
-// ── 4. 密钥文件权限 ────────────────────────────────────────────────────────
-
-/// 栈根密钥与私钥不能被「其他用户」读到。权限位语义各家不同，这里只看 world 位。
-pub fn secret_perms(stack: &Stack) -> Vec<Finding> {
-    #[cfg(not(unix))]
-    {
-        let _ = stack;
-        return vec![Finding::ok(
-            "secret.file_mode",
-            "非 unix 平台，跳过权限检查",
-            "",
-        )];
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut out = Vec::new();
-
-        // 栈根密钥文件（含 admin token）。
-        let secret = stack.at(".wist/sec-value.yml");
-        match fs::metadata(&secret) {
-            Ok(meta) => {
-                let mode = meta.permissions().mode() & 0o777;
-                if mode & 0o007 != 0 {
-                    out.push(
-                        Finding::fail(
-                            "secret.file_mode",
-                            "栈根密钥对其他用户可读",
-                            format!(".wist/sec-value.yml 权限 {:o}（含 admin token）", mode),
-                        )
-                        .with_hint("改成 640（容器靠属组读，不需要放开 world 位）"),
-                    );
-                } else if mode & 0o020 != 0 {
-                    // 属组可写 = 同组任何人都能改写 admin token。不能阻断（有些现场靠 660
-                    // 让容器属组写入），但必须提示。
-                    out.push(
-                        Finding::warn(
-                            "secret.file_mode",
-                            "栈根密钥对属组可写",
-                            format!(".wist/sec-value.yml 权限 {:o}", mode),
-                        )
-                        .with_hint("若不需要属组写入，收到 640"),
-                    );
-                } else {
-                    out.push(Finding::ok(
-                        "secret.file_mode",
-                        "栈根密钥权限正常",
-                        format!("{:o}", mode),
-                    ));
-                }
-            }
-            // 缺这个文件 = 网关装载密钥失败（fail-closed），这是真问题，不是提示。
-            Err(_) => out.push(
-                Finding::fail(
-                    "secret.file_mode",
-                    "找不到栈根密钥文件",
-                    format!("{}（网关装载密钥会 fail-closed）", secret.display()),
-                )
-                .with_hint("跑一次 `gops sys localize`（init-gateway.sh 会生成它）"),
-            ),
-        }
-
-        // 私钥：扫 identity/，按内容识别（不靠文件名猜）。
-        let mut files = Vec::new();
-        walk_files(&stack.at("identity"), 5, &mut files);
-        let mut leaked = Vec::new();
-        let mut checked = 0usize;
-        for path in files {
-            let Ok(meta) = fs::metadata(&path) else {
-                continue;
-            };
-            if meta.len() > 512 * 1024 {
-                continue;
-            }
-            let Ok(text) = fs::read_to_string(&path) else {
-                continue;
-            };
-            if !text.contains("PRIVATE KEY") {
-                continue;
-            }
-            checked += 1;
-            let mode = meta.permissions().mode() & 0o777;
-            if mode & 0o007 != 0 {
-                leaked.push(format!(
-                    "{}（{:o}）",
-                    path.strip_prefix(&stack.root).unwrap_or(&path).display(),
-                    mode
-                ));
-            }
-        }
-
-        if leaked.is_empty() {
-            out.push(Finding::ok(
-                "secret.private_key_mode",
-                "私钥文件不对其他用户开放",
-                format!("检查 {checked} 个私钥文件"),
-            ));
-        } else {
-            out.push(
-                Finding::fail(
-                    "secret.private_key_mode",
-                    "私钥对其他用户可读",
-                    leaked.join("；"),
-                )
-                .with_hint("私钥应为 600/640；world 位一律收回"),
-            );
-        }
-
-        out
-    }
-}
-
-fn walk_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-    if depth == 0 {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk_files(&path, depth - 1, out);
-        } else if path.is_file() {
-            out.push(path);
-        }
-    }
-}
+// ── 渲染 / 占位值 / 密钥：通用实现来自 wist-stackcheck-core ────────────────
 
 // ── 5. 知识库包与签名配对 ──────────────────────────────────────────────────
 
@@ -1362,29 +956,24 @@ pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
             found.display().to_string(),
         )];
     };
-    let Ok((_, pem)) = x509_parser::pem::parse_x509_pem(&bytes) else {
-        return vec![Finding::fail(
-            CODE,
-            "网关叶证书不是合法 PEM",
-            found.display().to_string(),
-        )];
-    };
-    let Ok((_, cert)) = x509_parser::parse_x509_certificate(&pem.contents) else {
-        return vec![Finding::fail(
-            CODE,
-            "网关叶证书无法解析",
-            found.display().to_string(),
-        )];
+    let leaf = match wist_stackcheck_core::x509::parse_pem(&bytes) {
+        Ok(leaf) => leaf,
+        Err(err) => {
+            return vec![Finding::fail(
+                CODE,
+                format!("网关叶证书：{err}"),
+                found.display().to_string(),
+            )];
+        }
     };
 
-    let validity = cert.validity();
-    if !validity.is_valid() {
+    if !leaf.valid {
         return vec![Finding::fail(
             CODE,
             "网关叶证书不在有效期内",
             format!(
                 "notBefore={} notAfter={}",
-                validity.not_before, validity.not_after
+                leaf.not_before, leaf.not_after
             ),
         )
         .with_hint("重新签发：删掉 identity/gateway/{public,private}/admin-tls.* 后跑 localize")];
@@ -1403,58 +992,23 @@ pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
         )];
     };
 
-    let sans = certificate_dns_names(&cert);
-    if sans.iter().any(|san| san_covers(san, &domain)) {
+    let sans = wist_stackcheck_core::x509::san_summary(&leaf);
+    if wist_stackcheck_core::x509::covers(&leaf, &domain) {
         return vec![Finding::ok(
             CODE,
             "叶证书 SAN 覆盖 WEB_DOMAIN",
-            format!("{domain} ∈ [{}]", sans.join(", ")),
+            format!("{domain} ∈ [{sans}]"),
         )];
     }
     vec![
         Finding::fail(
             CODE,
             "叶证书 SAN 不覆盖 WEB_DOMAIN",
-            format!("WEB_DOMAIN={domain}，证书 SAN=[{}]", sans.join(", ")),
+            format!("WEB_DOMAIN={domain}，证书 SAN=[{sans}]"),
         )
         .with_hint("跑一次 `gops sys localize`：init-gateway.sh 发现 SAN 缺域名会重签"),
     ]
 }
-
-fn certificate_dns_names(cert: &x509_parser::prelude::X509Certificate<'_>) -> Vec<String> {
-    cert.subject_alternative_name()
-        .ok()
-        .flatten()
-        .map(|extension| {
-            extension
-                .value
-                .general_names
-                .iter()
-                .filter_map(|name| match name {
-                    x509_parser::extensions::GeneralName::DNSName(dns) => Some((*dns).to_string()),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// 证书 SAN 是否覆盖某个域名：**精确相等**，或通配符只覆盖**一层**。
-fn san_covers(san: &str, domain: &str) -> bool {
-    let san = san.trim().trim_end_matches('.').to_ascii_lowercase();
-    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-    if san == domain {
-        return true;
-    }
-    let Some(suffix) = san.strip_prefix("*.") else {
-        return false;
-    };
-    domain
-        .strip_suffix(suffix)
-        .and_then(|head| head.strip_suffix('.'))
-        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
-}
-
 /// `configs/gateway/knowledge/initial/` 的五份数据文件。
 ///
 /// `install-initial-knowledge.sh` 解包后会校验一次，但**只在那一刻**；之后手工动过目录、
@@ -1512,448 +1066,7 @@ pub fn initial_knowledge_layout(stack: &Stack) -> Vec<Finding> {
     )]
 }
 
-// ── 9. 宿主端口 ──────────────────────────────────────────────────────────
-
-/// 一个发布到宿主的端口。
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PublishedPort {
-    host_port: u16,
-    protocol: String,
-}
-
-/// 展开 compose 里的 `${VAR}` / `${VAR:-default}`（只认这两种）。
-fn expand(raw: &str, vars: &BTreeMap<String, String>) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut rest = raw;
-    while let Some(start) = rest.find("${") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        let Some(end) = after.find('}') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let expr = &after[..end];
-        let (name, default) = match expr.split_once(":-") {
-            Some((name, default)) => (name, Some(default)),
-            None => (expr, None),
-        };
-        match vars.get(name.trim()) {
-            Some(value) if !value.trim().is_empty() => out.push_str(value),
-            _ => out.push_str(default.unwrap_or("")),
-        }
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// 取 compose 里**所有**同名块键（`ports:`）下缩进更深的行。
-///
-/// 必须扫全部块：`ports:` 每个 service 各有一份，只取第一个的话，
-/// 端口检查实际只看了一个服务（实测：第 1 个是 VM，于是其余 4 个端口全没查）。
-fn compose_blocks<'a>(compose: &'a str, key: &str) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut block_indent: Option<usize> = None;
-    let header = format!("{key}:");
-    for line in compose.lines() {
-        let trimmed = line.trim();
-        let indent = line.len() - line.trim_start().len();
-        let is_header = trimmed == header || trimmed.starts_with(&header);
-        match block_indent {
-            Some(base) if indent > base => {
-                if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                    out.push(line);
-                }
-            }
-            Some(_) | None => {
-                // 块结束（或还没开始）：这一行本身可能是下一个块头。
-                block_indent = is_header.then_some(indent);
-            }
-        }
-    }
-    out
-}
-
-fn compose_ports(compose: &str, vars: &BTreeMap<String, String>) -> Vec<PublishedPort> {
-    let mut out = Vec::new();
-    let lines = compose_blocks(compose, "ports");
-    let mut index = 0usize;
-    while index < lines.len() {
-        let line = lines[index].trim();
-        index += 1;
-        let Some(item) = line.strip_prefix("- ") else {
-            continue; // 长语法的后续键，已在上一个条目里处理
-        };
-        // 长语法：`- target: 3000` 加后续 `published: 443` / `protocol: udp`
-        if item.contains("target:") || item.contains("published:") {
-            let mut published = None;
-            let mut protocol = "tcp".to_string();
-            let mut scan = |text: &str| {
-                if let Some((_, value)) = text.split_once("published:")
-                    && let Ok(port) = value.trim().trim_matches('"').parse::<u16>()
-                {
-                    published = Some(port);
-                }
-                if let Some((_, value)) = text.split_once("protocol:") {
-                    protocol = value.trim().trim_matches('"').to_string();
-                }
-            };
-            scan(item);
-            while index < lines.len() && !lines[index].trim().starts_with("- ") {
-                scan(lines[index]);
-                index += 1;
-            }
-            if let Some(host_port) = published {
-                out.push(PublishedPort {
-                    host_port,
-                    protocol,
-                });
-            }
-            continue;
-        }
-        // 短语法：`"[ip:]host:container[/proto]"`
-        let expanded = expand(item.trim().trim_matches('"'), vars);
-        let owned = expanded.replace(['\'', '"'], "");
-        let (spec, protocol) = match owned.split_once('/') {
-            Some((spec, protocol)) => (spec.to_string(), protocol.to_string()),
-            None => (owned.clone(), "tcp".to_string()),
-        };
-        let parts: Vec<&str> = spec.split(':').collect();
-        // 短语法：`HOST:CONTAINER` 或 `IP:HOST:CONTAINER`（前者 2 段、后者 3 段）。
-        // 且：2 段时**第一段**才是宿主端口 —— 取错就会拿容器端口去查宿主，永远查不出冲突。
-        let host = match parts.as_slice() {
-            [host, _container] => *host,
-            [_ip, host, _container] => *host,
-            _ => continue, // 只写了容器端口 = 不发布到宿主
-        };
-        if let Ok(host_port) = host.trim().parse::<u16>() {
-            out.push(PublishedPort {
-                host_port,
-                protocol,
-            });
-        }
-    }
-    out
-}
-
-fn compose_images(compose: &str, vars: &BTreeMap<String, String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in compose.lines() {
-        let trimmed = line.trim();
-        let Some(value) = trimmed.strip_prefix("image:") else {
-            continue;
-        };
-        let image = expand(value.trim().trim_matches('"').trim_matches('\''), vars);
-        if !image.is_empty() {
-            out.push(image);
-        }
-    }
-    out
-}
-
-/// 解析 `docker ps --format '{{.Ports}}'` 的发布端口（`0.0.0.0:443->3000/tcp, …`）。
-fn published_ports_from_ps(output: &str) -> std::collections::HashSet<u16> {
-    let mut ours = std::collections::HashSet::new();
-    for chunk in output.split(',') {
-        let Some((host_side, _)) = chunk.split_once("->") else {
-            continue;
-        };
-        let Some((_, port)) = host_side.trim().rsplit_once(':') else {
-            continue;
-        };
-        if let Ok(port) = port.parse::<u16>() {
-            ours.insert(port);
-        }
-    }
-    ours
-}
-
-fn tcp_port_is_free(port: u16) -> bool {
-    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
-}
-
-/// compose 的**项目名**（容器标签 `com.docker.compose.project` 的值）。
-///
-/// 为什么不用 `project.working_dir`：栈目录改过位置/换过名字后，仍在跑的容器会带着**旧路径**
-/// 标签，按路径过滤会漏掉自己（典型症状：VM 容器属于同一项目却认不出来，18429 被当成
-/// 「别的进程占用」）。项目名跨路径稳定。
-fn compose_project_name(stack: &Stack, compose: &str) -> String {
-    if let Ok(value) = std::env::var("COMPOSE_PROJECT_NAME")
-        && !value.trim().is_empty()
-    {
-        return value.trim().to_string();
-    }
-    for line in compose.lines() {
-        // 只认**顶格**的 `name:`（项目名）。缩进的是 volumes/networks 里的名字，
-        // 例如 `volumes:\n  wparse-run:\n    name: wist-gateway-stack-wparse-run` ——
-        // 认错会让项目名变成那个卷名，端口归属就全查不到了。
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
-        let Some(value) = line.strip_prefix("name:") else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"').trim_matches('\'');
-        if !value.is_empty() {
-            return value.to_string();
-        }
-        break;
-    }
-    stack
-        .root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("wist-gateway-stack")
-        .to_string()
-}
-
-fn our_published_ports(stack: &Stack, compose: &str) -> Option<std::collections::HashSet<u16>> {
-    let filter = format!(
-        "label=com.docker.compose.project={}",
-        compose_project_name(stack, compose)
-    );
-    let (ok, stdout, _) = run_with_timeout(
-        "docker",
-        &["ps", "--filter", &filter, "--format", "{{.Ports}}"],
-        10,
-    )?;
-    ok.then(|| published_ports_from_ps(&stdout))
-}
-
-/// 发布到宿主的端口是否真的空着。
-///
-/// 必须排除**本栈自己**占着的端口：升级的 `localize` 阶段容器正在跑，
-/// 不排除就会每次误报。
-fn ports_available_with(
-    stack: &Stack,
-    ours: Option<&std::collections::HashSet<u16>>,
-) -> Vec<Finding> {
-    const CODE: &str = "port.available";
-    let Ok((vars, _)) = effective_vars(stack) else {
-        return vec![Finding::warn(CODE, "读不到变量，跳过端口检查", "")];
-    };
-    let Some(compose_path) = compose_file(stack) else {
-        return Vec::new(); // 缺 compose 已由 package.compose_mount 报
-    };
-    let Ok(compose) = fs::read_to_string(&compose_path) else {
-        return vec![Finding::warn(CODE, "读不到 compose，跳过端口检查", "")];
-    };
-    let ports = compose_ports(&compose, &vars);
-    if ports.is_empty() {
-        return vec![Finding::ok(CODE, "没有发布到宿主的端口", "")];
-    }
-    let Some(ours) = ours else {
-        return vec![Finding::warn(
-            CODE,
-            "无法确认端口归属，跳过占用检查",
-            "docker 不可用（没装或守护进程没起）",
-        )
-        .with_hint("栈跑着时端口本就被自己占着；手工确认用 `docker ps` / `lsof -i`")];
-    };
-
-    let mut conflicts = Vec::new();
-    let mut skipped = 0usize;
-    for port in &ports {
-        if port.protocol != "tcp" || ours.contains(&port.host_port) {
-            skipped += 1;
-            continue;
-        }
-        if !tcp_port_is_free(port.host_port) {
-            conflicts.push(port.host_port);
-        }
-    }
-    conflicts.sort_unstable();
-    conflicts.dedup();
-
-    if conflicts.is_empty() {
-        let checked = ports.len() - skipped;
-        if checked == 0 {
-            return vec![Finding::ok(
-                CODE,
-                "端口都由本栈自己占着，跳过占用检查",
-                format!("{} 个发布端口（栈在运行）", ports.len()),
-            )];
-        }
-        vec![Finding::ok(
-            CODE,
-            "宿主端口都空着",
-            format!("已检查 {checked}/{}（{} 个由本栈占着 / udp）", ports.len(), skipped),
-        )]
-    } else {
-        vec![
-            Finding::fail(
-                CODE,
-                "宿主端口已被别的进程占用",
-                format!(
-                    "占用中：{}",
-                    conflicts
-                        .iter()
-                        .map(u16::to_string)
-                        .collect::<Vec<_>>()
-                        .join("、")
-                ),
-            )
-            .with_hint("`compose up` 会失败（port is already allocated）；腾端口或改 *_PORT"),
-        ]
-    }
-}
-
-/// 本栈**自己**已经发布的端口（用 compose 的 workdir 标签认出本栈容器）。
-/// `None` = 无法判定 —— 那时不能拿「端口被占」去吓人。
-fn run_with_timeout(program: &str, args: &[&str], secs: u64) -> Option<(bool, String, String)> {
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().ok()?;
-                return Some((
-                    status.success(),
-                    String::from_utf8_lossy(&output.stdout).to_string(),
-                    String::from_utf8_lossy(&output.stderr).to_string(),
-                ));
-            }
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Some((false, String::new(), format!("超时（{secs}s）")));
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
-            Err(err) => return Some((false, String::new(), err.to_string())),
-        }
-    }
-}
-
-pub fn ports_available(stack: &Stack) -> Vec<Finding> {
-    let compose = compose_file(stack).and_then(|path| fs::read_to_string(path).ok());
-    let ours = compose
-        .as_deref()
-        .and_then(|text| our_published_ports(stack, text));
-    ports_available_with(stack, ours.as_ref())
-}
-
-// ── 10. 镜像可达 ──────────────────────────────────────────────────────────
-
-/// 网络类错误（整个站点离线时会全部命中）—— 收敛成一条提示，不按镜像刷屏。
-fn looks_like_network_error(message: &str) -> bool {
-    let lowered = message.to_ascii_lowercase();
-    [
-        "no such host",
-        "timeout",
-        "超时",
-        "connection refused",
-        "temporary failure in name resolution",
-        "network is unreachable",
-        "i/o timeout",
-        "tls handshake timeout",
-        "context deadline exceeded",
-    ]
-    .iter()
-    .any(|needle| lowered.contains(needle))
-}
-
-fn image_reachable_with(
-    stack: &Stack,
-    probe: &(dyn Fn(&str) -> Result<(), String> + Sync),
-) -> Vec<Finding> {
-    const CODE: &str = "image.reachable";
-    let Ok((vars, _)) = effective_vars(stack) else {
-        return vec![Finding::warn(CODE, "读不到变量，跳过镜像检查", "")];
-    };
-    let Some(compose_path) = compose_file(stack) else {
-        return Vec::new();
-    };
-    let Ok(compose) = fs::read_to_string(&compose_path) else {
-        return Vec::new();
-    };
-    let images = compose_images(&compose, &vars);
-    if images.is_empty() {
-        return vec![Finding::ok(CODE, "compose 里没有镜像", "")];
-    }
-
-    let mut broken = Vec::new();
-    let mut offline = 0usize;
-    // 并行探测：串行时一个慢 registry 会把体检拖成几十秒（实测 ghcr 单个 34s）。
-    let results: Vec<Result<(), String>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = images
-            .iter()
-            .map(|image| scope.spawn(move || probe(image)))
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle
-                    .join()
-                    .unwrap_or_else(|_| Err("探测线程崩溃".to_string()))
-            })
-            .collect()
-    });
-    for (image, result) in images.iter().zip(results) {
-        match result {
-            Ok(()) => {}
-            Err(err) if looks_like_network_error(&err) => offline += 1,
-            Err(err) => broken.push(format!("{image}（{err}）")),
-        }
-    }
-
-    if !broken.is_empty() {
-        let shown = broken.iter().take(5).cloned().collect::<Vec<_>>().join("；");
-        return vec![
-            Finding::warn(
-                CODE,
-                "镜像在源上取不到",
-                format!("{} 个：{shown}", broken.len()),
-            )
-            .non_blocking()
-            .with_hint("确认 tag 与镜像源前缀（*_SPC / *_TAG）；`compose pull` 会失败在这里"),
-        ];
-    }
-    if offline == images.len() {
-        return vec![Finding::warn(
-            CODE,
-            "镜像源不可达（离线？）",
-            format!("{offline} 个镜像全部拿不到 manifest"),
-        )
-        .with_hint("离线站点用 `--offline` 跳过本项，免得每次体检都报")];
-    }
-    vec![Finding::ok(
-        CODE,
-        "镜像在源上都能取到",
-        format!("{} 个", images.len()),
-    )]
-}
-
-pub fn image_reachable(stack: &Stack, offline: bool) -> Vec<Finding> {
-    if offline {
-        return vec![Finding::ok(
-            "image.reachable",
-            "跳过镜像可达检查（--offline）",
-            "",
-        )];
-    }
-    image_reachable_with(stack, &|image| {
-        // 本地已有 → 不需要网络（`pull` 也会直接跳过）；这一步 55ms，远端 manifest 可能 34s。
-        if let Some((true, _, _)) = run_with_timeout("docker", &["image", "inspect", image], 5) {
-            return Ok(());
-        }
-        let Some((ok, _, stderr)) = run_with_timeout("docker", &["manifest", "inspect", image], 6)
-        else {
-            return Err("docker 不可用".to_string());
-        };
-        if ok {
-            Ok(())
-        } else {
-            Err(stderr.trim().lines().next().unwrap_or("未知错误").to_string())
-        }
-    })
-}
+// ── 端口 / 镜像：通用实现来自 wist-stackcheck-core ─────────────────────────
 
 // ── 测试 ────────────────────────────────────────────────────────────────────
 
@@ -1963,7 +1076,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use std::collections::BTreeMap;
     use crate::Status;
+    use crate::profile;
 
     /// 临时栈根；`Drop` 时清理。
     struct Tree {
@@ -2088,7 +1203,7 @@ name = \"galaxy-flow\"
         file.set_modified(SystemTime::now() - Duration::from_secs(60))
             .unwrap();
 
-        let findings = render_freshness(&tree.stack());
+        let findings = render_freshness(&tree.stack(), &profile::GATEWAY);
         let finding = findings
             .iter()
             .find(|finding| finding.code == "render.freshness.gwlinkd")
@@ -2104,7 +1219,7 @@ name = \"galaxy-flow\"
             "{\"public_base_url\":\"https://gw.example.com\"}\n",
         );
 
-        let findings = render_placeholders(&tree.stack());
+        let findings = render_placeholders(&tree.stack(), &profile::GATEWAY);
         let finding = &findings[0];
         assert_eq!(finding.status, Status::Fail);
         assert!(finding.detail.contains("example.com"), "{}", finding.detail);
@@ -2202,7 +1317,7 @@ name = \"galaxy-flow\"
         tree.write("configs/gwlinkd/gwlinkd.value.json", "{}\n");
         tree.write("configs/gwlinkd/gwlinkd.toml", "state_dir = \"/tmp\"\n");
 
-        let findings = render_freshness(&tree.stack());
+        let findings = render_freshness(&tree.stack(), &profile::GATEWAY);
         let finding = findings
             .iter()
             .find(|finding| finding.code == "render.freshness.gwlinkd")
@@ -2244,7 +1359,7 @@ name = \"galaxy-flow\"
     #[test]
     fn flags_a_missing_root_secret_file() {
         let tree = Tree::new("no-secret");
-        let findings = secret_perms(&tree.stack());
+        let findings = secret_perms(&tree.stack(), &profile::GATEWAY);
         let finding = findings
             .iter()
             .find(|finding| finding.code == "secret.file_mode")
@@ -2262,7 +1377,7 @@ name = \"galaxy-flow\"
         let path = tree.write(".wist/sec-value.yml", "admin_token: x\n");
         let check = |mode: u32| {
             fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
-            secret_perms(&tree.stack())
+            secret_perms(&tree.stack(), &profile::GATEWAY)
                 .into_iter()
                 .find(|finding| finding.code == "secret.file_mode")
                 .expect("应有密钥权限检查")
@@ -2279,7 +1394,7 @@ name = \"galaxy-flow\"
     #[test]
     fn warns_instead_of_passing_when_nothing_was_scanned() {
         let tree = Tree::new("nothing-scanned");
-        let findings = render_placeholders(&tree.stack());
+        let findings = render_placeholders(&tree.stack(), &profile::GATEWAY);
         assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
         assert!(findings[0].title.contains("跳过"), "{findings:#?}");
     }
@@ -2289,7 +1404,7 @@ name = \"galaxy-flow\"
         let tree = Tree::new("missing-render");
         tree.write("configs/gwlinkd/gwlinkd.value.json", "{}\n");
 
-        let findings = render_freshness(&tree.stack());
+        let findings = render_freshness(&tree.stack(), &profile::GATEWAY);
         let finding = findings
             .iter()
             .find(|finding| finding.code == "render.freshness.gwlinkd")
@@ -2569,7 +1684,7 @@ jx0fk6s=\n\
     #[test]
     fn freshness_says_nothing_when_neither_side_exists() {
         let tree = Tree::new("freshness-empty");
-        assert!(render_freshness(&tree.stack()).is_empty());
+        assert!(render_freshness(&tree.stack(), &profile::GATEWAY).is_empty());
     }
 
     #[test]
@@ -2693,13 +1808,13 @@ jx0fk6s=\n\
     fn project_name_ignores_indented_volume_names() {
         let compose = "services:\n  a:\n    image: x\nvolumes:\n  run:\n    name: wist-gateway-stack-wparse-run\n";
         assert_eq!(
-            compose_project_name(&Stack::new("/tmp/my-stack"), compose),
+            compose_project_name(&Stack::new("/tmp/my-stack"), compose, &profile::GATEWAY),
             "my-stack"
         );
 
         let named = "name: explicit-project\nservices: {}\n";
         assert_eq!(
-            compose_project_name(&Stack::new("/tmp/my-stack"), named),
+            compose_project_name(&Stack::new("/tmp/my-stack"), named, &profile::GATEWAY),
             "explicit-project"
         );
     }
@@ -2716,14 +1831,17 @@ jx0fk6s=\n\
             vec![
                 PublishedPort {
                     host_port: 443,
+                    bind_ip: None,
                     protocol: "tcp".into()
                 },
                 PublishedPort {
                     host_port: 18429,
+                    bind_ip: Some("127.0.0.1".to_string()),
                     protocol: "tcp".into()
                 },
                 PublishedPort {
                     host_port: 9000,
+                    bind_ip: None,
                     protocol: "udp".into()
                 },
             ]
@@ -2737,6 +1855,7 @@ jx0fk6s=\n\
             compose_ports(compose, &BTreeMap::new()),
             vec![PublishedPort {
                 host_port: 8443,
+                bind_ip: None,
                 protocol: "tcp".into()
             }]
         );
@@ -2777,7 +1896,17 @@ jx0fk6s=\n\
             &format!("services:\n  gateway:\n    ports:\n      - \"{port}:3000\"\n"),
         );
 
-        let findings = ports_available_with(&tree.stack(), Some(&std::collections::HashSet::new()));
+        let compose = format!("services:\n  gateway:\n    ports:\n      - \"{port}:3000\"\n");
+        tree.write("sys/docker-compose.yml", &compose);
+        let vars = Vars::load(&tree.stack());
+
+        let findings = ports_available_with(
+            &tree.stack(),
+            &vars,
+            &profile::GATEWAY,
+            &compose,
+            Some(&std::collections::HashSet::new()),
+        );
         let finding = findings
             .iter()
             .find(|finding| finding.code == "port.available")
@@ -2788,20 +1917,20 @@ jx0fk6s=\n\
         // 这个端口是本栈自己发布的（栈在跑）：不该报。
         let mut ours = std::collections::HashSet::new();
         ours.insert(port);
-        let findings = ports_available_with(&tree.stack(), Some(&ours));
+        let findings = ports_available_with(
+            &tree.stack(),
+            &vars,
+            &profile::GATEWAY,
+            &compose,
+            Some(&ours),
+        );
         assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
     }
 
     #[test]
     fn image_check_collapses_when_the_whole_site_is_offline() {
-        let tree = Tree::new("images-offline");
-        tree.write("sys/merged_vars.yml", VARS);
-        tree.write(
-            "sys/docker-compose.yml",
-            "services:\n  a:\n    image: a:1\n  b:\n    image: b:1\n",
-        );
-
-        let findings = image_reachable_with(&tree.stack(), &|_| {
+        let images = vec!["a:1".to_string(), "b:1".to_string()];
+        let findings = image_reachable_with(&images, &|_| {
             Err("dial tcp: lookup registry: no such host".to_string())
         });
         assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
@@ -2810,14 +1939,8 @@ jx0fk6s=\n\
 
     #[test]
     fn image_check_reports_a_missing_tag() {
-        let tree = Tree::new("images-missing");
-        tree.write("sys/merged_vars.yml", VARS);
-        tree.write(
-            "sys/docker-compose.yml",
-            "services:\n  a:\n    image: repo/app:v9\n",
-        );
-
-        let findings = image_reachable_with(&tree.stack(), &|_| {
+        let images = vec!["repo/app:v9".to_string()];
+        let findings = image_reachable_with(&images, &|_| {
             Err("manifest unknown".to_string())
         });
         assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
@@ -2827,18 +1950,15 @@ jx0fk6s=\n\
 
     #[test]
     fn image_check_passes_when_all_are_reachable() {
-        let tree = Tree::new("images-ok");
-        tree.write("sys/merged_vars.yml", VARS);
-        tree.write("sys/docker-compose.yml", "services:\n  a:\n    image: a:1\n");
-
-        let findings = image_reachable_with(&tree.stack(), &|_| Ok(()));
+        let images = vec!["a:1".to_string()];
+        let findings = image_reachable_with(&images, &|_| Ok(()));
         assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
     }
 
     #[test]
     fn image_check_is_skipped_when_offline_is_requested() {
         let tree = Tree::new("images-skip");
-        let findings = image_reachable(&tree.stack(), true);
+        let findings = image_reachable(&tree.stack(), &Vars::load(&tree.stack()), &profile::GATEWAY, true);
         assert_eq!(findings[0].status, Status::Ok);
         assert!(findings[0].title.contains("--offline"), "{findings:#?}");
     }
@@ -2851,7 +1971,7 @@ jx0fk6s=\n\
             "public_base_url = \"https://gw.example.com\"\n",
         );
 
-        let findings = render_placeholders(&tree.stack());
+        let findings = render_placeholders(&tree.stack(), &profile::GATEWAY);
         let finding = &findings[0];
         assert_eq!(finding.status, Status::Fail);
         assert!(

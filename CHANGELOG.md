@@ -3,12 +3,12 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.2.5-alpha] - 2026-10-23
 
 ### 新增
 
 - **`wist-stackcheck`：栈级配置检查器**（`tools/stackcheck` + `scripts/check-stack.sh`）。
-  只查**栈自己生成的东西**，共 5 组 11 条结论：
+  只查**栈自己生成的东西**，17 项判据：
   - `package.*`：投放目录 / 容器路径 / compose 挂载三者与 `PACKAGE_DIR` 派生值自洽；
     **键落在别的 TOML 段**时明确指出真实位置（本次现场故障的判据）；
   - `render.freshness.*`：渲染产物不得早于它的值文件（改了值没重渲）；
@@ -25,10 +25,15 @@
   结果文件已有合法 Flow Result 时追加而不是覆盖，所以一个 flow 里多个诊断动作不会互相吞掉。
   注：栈级检查必须排在重建者之后。
 
-- **升级/部署守门**：`flow localize` 末尾力 `scripts/check-stack.sh --gate`。
+- **升级/部署守门**：`flow localize` 末尾挂 `scripts/check-stack.sh --gate`。
   因为 `gops prj upgrade` 的 `regenerate` 阶段跑的就是 `gops sys localize` ——
   **新模板渲染出来是错的，会在 `pull` / `up` 之前就暴露**，并由 `--on-failure rollback-all` 回滚；
-  首次部署也一样（`docker compose up` 之前就拦）。升级前的 `diagnose` 步本身已对 FAIL 拒绝升级。
+  首次部署也一样（`docker compose up` 之前就拦）。
+
+  > 
+  > 升级流水线里**只有这一道**是自动拦截：`prj upgrade` 的 `diagnose` 步用的是项目级
+  > `project_diagnose`（values / sys_models / contract），**不跑**系统的 `flow diagnose`。
+  > 想看全量体检得手工跑 `gops run diagnose`。
 
   闸门只看**阻断类**失败：WARN、以及「失败但不阻断」都不拦。目前唯一的不阻断项是
   知识库包缺 `.sig` —— 它让「以后导入」失败，但当前跑着的栈是好的，不该因此卡住升级。

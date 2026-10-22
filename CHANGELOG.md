@@ -3,6 +3,27 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1-alpha] - 2026-10-22
+
+### 变更
+
+- **wparse `0.31.1-alpha` → `0.32.1-alpha`**（`wp-motor v1.33.0`）。该版本把**管理面配置移出远程托管目录**，
+  并修复远程同步后模型文件可能缺失（缓存 checkout 改为 hard reset）。
+- **`[admin_api]` 迁到项目根 `wparse.local.toml`**：从 `sys/data-plane/conf/wparse.toml` 拆到
+  `sys/data-plane/wparse.local.toml`。`[project_remote]` 的 infra 同步会整体替换 `conf/`，旧写法会在
+  每次远程发布后把 `admin_api.bind` 重置成远端模板值，导致管理端口失效。
+  - 优先级：`wparse.local.toml` > `conf/wparse.toml` 中遗留的 `[admin_api]`（旧文件仍可启动，但会告警）。
+  - 种子补缺：`wparse` 容器 entrypoint 与 `dev/svc.sh` 都会把该文件 `cp -an` 到工作根（已存在不覆盖）。
+  - 开发态由 `dev/svc.sh` 生成宿主可用的一份（`127.0.0.1:19091`、无 TLS）并补 `admin token`；
+    发布态仍是容器内 `0.0.0.0:19090` + TLS。
+
+### 升级注意
+
+- 现场升级后执行 `gops sys update && gops sys localize`，再 `gops run start`（`WPARSE_TAG` 变化会重建
+  `wparse` 容器）—— 新 entrypoint 才会把 `wparse.local.toml` 补进 `data-plane-run/work`。
+- 首次远程 infra 同步后，工作根 `conf/wparse.toml` 会变成远端模板（可能没有 `[admin_api]`），
+  管理面仍由 `wparse.local.toml` 提供；若现场曾手工改过端口/TLS，请同步改到该文件。
+
 ## [0.2.0-alpha] - 2026-10-22
 
 ### 变更（**破坏性：目录布局**）

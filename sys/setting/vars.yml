@@ -115,12 +115,14 @@ system:
     value: ''
 
   # 安装包投放目录（宿主），只读挂到网关容器的 /packages；界面「本地来源」填 /packages/<文件名>
+  # （gwlinkd 自己的交付区是它的 `agents/` 子目录，与人工投放/知识库包互不干扰）
   - name: PACKAGE_DIR
     value: ./packages
 
   # 发布 ②「Agent 包交付」：上面那份投放目录在**网关容器里**的路径（发给网关的 package_url 前缀，
-  # 与 compose 的 `- ${PACKAGE_DIR}:/packages:ro` 一致）。gwlinkd 取到中心包后落到 PACKAGE_DIR，
-  # 再把 `<此项>/<文件名>` 交给网关托管。
+  # 与 compose 的 `- ${PACKAGE_DIR}:/packages:ro` 一致）。gwlinkd 取到中心包后落到
+  # `<PACKAGE_DIR>/agents`（独占子目录：它交付后按 mtime 只留最新 N 份且**不区分文件类型**，
+  # 混在 packages/ 里会把知识库包一起清掉），再把 `<此项>/agents/<文件名>` 交给网关托管。
   - name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR
     value: /packages
 

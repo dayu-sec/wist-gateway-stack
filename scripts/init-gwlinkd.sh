@@ -19,7 +19,9 @@
 #   GATEWAY_SELF_ENDPOINT          本机网关环回面（页面路用；空 = 不配）
 #   GATEWAY_SELF_CA                环回面信任锚（空 = 系统根）
 #   PACKAGE_DIR                    发布 ② 投放目录（宿主侧；渲染为**绝对路径**给 gwlinkd；空 = 不渲染）
+#                                  gwlinkd 实际用的是它的 `agents/` 子目录（见下）
 #   GWLINKD_AGENT_PACKAGE_CONTAINER_DIR  该目录在网关容器里的路径（缺省 /packages，与 compose 挂载一致）
+#                                  渲染给 gwlinkd 时自动补 `/agents`（即 `/packages/agents`）
 #   GWLINKD_UPGRADER_PROGRAM       升级执行器程序（空 = 不渲染，用 gwlinkd 缺省 gops）
 #   GWLINKD_UPGRADE_PROJECT_DIR    gops 工程根（含 ops-prj.yml；空 = 不渲染；**绝对路径**）
 #
@@ -58,7 +60,16 @@ import json, os, sys, tempfile
 path = sys.argv[1]
 state, identity, self_ep, self_ca, drop_raw, container, upgrader, upgrade_dir, stack_root, admin_port = sys.argv[2:12]
 # 投放目录给 gwlinkd 用：空 = 不启用（不渲染）；相对路径 → **绝对**（gwlinkd 的 cwd 不定）。
-drop = "" if not drop_raw else (drop_raw if os.path.isabs(drop_raw) else os.path.abspath(drop_raw))
+# ② 的交付区独占一个子目录：`packages/` 同时放知识库包与人工投放的安装包，而 gwlinkd 交付后
+# 按 mtime 只保留最新 N 份（`prune_drop_dir` **不区分类型**）—— 混放会把知识库包连带清掉。
+# 容器里就是 `${container}/agents`（同一个 compose 挂载，不用额外加 volume）。
+AGENT_PACKAGE_SUBDIR = "agents"
+if not drop_raw:
+    drop = ""
+else:
+    base = drop_raw if os.path.isabs(drop_raw) else os.path.abspath(drop_raw)
+    drop = os.path.join(base, AGENT_PACKAGE_SUBDIR)
+container = f"{container.rstrip('/')}/{AGENT_PACKAGE_SUBDIR}" if container else ""
 value = {
     "state_dir": state,
     "identity_dir": identity,

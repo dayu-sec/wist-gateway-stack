@@ -3,6 +3,28 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 修复
+
+- **`push-agent-package` 计划必然失败（「未配置 agent_package_drop_dir」）**：
+  `agent_package_drop_dir` / `agent_package_container_dir` 被渲染在 `[[upgrade.component]]` **之后**，
+  按 TOML 规则它们属于最后一个 component 表，gwlinkd 在文档根读到的是 `None` → ② 走 fail-closed。
+  两项已移到所有段头之前，并加注「必须写在任何段头之前」，避免以后被挪回去。
+
+### 变更
+
+- **② Agent 包交付区独立到 `packages/agents`**：gwlinkd 交付后按 mtime 只保留最新 N 份，
+  且 `prune_drop_dir` **不区分文件类型** —— 与知识库包、人工投放包共用 `packages/` 时，
+  多交付几轮就会把 `wist-knowledge-*.tar.gz` 及其 `.sig` 当旧的删掉。
+  现在宿主落 `<PACKAGE_DIR>/agents`、容器路径为 `<GWLINKD_AGENT_PACKAGE_CONTAINER_DIR>/agents`
+  （同一个 compose 挂载，不需要新增 volume）。
+
+### 升级注意
+
+- 旧部署的交付文件还在 `packages/` 根下；升级后重派一次 `push-agent-package` 计划即可
+  （网关按 platform **upsert**，不会留重复条目），随后可手工清掉根目录里的旧文件。
+
 ## [0.2.4-alpha] - 2026-10-22
 
 ### 变更

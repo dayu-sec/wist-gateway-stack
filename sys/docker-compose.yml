@@ -221,6 +221,8 @@ services:
       - ./.wist:/secrets:ro
       # 安装包投放目录（只读）：界面「本地来源」填 /packages/<文件名>。
       # 容器读不到宿主任意路径，本地包必须先落到这个被挂进来的目录。
+      # gwlinkd 的「Agent 包交付」（②）落在它的 `agents/` 子目录（`/packages/agents`）：
+      # 它交付后按 mtime 只留最新 N 份且不区分类型，与知识库包混放会把后者清掉。
       - ${PACKAGE_DIR}:/packages:ro
     ports:
       - "${GATEWAY_PORT}:3000"

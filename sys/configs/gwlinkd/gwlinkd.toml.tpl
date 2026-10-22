@@ -23,8 +23,8 @@
 #   identity_dir           身份目录（客户端证书 + 私钥、中心信任锚）—— 进 contract；空 = 不渲染（回落 state_dir）
 #   gateway_self_endpoint  本机网关环回面（页面路才需要；空 = 不渲染该项）
 #   gateway_self_ca        环回面信任锚（空 = 不渲染，用系统根）
-#   agent_package_drop_dir        发布 ② 投放目录（宿主侧；空 = 不渲染该项，② 不启用）
-#   agent_package_container_dir   该目录在网关容器里的路径（如 /packages）
+#   agent_package_drop_dir        发布 ② 投放目录（宿主侧；= `<PACKAGE_DIR>/agents`；空 = 不渲染该项，② 不启用）
+#   agent_package_container_dir   该目录在网关容器里的路径（= `<GWLINKD_AGENT_PACKAGE_CONTAINER_DIR>/agents`，典型 `/packages/agents`）
 #   upgrader_program       升级执行器程序（空 = 不渲染，用 gwlinkd 缺省 gops）
 #   upgrade_project_dir    gops 工程根（含 ops-prj.yml；空 = 不渲染。用 gops 执行器升级时必配，**绝对路径**）
 state_dir = "{{state_dir}}"
@@ -45,6 +45,20 @@ upgrader_program = "{{upgrader_program}}"
 {{#if upgrade_project_dir}}
 upgrade_project_dir = "{{upgrade_project_dir}}"
 {{/if}}
+# 发布 ②「Agent 包交付」：gwlinkd 取到中心包后，落到宿主投放目录（agent_package_drop_dir），
+# 再把**容器内路径**（agent_package_container_dir/<文件名>）交给网关托管。
+# 两项都指 `packages/agents`（宿主写法 vs 容器写法）—— 独占子目录：gwlinkd 交付后按 mtime
+# 只保留最新 N 份且**不区分文件类型**，与知识库包/人工投放混放会把它们一起清掉。
+# 缺这两项则 ② fail-closed（收到 push-agent-package 计划会报错）。
+# **必须写在任何段头之前**：TOML 里段头之后的键属于该段 —— 原先放在 `[[upgrade.component]]`
+# 之后，这两个键就成了最后一个 component 的字段，gwlinkd 读到的是「未配置 agent_package_drop_dir」。
+{{#if agent_package_drop_dir}}
+agent_package_drop_dir = "{{agent_package_drop_dir}}"
+{{/if}}
+{{#if agent_package_container_dir}}
+agent_package_container_dir = "{{agent_package_container_dir}}"
+{{/if}}
+
 # 本机组件目录（`[[upgrade.component]]`）：中心计划里的**组件名** → 本机安装机制。
 # galaxy-ops / galaxy-flow 是**宿主二进制**（gops / gx），不是 gops 工程里的系统：
 # 标 `tool-copy` 就地覆盖原二进制；不标就会落到 `gops prj upgrade <组件名>`，
@@ -64,16 +78,6 @@ binary = "gops"
 name = "galaxy-flow"
 install = "tool-copy"
 binary = "gx"
-# 发布 ②「Agent 包交付」：gwlinkd 取到中心包后，落到宿主投放目录（agent_package_drop_dir），
-# 再把**容器内路径**（agent_package_container_dir/<文件名>）交给网关托管。
-# 两项指向**同一份**目录（宿主写法 vs 容器写法）—— 容器里的路径就是 compose 里 `:/packages`。
-# 缺这两项则 ② fail-closed（收到 push-agent-package 计划会报错）。
-{{#if agent_package_drop_dir}}
-agent_package_drop_dir = "{{agent_package_drop_dir}}"
-{{/if}}
-{{#if agent_package_container_dir}}
-agent_package_container_dir = "{{agent_package_container_dir}}"
-{{/if}}
 
 # ── WarpParse 管理面中继（WarpStation 发布链路）──
 # Center 的 wparse-proxy 把发布/状态请求写入命令队列；gwlinkd 轮询取命令，

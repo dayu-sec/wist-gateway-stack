@@ -1,0 +1,57 @@
+name: Scripts
+
+# 栈脚本的回归测试：只盯 `scripts/`、`dev/tests/`、`sys/` 里的东西。
+#
+# 为什么单独一条工作流：2026-10-23 的升级失败在**手工环境**里永远复现不了 ——
+# 交互式 shell 的 PATH 里有 Homebrew 的 openssl，而升级流程由 gwlinkd 派生，
+# 解析到的是 macOS 自带的 LibreSSL（不认 `x509 -ext`），于是在 `set -e` + `pipefail`
+# 下静默退 1。所以 `dev/tests/*.test.sh` 全部**故意用最小 PATH** 跑，
+# 并且必须有 macOS 那一路（LibreSSL / bash 3.2 的差异只在那里能复现）。
+on:
+  push:
+    paths:
+      - "scripts/**"
+      - "dev/**"
+      - "sys/**"
+      - ".github/workflows/scripts.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "dev/**"
+      - "sys/**"
+      - ".github/workflows/scripts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  # 静态检查：`dev/lint.sh`（CI 与本地同一条命令）。
+  # 为什么单独一个 job：它只需要 ubuntu 一台，不必跑两次（macOS 那台很贵）。
+  lint:
+    name: Shellcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ensure shellcheck
+        run: command -v shellcheck >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y shellcheck)
+      - run: ./dev/lint.sh
+
+  shell-tests:
+    name: Shell regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run dev/tests
+        run: |
+          set -eu
+          fail=0
+          for t in dev/tests/*.test.sh; do
+            echo "::group::${t}"
+            if bash "${t}"; then echo "PASS ${t}"; else echo "::error file=${t}::${t} 失败"; fail=1; fi
+            echo "::endgroup::"
+          done
+          exit "${fail}"

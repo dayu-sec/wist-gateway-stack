@@ -388,6 +388,18 @@ dev 态由 `./dev/svc.sh start` 带起它，**配置驱动**：读 `dev/configs/
 
 前置：本地有 Rust 工具链（脚本会 `cargo build` `wist-gateway` / `wist-agentd`）、`wist-gateway-web/node_modules`（先 `npm install`）、`dev/bin/` 里有 wparse 二进制。日志：`/tmp/wist-gateway-server.log`、`/tmp/wist-gateway-web.log`。
 
+### 本地自检（改脚本前先跑）
+
+```bash
+./dev/lint.sh                    # shellcheck（错误/警告 + 反引号 SC2006），CI 跑的是同一条命令
+dev/tests/*.test.sh              # 脚本回归测试：**故意用守护进程的最小 PATH** 跑
+cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测
+```
+
+> 为什么测试要换 PATH：升级流程由 gwlinkd 派生，它的 PATH 里没有 `/opt/homebrew/bin` ——
+> 2026-10-23 的升级事故就是「交互式跑得过、升级跑不过」（macOS 自带的 LibreSSL 不认 `x509 -ext`）。
+> 测试与 CI（`.github/workflows/scripts.yml`）都用最小 PATH，并且必须有 macOS 那一路。
+
 ## 制品包（发布）
 
 `.github/workflows/release.yml` 在 `v*.*.*` 标签上打包并发布：**整仓内容（除 CI 自身的 `.github/`）**。

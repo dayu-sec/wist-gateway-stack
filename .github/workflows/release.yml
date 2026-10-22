@@ -61,13 +61,51 @@ jobs:
   # 用 git archive 出包，只收 git 跟踪的内容 —— dev/bin/（约 92M 本地二进制）、
   # data-plane/{data,.run}/、configs/ 与 identity/（现场生成，已 ignore）、values/、_gal/.report
   # 等都未入 git，天然不入包；sys/configs/web/nginx.conf.tpl 随仓入库，会进包。
+  # 栈脚本的回归测试（`dev/tests/*.test.sh`）。
+  #
+  # 为什么要有这一层：2026-10-23 的升级事故里，同一个 bug 在**手工跑**时永远不复现
+  # （交互式 shell 的 PATH 里有 Homebrew 的 openssl，升级流程由 gwlinkd 派生、只能用系统的
+  # LibreSSL），所以测试必须**故意换成守护进程的 PATH** 跑 —— 细节见各测试文件头。
+  # macOS 那一路是**必须**的：LibreSSL 与 bash 3.2 的差异只在那里能复现。
+  scripts-test:
+    name: Test stack scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run shell regression tests
+        run: |
+          set -eu
+          fail=0
+          for t in dev/tests/*.test.sh; do
+            echo "::group::${t}"
+            if bash "${t}"; then echo "PASS ${t}"; else echo "::error file=${t}::${t} 失败"; fail=1; fi
+            echo "::endgroup::"
+          done
+          exit "${fail}"
+
+  # 脚本静态检查（`dev/lint.sh`，与 `.github/workflows/scripts.yml` 同一条命令）。
+  # 放进 `package` 的依赖里：带 lint 错误的脚本不该被装进要发布的包。
+  shellcheck:
+    name: Shellcheck scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ensure shellcheck
+        run: command -v shellcheck >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y shellcheck)
+      - run: ./dev/lint.sh
+
+  # 部署包（单包含三平台 stackcheck 二进制）。
   # 变量解析产物 sys/merged_vars.yml 是 gops 文档标注“需入库”的文件，已在仓库里、
   # 随 git archive 进包，所以这里不需要跑 gops。
   # 纪律：改了 sys/setting/vars.yml 后，本地跑一次 `gops sys update` 并把 merged_vars.yml
   # 的变更一起提交，否则包里带的是旧值。
   package:
     name: Package deployment bundle
-    needs: [stackcheck-build]
+    needs: [stackcheck-build, scripts-test, shellcheck]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

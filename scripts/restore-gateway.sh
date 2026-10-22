@@ -180,3 +180,17 @@ else
   echo "    发布态：${COMPOSE[*]} restart gateway"
   echo "    开发态：./dev/svc.sh stop gateway && ./dev/svc.sh start gateway"
 fi
+
+# 恢复后自检：**只读**。上一步只保证「文件写回去了」，不保证它们互相一致
+# （例如恢复的是半套：gwlinkd.toml 指向的投放目录对不上、渲染产物比 value.json 旧）。
+# 不改变退出码 —— 恢复本身已经完成，这里只把矛盾**当场**报出来，而不是等下次 localize。
+if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}" && -x "${STACK_ROOT}/scripts/check-stack.sh" ]]; then
+  echo
+  echo "  恢复后自检（`scripts/check-stack.sh`）："
+  if selfcheck_out="$("${STACK_ROOT}/scripts/check-stack.sh" 2>&1)"; then
+    echo "    通过（无 WARN / FAIL）"
+  else
+    printf '%s\n' "${selfcheck_out}" | sed 's/^/    /'
+    echo "    ↑ 不影响本次恢复结果；按提示处理后跑一次 \`gops sys localize\`。"
+  fi
+fi

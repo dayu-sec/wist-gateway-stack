@@ -36,6 +36,17 @@
   闸门优先级高于结果文件模式：环境里恰好存在 `GOPS_DIAGNOSE_RESULT` 时，
   「结果模式始终退 0」不能把守门绕过。
 
+  另有三组判据把原来只在脚本里「闪一下」的提示变成常驻体检（`diagnose` 与闸门都覆盖）：
+  - `identity.signing_pubkey`：配了知识库验签公钥就必须找得到它在三个候选落点之一
+    （栈根 / `configs/gateway/` / `identity/gateway/`）；缺失不阻断，但以后导入会 422。
+  - `identity.gwlinkd_paths`：`state_dir` / `identity_dir` / `GWLINKD_TRUST_BUNDLE`
+    指向不存在的路径时提示（悬空信任锚会让 gwlinkd 报 UnknownIssuer）。
+  - `knowledge.initial_layout`：`configs/gateway/knowledge/initial/` 的五份数据文件必须齐
+    （`install-initial-knowledge.sh` 只在解包那一刻校验过，之后没人再管）。
+
+- **`restore-gateway.sh` 还原后自检**：恢复完成时对栈根跑一次检查（只读），把
+  「文件写回去了但互相矛盾」当场报出来，而不是等下次 `localize`。不改变恢复的退出码。
+
 ### 修复
 
 - **`public_base_url` 是派生值但只在新建时写**（`scripts/init-gateway.sh`）：

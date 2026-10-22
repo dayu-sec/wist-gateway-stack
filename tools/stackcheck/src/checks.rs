@@ -744,6 +744,212 @@ fn knowledge_signing_configured(stack: &Stack) -> bool {
     root_str(&doc, "knowledge_signing_pubkey").is_some_and(|value| !value.trim().is_empty())
 }
 
+// ── 6. 身份材料路径 ──────────────────────────────────────────────────────
+
+/// 知识库验签公钥（`knowledge_signing_pubkey`）与 gwlinkd 的路径类现场值。
+///
+/// 两处原来只在生成脚本里「闪一下」：`init-knowledge-signing.sh` 找不到源文件就退，
+/// `init-gwlinkd-pub.sh` 打一行 WARN 就过去了。搬成检查项后 `diagnose` 与升级闸门都会覆盖。
+pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
+    let mut out = Vec::new();
+
+    // (a) 知识库验签公钥：配了就必须找得到，否则导入会在用到时才 500/422。
+    let signing = fs::read_to_string(stack.at("configs/gateway/wist-gateway.value.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|doc| {
+            doc.get("knowledge_signing_pubkey")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+
+    if signing.trim().is_empty() {
+        out.push(Finding::ok(
+            "identity.signing_pubkey",
+            "未配置知识库验签公钥",
+            "验签关闭（知识库包无需 .sig）",
+        ));
+    } else {
+        let raw = signing.trim();
+        // 网关在容器里以 `/config` 为基址，同一个相对路径可能落在栈根 / configs/gateway /
+        // identity/gateway 三处之一 —— 都认，避免把正常部署误判为悬空。
+        let candidates = if Path::new(raw).is_absolute() {
+            vec![PathBuf::from(raw)]
+        } else {
+            let mut candidates = vec![stack.at(raw), stack.at("configs/gateway").join(raw)];
+            // 容器里 `/config/identity/...` 挂的就是宿主 `identity/gateway/...`，
+            // 所以 `identity/public/x` 实际落在 `identity/gateway/public/x`。
+            if let Some(rest) = raw.strip_prefix("identity/") {
+                candidates.push(stack.at("identity/gateway").join(rest));
+            } else {
+                candidates.push(stack.at("identity/gateway").join(raw));
+            }
+            candidates
+        };
+        match candidates.iter().find(|path| path.is_file()) {
+            Some(found) => out.push(Finding::ok(
+                "identity.signing_pubkey",
+                "知识库验签公钥就位",
+                found
+                    .strip_prefix(&stack.root)
+                    .unwrap_or(found)
+                    .display()
+                    .to_string(),
+            )),
+            None => out.push(
+                Finding::fail(
+                    "identity.signing_pubkey",
+                    "知识库验签公钥指向的文件不存在",
+                    format!("`{raw}` 在 {} 个候选位置都没找到", candidates.len()),
+                )
+                // 不阻断：跑着的栈是好的，只是以后导入知识库会失败。
+                .non_blocking()
+                .with_hint("把公钥放回 identity/gateway/public/，或清空该项关闭验签"),
+            ),
+        }
+    }
+
+    // (b) gwlinkd 的路径类现场值。
+    let toml_path = stack.at("configs/gwlinkd/gwlinkd.toml");
+    let mut missing = Vec::new();
+    let mut checked = 0usize;
+
+    for (label, dir) in [
+        (
+            "state_dir",
+            root_str_of(&toml_path, "state_dir"),
+        ),
+        (
+            "identity_dir",
+            root_str_of(&toml_path, "identity_dir"),
+        ),
+    ] {
+        let Some(dir) = dir.filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+        checked += 1;
+        if !resolve(stack, dir.trim()).is_dir() {
+            // 首次启动前两者本来就不存在（gwlinkd 自己会建）—— 只提示，不阻断。
+            missing.push(format!("{label}={dir}（未创建，运行后会生成）"));
+        }
+    }
+
+    if let Ok(text) = fs::read_to_string(stack.at("identity/gwlinkd/.env")) {
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            if key.trim() != "GWLINKD_TRUST_BUNDLE" {
+                continue;
+            }
+            let value = value.trim();
+            if value.is_empty() {
+                continue; // 空 = 回落系统根，正常。
+            }
+            checked += 1;
+            if !Path::new(value).is_file() {
+                missing.push(format!(
+                    "GWLINKD_TRUST_BUNDLE={value}（gwlinkd 会报 UnknownIssuer）"
+                ));
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        out.push(Finding::ok(
+            "identity.gwlinkd_paths",
+            "gwlinkd 的路径类现场值都在",
+            format!("检查 {checked} 项"),
+        ));
+    } else {
+        out.push(
+            Finding::warn(
+                "identity.gwlinkd_paths",
+                "gwlinkd 的路径类现场值有悬空项",
+                missing.join("；"),
+            )
+            .with_hint("跑一次 `gops sys localize`：能自愈的会改回期望位置"),
+        );
+    }
+
+    out
+}
+
+fn root_str_of(path: &Path, key: &str) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let doc = toml::from_str::<toml::Value>(&text).ok()?;
+    root_str(&doc, key)
+}
+
+fn resolve(stack: &Stack, raw: &str) -> PathBuf {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        stack.at(raw)
+    }
+}
+
+// ── 7. 初始知识库布局 ────────────────────────────────────────────────────
+
+/// `configs/gateway/knowledge/initial/` 的五份数据文件。
+///
+/// `install-initial-knowledge.sh` 解包后会校验一次，但**只在那一刻**；之后手工动过目录、
+/// 或从备份搬进来半套，就没人再管。这里把它变成常驻判据。
+pub fn initial_knowledge_layout(stack: &Stack) -> Vec<Finding> {
+    const FILES: &[&str] = &[
+        "catalog.toml",
+        "packs.toml",
+        "templates.toml",
+        "purpose-rules.toml",
+        "aspect-policies.toml",
+    ];
+
+    let dir = stack.at("configs/gateway/knowledge/initial");
+    if !dir.is_dir() {
+        return vec![Finding::warn(
+            "knowledge.initial_layout",
+            "没有初始知识库目录",
+            dir.display().to_string(),
+        )
+        .with_hint("ARTIFACT_HOME / KNOWLEDGE_PATH 为空时这是正常的；否则跑一次 localize")];
+    }
+
+    let missing: Vec<&str> = FILES
+        .iter()
+        .copied()
+        .filter(|name| !dir.join(name).is_file())
+        .collect();
+
+    if !missing.is_empty() {
+        return vec![
+            Finding::fail(
+                "knowledge.initial_layout",
+                "初始知识库缺文件",
+                format!("{} 缺：{}", dir.display(), missing.join("、")),
+            )
+            .with_hint("包布局与预期不符（解包只解了一层？）；重跑 install-initial-knowledge.sh"),
+        ];
+    }
+
+    let version = fs::read_to_string(dir.join("manifest.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|doc| {
+            doc.get("version")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "未知".to_string());
+
+    vec![Finding::ok(
+        "knowledge.initial_layout",
+        "初始知识库布局完整",
+        format!("5 份文件齐全，版本 {version}"),
+    )]
+}
+
 // ── 测试 ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1085,6 +1291,90 @@ name = \"galaxy-flow\"
             .expect("值文件在时应报一项");
         assert_eq!(finding.status, Status::Warn, "{finding:#?}");
         assert!(finding.title.contains("缺失"), "{finding:#?}");
+    }
+
+    // ── 新增的身份材料 / 初始知识库用例 ──────────────────────────────
+
+    #[test]
+    fn flags_a_missing_signing_public_key() {
+        let tree = Tree::new("signing-pubkey");
+        tree.write(
+            "configs/gateway/wist-gateway.value.json",
+            "{\"knowledge_signing_pubkey\":\"identity/public/knowledge-signing.pub.pem\"}\n",
+        );
+
+        let findings = identity_paths(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "identity.signing_pubkey")
+            .expect("应有验签公钥检查");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(!finding.blocking, "公钥缺失不该拦升级");
+
+        // 放在 identity/gateway/public/ 下应当被认出来（容器 `/config/identity` 那条路）。
+        tree.write(
+            "identity/gateway/public/knowledge-signing.pub.pem",
+            "-----BEGIN PUBLIC KEY-----\n",
+        );
+        let findings = identity_paths(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "identity.signing_pubkey")
+            .expect("应有验签公钥检查");
+        assert_eq!(finding.status, Status::Ok, "{finding:#?}");
+    }
+
+    #[test]
+    fn warns_about_dangling_gwlinkd_paths() {
+        let tree = Tree::new("gwlinkd-paths");
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "state_dir = \"/nonexistent/state\"\nidentity_dir = \"/nonexistent/identity\"\n",
+        );
+        tree.write(
+            "identity/gwlinkd/.env",
+            "GWLINKD_TRUST_BUNDLE=/nonexistent/control-center.pem\n",
+        );
+
+        let findings = identity_paths(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "identity.gwlinkd_paths")
+            .expect("应有 gwlinkd 路径检查");
+        assert_eq!(finding.status, Status::Warn, "{finding:#?}");
+        assert!(finding.detail.contains("GWLINKD_TRUST_BUNDLE"), "{finding:#?}");
+    }
+
+    #[test]
+    fn checks_the_initial_knowledge_layout() {
+        let tree = Tree::new("knowledge-layout");
+
+        // 目录不在：提示（可能本来就关掉了初始知识库）。
+        let findings = initial_knowledge_layout(&tree.stack());
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+
+        // 只有一半文件：真问题（网关会加载一个残缺包）。
+        tree.write("configs/gateway/knowledge/initial/catalog.toml", "");
+        tree.write("configs/gateway/knowledge/initial/packs.toml", "");
+        let findings = initial_knowledge_layout(&tree.stack());
+        assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
+        assert!(findings[0].detail.contains("templates.toml"), "{findings:#?}");
+
+        // 补齐后 OK，并带出版本号。
+        for name in [
+            "templates.toml",
+            "purpose-rules.toml",
+            "aspect-policies.toml",
+        ] {
+            tree.write(&format!("configs/gateway/knowledge/initial/{name}"), "");
+        }
+        tree.write(
+            "configs/gateway/knowledge/initial/manifest.json",
+            "{\"version\":\"0.4.0\"}\n",
+        );
+        let findings = initial_knowledge_layout(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+        assert!(findings[0].detail.contains("0.4.0"), "{findings:#?}");
     }
 
     #[test]

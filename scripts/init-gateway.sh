@@ -140,11 +140,12 @@ if [[ -f "$TLS_CRT" && -f "$TLS_KEY" ]] \
   else
     # SAN 是否覆盖域名：**精确**相等，或 `*.a.b` 只覆盖一层（`x.a.b` 命中，`x.y.a.b` 不命中）。
     #
+    # ⚠ 两边必须同口径：本处（bash，字符串比对）
+    #   ↔ tools/stackcheck/src/checks.rs::san_covers（Rust，真解析）。
+    #   合并前先看另一边；口径不一致 → 闸门报 FAIL 而 localize 不重签（死锁）。
+    #
     # 不能用 `grep -q "DNS:${domain}"`：`.` 在正则里是通配符，而且整体是**子串**匹配 ——
-    # 证书 SAN 为 `gw.example.com.evil.net` 时也会判「已含」，于是**永远不会重签**；
-    # 而 `wist-stackcheck` 的 `tls.san_covers_domain` 会报 FAIL（阻断升级）——
-    # 两边口径不一致就成了死锁：闸门永远红，localize 永远不修。
-    # 改这里要同步改那边（那边是真解析，这边只能靠字符串）。
+    # 证书 SAN 为 `gw.example.com.evil.net` 时也会判「已含」，于是**永远不会重签**。
     san_covers() { # $1=SAN 条目  $2=域名
       local san="$1" target="$2" suffix label
       san="${san%.}"

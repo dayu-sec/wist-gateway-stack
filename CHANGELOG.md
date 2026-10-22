@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2-alpha] - 2026-10-22
+
+### 修复
+
+- **gwlinkd 开发态安装兼容中心布局**（`dev/install-gwlinkd-dev.sh`）：当
+  `/usr/local/bin/wist-gwlinkd` 是指向 `/usr/local/lib/wist-gwlinkd/wist-gwlinkd` 的符号链接时，
+  按**真身**替换（不再把符号链接换成 root 属主的普通文件）；同时保证真身目录与文件归运行用户，
+  避免中心推送的 gwlinkd 自更新在 preflight 写探测处 `EACCES`。服务定义仍以入口路径为准。
+- **站点目录搬家后自愈信任锚路径**（`scripts/init-gwlinkd-pub.sh`）：`.env` 里路径型现场值
+  （`GWLINKD_TRUST_BUNDLE`）指向的文件已不存在、而现场态目录下 `control-center.pem` 确实存在时，
+  自动改写回期望位置；自定义路径仍有效则保留，两边都没有只告警、不猜。解决搬家后
+  gwlinkd 回落系统根、自签中心报 `UnknownIssuer`。
+
+### 升级注意
+
+- 本次**不改组件 tag**（gateway `v0.18.1-alpha` / web `v0.12.1-alpha` / wparse `0.32.1-alpha` / VM `v1.154.0`），
+  升级只需替换 stack 包，再 `gops sys localize`（会对 `.env` 重新做一次路径自愈）。
+- TCR 里 `warp-parse:0.32.1-alpha` 仍未同步（推送 401：当前账号没有 `cloud/warp-parse` 的 push 权限）；
+  只拉 TCR 的现场升级前，先用有权限的账号补推。
+
 ## [0.2.1-alpha] - 2026-10-22
 
 ### 变更

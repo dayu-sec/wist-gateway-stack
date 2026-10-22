@@ -28,7 +28,8 @@
 #
 # 可覆盖 env：
 #   WIST_GWLINKD_DEV_BIN_SRC=<dir>    产物目录（默认 <crate>/target/debug；`--release` 时是 target/release）
-#   WIST_GWLINKD_DEV_BIN=<path>      服务二进制落点（默认 /usr/local/bin/wist-gwlinkd）
+#   WIST_GWLINKD_DEV_BIN=<path>      服务**入口**路径（默认 /usr/local/bin/wist-gwlinkd）
+#                                    是指向真身的符号链接时按**真身**换（中心布局：/usr/local/lib/wist-gwlinkd/）
 #   WIST_GWLINKD_DEV_CONFIG=<path>   主配置（默认取服务现有定义里的，退回 <栈根>/configs/gwlinkd/gwlinkd.toml）
 #   WIST_GWLINKD_DEV_PUB_CONFIG=<path> 现场态配置（同上口径）
 #   SKIP_BUILD=1                      等价 --no-build
@@ -150,10 +151,37 @@ done
 
 BIN_SRC_DIR="${WIST_GWLINKD_DEV_BIN_SRC:-${GWLINKD_CRATE}/target/${PROFILE}}"
 SRC_BIN="${BIN_SRC_DIR}/wist-gwlinkd"
-DEST_BIN="${WIST_GWLINKD_DEV_BIN:-/usr/local/bin/wist-gwlinkd}"
+
+# 中心的安装布局：`/usr/local/bin/wist-gwlinkd` 只是**符号链接**，真身在
+# `/usr/local/lib/wist-gwlinkd/wist-gwlinkd`（目录与文件都归运行用户 —— gwlinkd 的自更新要在
+# 进程内就地把真身换掉）。服务定义里的 `--bin` 用入口路径。
+SERVICE_BIN="${WIST_GWLINKD_DEV_BIN:-/usr/local/bin/wist-gwlinkd}"
+GWLINKD_REAL_DIR='/usr/local/lib/wist-gwlinkd'
+
+# 顺着符号链接找到**真身**：要换的是真身，不是入口。直接用 `install` 写入口路径会把符号链接
+# 换成 root 属主的普通文件，`/usr/local/bin` 又归 root —— 之后自更新 preflight 写探测直接 EACCES。
+resolve_link() {
+  local p="$1" t
+  while [[ -L "$p" ]]; do
+    t="$(readlink "$p")" || break
+    case "$t" in
+      /*) p="$t" ;;
+      *) p="$(cd -- "$(dirname -- "$p")" && pwd -P)/$t" ;;
+    esac
+  done
+  # 归一化（去掉链接里的 `..` / 相对段）；目录不存在时原样返回。
+  if [[ -d "$(dirname -- "$p")" ]]; then
+    printf '%s\n' "$(cd -- "$(dirname -- "$p")" && pwd -P)/$(basename -- "$p")"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+DEST_BIN="$(resolve_link "${SERVICE_BIN}")"
+DEST_DIR="$(dirname -- "${DEST_BIN}")"
 
 # 系统级服务要 root：脚本自己提权（而不是要求外层 sudo —— 那会把 cargo build 也变成 root）。
-SUDO="sudo"
+# 落点目录若已归运行用户（中心布局），就**不提权**：写出来的文件才仍是运行用户的。
+if [[ -w "${DEST_DIR}" ]]; then SUDO=""; else SUDO="sudo"; fi
 # 服务的运行身份：以**部署用户**跑，别用 root（gwlinkd 会回写配置 / 落身份 / 驱动 gops 升级，
 # 那些都该是部署用户的属主）。这与中心安装脚本的 `--run-as <部署用户>` 同口径。
 RUN_AS_ARGS=(--run-as "$(id -un)")
@@ -186,19 +214,20 @@ PUB="${WIST_GWLINKD_DEV_PUB_CONFIG:-${DEFINITION_PUB:-${RELEASE_PUB}}}"
 
 # ---------------------------------------------------------------- 服务状态（只读）
 service_status_raw() {
-  "${DEST_BIN}" service status --system "${RUN_AS_ARGS[@]}" \
-    --bin "${DEST_BIN}" --config "${CONF}" --pub-config "${PUB}"
+  "${SERVICE_BIN}" service status --system "${RUN_AS_ARGS[@]}" \
+    --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}"
 }
 
 show_status() {
   echo "== gwlinkd 服务现状 =="
   note "服务定义 ${DEFINITION}"
-  note "二进制   $(short "${DEST_BIN}")"
+  note "入口     $(short "${SERVICE_BIN}")"
+  [[ "${DEST_BIN}" == "${SERVICE_BIN}" ]] || note "真身     $(short "${DEST_BIN}")"
   note "配置     $(short "${CONF}")"
   note "现场态   $(short "${PUB}")"
   echo
-  if [[ ! -x "${DEST_BIN}" ]]; then
-    warn "服务二进制不存在：${DEST_BIN}（发布态还没装过？）"
+  if [[ ! -x "${SERVICE_BIN}" ]]; then
+    warn "服务二进制不存在：${SERVICE_BIN}（发布态还没装过？）"
     return 0
   fi
   service_status_raw 2>&1 | sed 's/^/  /' || warn "service status 未成功"
@@ -247,11 +276,31 @@ release_legacy_console_instance() {
   run rm -f "${GWLINKD_LEGACY_PIDFILE}"
 }
 
+# gwlinkd 的自更新是“取制品 → 同目录写临时文件 → rename 覆盖真身”，所以**目录**必须对运行用户
+# 可写（只给文件写权限不够）。中心布局把真身放 /usr/local/lib/wist-gwlinkd（目录与文件都归运行用户），
+# 入口 /usr/local/bin/wist-gwlinkd 只做符号链接。换完只做体检：不达标就当场说清后果和修法，
+# 别等中心派升级计划时才在 gwlinkd 日志里报 preflight EACCES。
+self_update_layout_check() {
+  if [[ "${DRY_RUN}" == "1" ]]; then return 0; fi
+  if [[ -w "${DEST_DIR}" ]]; then
+    pass "自更新布局就绪：$(short "${DEST_DIR}") 对 $(id -un) 可写"
+    return 0
+  fi
+  warn "自更新会失败：目录 $(short "${DEST_DIR}") 对 $(id -un) 不可写（原子 rename 需要目录可写，只给文件权限不够）。"
+  warn "期望布局：真身 ${GWLINKD_REAL_DIR}/wist-gwlinkd（目录与文件归运行用户），$(short "${SERVICE_BIN}") 只做符号链接。"
+  warn "修复：在中心网关页重跑「只装 gwlinkd」命令；或把 WIST_GWLINKD_DEV_BIN 指到运行用户可写的目录。"
+}
+
 swap_binary() {
-  echo "== 备份并替换服务二进制 =="
-  local ts bak
+  echo "== 备份并替换服务二进制（真身） =="
+  local ts bak created_dir=0
   ts="$(date '+%Y%m%d-%H%M%S')"
   bak="${DEST_BIN}.bak-${ts}"
+
+  if [[ ! -d "${DEST_DIR}" ]]; then
+    created_dir=1
+    run ${SUDO} install -d -m 0755 "${DEST_DIR}"
+  fi
 
   if [[ -f "${DEST_BIN}" ]]; then
     note "旧 $(basename "${DEST_BIN}")  $(sha12 "${DEST_BIN}")  → 备份为 $(short "${bak}")"
@@ -264,6 +313,15 @@ swap_binary() {
   # 运行中的进程 / 随后 exec 会抓到旧内容。
   run ${SUDO} install -m 0755 "${SRC_BIN}" "${DEST_BIN}.new"
   run ${SUDO} mv -f "${DEST_BIN}.new" "${DEST_BIN}"
+  # 走了 sudo 的话文件是 root 属主；自更新期望目录与文件**都归运行用户**，这里把文件交回去。
+  if [[ -n "${SUDO}" ]]; then
+    run ${SUDO} chown "$(id -un)" "${DEST_BIN}"
+    # 只在中心那个专用目录上连目录一起交回（不能去改共用的 /usr/local/bin 属主）。
+    if [[ "${created_dir}" == "1" && "${DEST_DIR}" == "${GWLINKD_REAL_DIR}" ]]; then
+      run ${SUDO} chown "$(id -un)" "${DEST_DIR}"
+    fi
+  fi
+  self_update_layout_check
 
   if [[ "${DRY_RUN}" == "1" ]]; then
     note "将换上 $(basename "${DEST_BIN}")  $(sha12 "${SRC_BIN}")"
@@ -289,10 +347,10 @@ install_service() {
   if [[ "${DRY_RUN}" == "1" && -x "${SRC_BIN}" ]]; then
     note "将写入的服务定义（service print 渲染）："
     "${SRC_BIN}" service print --system "${RUN_AS_ARGS[@]}" \
-      --bin "${DEST_BIN}" --config "${CONF}" --pub-config "${PUB}" 2>&1 | sed 's/^/    /' || true
+      --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}" 2>&1 | sed 's/^/    /' || true
   fi
-  run ${SUDO} "${DEST_BIN}" service install --force --system "${RUN_AS_ARGS[@]}" \
-    --bin "${DEST_BIN}" --config "${CONF}" --pub-config "${PUB}"
+  run ${SUDO} "${SERVICE_BIN}" service install --force --system "${RUN_AS_ARGS[@]}" \
+    --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}"
 }
 
 verify() {
@@ -341,6 +399,7 @@ rollback() {
 
   run ${SUDO} install -m 0755 "${newest}" "${DEST_BIN}.new"
   run ${SUDO} mv -f "${DEST_BIN}.new" "${DEST_BIN}"
+  if [[ -n "${SUDO}" ]]; then run ${SUDO} chown "$(id -un)" "${DEST_BIN}"; fi
   if [[ "${DRY_RUN}" != "1" ]]; then
     note "已换回 $(sha12 "${DEST_BIN}")"
   fi
@@ -357,7 +416,12 @@ preflight() {
   fi
   note "platform=${PLATFORM} scope=system uid=$(id -u) mode=${MODE} dry_run=${DRY_RUN} profile=${PROFILE}"
   note "产物     ${SRC_BIN}"
-  note "服务 bin $(short "${DEST_BIN}")"
+  note "服务 bin $(short "${SERVICE_BIN}")$([[ "${DEST_BIN}" == "${SERVICE_BIN}" ]] || printf ' → %s' "$(short "${DEST_BIN}")")"
+  if [[ -w "${DEST_DIR}" ]]; then
+    note "自更新   $(short "${DEST_DIR}") 对 $(id -un) 可写"
+  else
+    note "自更新   $(short "${DEST_DIR}") 对 $(id -un) **不可写** → 中心推送的 gwlinkd 升级会失败（重跑中心「只装 gwlinkd」可修）"
+  fi
   note "主配置   $(short "${CONF}")$([[ "${DEFINITION_CONF}" == "${CONF}" ]] && printf '（取自服务现有定义）')"
   note "现场态   $(short "${PUB}")$([[ "${DEFINITION_PUB}" == "${PUB}" ]] && printf '（取自服务现有定义）')"
   note "服务定义 ${DEFINITION}"
@@ -397,11 +461,11 @@ fi
 
 echo
 echo "== 完成 =="
-note "服务    ${SERVICE_NAME}（$(short "${DEST_BIN}")）"
+note "服务    ${SERVICE_NAME}（$(short "${SERVICE_BIN}")）"
 note "配置    $(short "${CONF}")  +  $(short "${PUB}")"
 note "日志    ${LOG_HINT}"
 note "状态    ./dev/install-gwlinkd-dev.sh --status"
 note "回滚    ./dev/install-gwlinkd-dev.sh --rollback"
 if [[ "${MODE}" == "install" && "${DRY_RUN}" != "1" ]]; then
-  note "卸载    \`${SUDO} ${DEST_BIN} service uninstall --system\`（svc.sh 已不管 gwlinkd）"
+  note "卸载    \`${SUDO} ${SERVICE_BIN} service uninstall --system\`（svc.sh 已不管 gwlinkd）"
 fi

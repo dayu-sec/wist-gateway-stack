@@ -137,8 +137,41 @@ if [[ -f "$TLS_CRT" && -f "$TLS_KEY" ]] \
   if [[ -z "$domain" ]]; then
     note "已有叶证书由当前 CA 签发（未指定 WEB_DOMAIN，跳过 SAN 校验）：${TLS_CRT}"
     leaf_ok=1
-  elif openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:${domain}"; then
-    leaf_ok=1
+  else
+    # SAN 是否覆盖域名：**精确**相等，或 `*.a.b` 只覆盖一层（`x.a.b` 命中，`x.y.a.b` 不命中）。
+    #
+    # 不能用 `grep -q "DNS:${domain}"`：`.` 在正则里是通配符，而且整体是**子串**匹配 ——
+    # 证书 SAN 为 `gw.example.com.evil.net` 时也会判「已含」，于是**永远不会重签**；
+    # 而 `wist-stackcheck` 的 `tls.san_covers_domain` 会报 FAIL（阻断升级）——
+    # 两边口径不一致就成了死锁：闸门永远红，localize 永远不修。
+    # 改这里要同步改那边（那边是真解析，这边只能靠字符串）。
+    san_covers() { # $1=SAN 条目  $2=域名
+      local san="$1" target="$2" suffix label
+      san="${san%.}"
+      target="${target%.}"
+      [[ "$san" == "$target" ]] && return 0
+      [[ "$san" == '*.'* ]] || return 1
+      suffix="${san#\*.}"
+      case "$target" in
+        *".${suffix}") ;;
+        *) return 1 ;;
+      esac
+      label="${target%".${suffix}"}"
+      [[ -n "$label" && "$label" != *.* ]] || return 1
+      return 0
+    }
+
+    san_entries="$(openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null \
+      | tr ',' '\n' | sed -n 's/.*DNS:\([^ ]*\).*/\1/p')"
+    while IFS= read -r san; do
+      [[ -n "$san" ]] || continue
+      if san_covers "$san" "$domain"; then
+        leaf_ok=1
+        break
+      fi
+    done <<EOF
+${san_entries}
+EOF
   fi
 fi
 if [[ "$leaf_ok" == 1 ]]; then

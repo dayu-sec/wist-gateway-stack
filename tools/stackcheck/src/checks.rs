@@ -318,7 +318,24 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
     }
 
     // compose 挂载：容器路径必须与 GWLINKD_AGENT_PACKAGE_CONTAINER_DIR 同源。
-    let compose_path = stack.at("sys/docker-compose.yml");
+    //
+    // 文件名候选与 gops 自己的 compose 发现**同一套**（`sys/docker-compose.yml` 优先，
+    // 也认 `compose.yml` / `.yaml` 与仓根的旧布局）—— 写死一个名字等于把部署形态钉死。
+    let compose_path = compose_file(stack);
+    let compose_path = match compose_path {
+        Some(path) => path,
+        None => {
+            out.push(
+                Finding::fail(
+                    "package.compose_mount",
+                    "找不到 compose 文件",
+                    "按 gops 的候选顺序（sys/docker-compose.yml 等）都没找到",
+                )
+                .with_hint("确认栈目录完整（`sys/docker-compose.yml` 随制品发布）"),
+            );
+            return out;
+        }
+    };
     match fs::read_to_string(&compose_path) {
         Ok(compose) => match package_mount_target(&compose) {
             Some(target) if trim_slash(&target) == trim_slash(container_base) => out.push(
@@ -361,9 +378,31 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
     out
 }
 
-/// 从 compose 文本里取 `${PACKAGE_DIR}:<target>[:ro]` 的 target。
+/// compose 文件的发现顺序（与 gops 的 `compose_invocation` 同口径）。
+fn compose_file(stack: &Stack) -> Option<PathBuf> {
+    const CANDIDATES: &[&str] = &[
+        "sys/docker-compose.yml",
+        "sys/docker-compose.yaml",
+        "sys/compose.yml",
+        "sys/compose.yaml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ];
+    CANDIDATES
+        .iter()
+        .map(|name| stack.at(name))
+        .find(|path| path.is_file())
+}
+
+/// 从 compose 文本里取 `${PACKAGE_DIR}:<target>[:ro]` 的 target（短语法），
+/// 兼容长语法（`source: ${PACKAGE_DIR}` 附近的 `target:`）。
 fn package_mount_target(compose: &str) -> Option<String> {
-    for line in compose.lines() {
+    let lines: Vec<&str> = compose.lines().collect();
+
+    // 短语法：`- ${PACKAGE_DIR}:/packages:ro`
+    for line in &lines {
         let Some(rest) = line.trim().strip_prefix("- ") else {
             continue;
         };
@@ -374,6 +413,24 @@ fn package_mount_target(compose: &str) -> Option<String> {
             continue;
         }
         return Some(dst.split(':').next().unwrap_or(dst).trim().to_string());
+    }
+
+    // 长语法：
+    //   - type: bind
+    //     source: ${PACKAGE_DIR}
+    //     target: /packages
+    // 在源行前后各看两行（`target` 可能在 `source` 之前）。
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("PACKAGE_DIR") || !line.contains("source") {
+            continue;
+        }
+        let start = index.saturating_sub(2);
+        let end = (index + 3).min(lines.len());
+        for candidate in &lines[start..end] {
+            if let Some((_, target)) = candidate.split_once("target:") {
+                return Some(target.trim().trim_matches('"').to_string());
+            }
+        }
     }
     None
 }
@@ -861,6 +918,7 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
             if value.is_empty() {
                 continue; // 空 = 回落系统根，正常。
             }
+            let value = unquote(value);
             checked += 1;
             if !Path::new(value).is_file() {
                 missing.push(format!(
@@ -891,9 +949,7 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
 }
 
 fn root_str_of(path: &Path, key: &str) -> Option<String> {
-    let text = fs::read_to_string(path).ok()?;
-    let doc = toml::from_str::<toml::Value>(&text).ok()?;
-    root_str(&doc, key)
+    config_str(path, None, key)
 }
 
 /// 读 `[section].key`（`section = None` 时读文档根）。两边都试一次，兼容配置搬家。
@@ -922,7 +978,19 @@ fn resolve(stack: &Stack, raw: &str) -> PathBuf {
 /// `identity/public/x.pem` 可能在三个地方之一；都认，避免把正常部署误判为悬空。
 fn relative_candidates(stack: &Stack, raw: &str) -> Vec<PathBuf> {
     if Path::new(raw).is_absolute() {
-        return vec![PathBuf::from(raw)];
+        let mut out = vec![PathBuf::from(raw)];
+        // 容器内**绝对**路径（`/config/...`）：同一挂载映射回宿主。
+        // 模板现在写的是相对路径，但站点手改成 `/config/identity/...` 也一样能用。
+        if let Some(rest) = raw.strip_prefix("/config/") {
+            out.push(stack.at(rest));
+            out.push(stack.at("configs/gateway").join(rest));
+            let under_identity = match rest.strip_prefix("identity/") {
+                Some(tail) => stack.at("identity/gateway").join(tail),
+                None => stack.at("identity/gateway").join(rest),
+            };
+            out.push(under_identity);
+        }
+        return out;
     }
     let mut candidates = vec![stack.at(raw), stack.at("configs/gateway").join(raw)];
     let under_identity = match raw.strip_prefix("identity/") {
@@ -1614,6 +1682,136 @@ jx0fk6s=\n\
     }
 
     #[test]
+    fn effective_vars_handles_comments_quotes_and_blank_lines() {
+        let tree = Tree::new("env-parsing");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            ".env",
+            "# 注释\n\nPACKAGE_DIR='./packages'\nGWLINKD_AGENT_PACKAGE_CONTAINER_DIR=\"/packages\"\n",
+        );
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            &format!(
+                "agent_package_drop_dir = \"{}/packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+                tree.root.display()
+            ),
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        assert!(
+            findings.iter().all(|finding| finding.status == Status::Ok),
+            "{findings:#?}"
+        );
+    }
+
+    #[test]
+    fn merged_vars_unquotes_single_quoted_values() {
+        let tree = Tree::new("vars-quoted");
+        tree.write(
+            "sys/merged_vars.yml",
+            "- name: PACKAGE_DIR\n  value: './packages'\n- name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR\n  value: '/packages'\n",
+        );
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            &format!(
+                "agent_package_drop_dir = \"{}/packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+                tree.root.display()
+            ),
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        assert!(
+            findings.iter().all(|finding| finding.status == Status::Ok),
+            "{findings:#?}"
+        );
+    }
+
+    #[test]
+    fn finds_compose_under_an_alternative_file_name() {
+        let tree = Tree::new("compose-alt");
+        tree.write("sys/merged_vars.yml", VARS);
+        // gops 自己认多种文件名；写死 docker-compose.yml 会把正常部署报成「找不到挂载」。
+        tree.write("sys/compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            &format!(
+                "agent_package_drop_dir = \"{}/packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+                tree.root.display()
+            ),
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        let mount = findings
+            .iter()
+            .find(|finding| finding.code == "package.compose_mount")
+            .expect("应有挂载检查");
+        assert_eq!(mount.status, Status::Ok, "{mount:#?}");
+    }
+
+    #[test]
+    fn reads_the_long_syntax_mount() {
+        let tree = Tree::new("compose-long");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            "sys/docker-compose.yml",
+            "services:\n  gateway:\n    volumes:\n      - type: bind\n        source: ${PACKAGE_DIR}\n        target: /packages\n        read_only: true\n",
+        );
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            &format!(
+                "agent_package_drop_dir = \"{}/packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+                tree.root.display()
+            ),
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        let mount = findings
+            .iter()
+            .find(|finding| finding.code == "package.compose_mount")
+            .expect("应有挂载检查");
+        assert_eq!(mount.status, Status::Ok, "{mount:#?}");
+    }
+
+    #[test]
+    fn signature_is_not_required_when_signing_is_off() {
+        let tree = Tree::new("pairing-off");
+        tree.write("packages/wist-knowledge-0.4.0.tar.gz", "dummy");
+
+        let findings = package_pairing(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.knowledge_signature")
+            .expect("应有配对检查");
+        assert_eq!(finding.status, Status::Ok, "{finding:#?}");
+    }
+
+    #[test]
+    fn initial_layout_tolerates_a_missing_manifest() {
+        let tree = Tree::new("layout-no-manifest");
+        for name in [
+            "catalog.toml",
+            "packs.toml",
+            "templates.toml",
+            "purpose-rules.toml",
+            "aspect-policies.toml",
+        ] {
+            tree.write(&format!("configs/gateway/knowledge/initial/{name}"), "");
+        }
+
+        let findings = initial_knowledge_layout(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+        assert!(findings[0].detail.contains("未知"), "{findings:#?}");
+    }
+
+    #[test]
+    fn freshness_says_nothing_when_neither_side_exists() {
+        let tree = Tree::new("freshness-empty");
+        assert!(render_freshness(&tree.stack()).is_empty());
+    }
+
+    #[test]
     fn effective_values_in_env_win_over_the_default_vars_file() {
         let tree = Tree::new("effective-vars");
         // `sys/merged_vars.yml` 是**默认值**；站点把 PACKAGE_DIR 覆盖成别的目录完全合法。
@@ -1649,6 +1847,24 @@ jx0fk6s=\n\
     #[test]
     fn accepts_a_certificate_covering_the_domain() {
         let tree = tls_tree("tls-ok", GOOD_CERT);
+        let findings = tls_certificate(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn accepts_a_container_absolute_certificate_path() {
+        let tree = Tree::new("tls-config-path");
+        tree.write(
+            "sys/merged_vars.yml",
+            "- name: WEB_DOMAIN\n  value: gw.example.test\n",
+        );
+        // 站点也可以直接写容器内路径；`/config/identity` 挂的就是宿主 identity/gateway。
+        tree.write(
+            "configs/gateway/wist-gateway.toml",
+            "[server]\ntls_cert_file = \"/config/identity/public/admin-tls.crt.pem\"\n",
+        );
+        tree.write("identity/gateway/public/admin-tls.crt.pem", GOOD_CERT);
+
         let findings = tls_certificate(&tree.stack());
         assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
     }

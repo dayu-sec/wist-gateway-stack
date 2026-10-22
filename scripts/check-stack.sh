@@ -28,7 +28,15 @@ esac
 
 BIN="${ROOT}/bin/${triple}/wist-stackcheck"
 if [ -x "$BIN" ]; then
-  exec "$BIN" --root "$ROOT" "$@"
+  # 预编译件可能是别的架构（手工拷错 / 平台包拿错）：先自报版本，
+  # 失败就明确说架构问题，而不是让 `exec` 报 126/127 让人去猜。
+  if "$BIN" --version >/dev/null 2>&1; then
+    exec "$BIN" --root "$ROOT" "$@"
+  fi
+  echo "预编译件无法执行：${BIN}" >&2
+  echo "  （本机 triple=${triple}；多半是包里的二进制属于别的平台）" >&2
+  echo "  处置：换对应平台的包，或删掉该文件改走下面的 cargo 回落" >&2
+  exit 2
 fi
 
 # 开发态回落：仓里带源码就现编现跑（发布包里一定带预编译件，不会走到这里）。

@@ -26,6 +26,7 @@ wist-stackcheck — 栈级配置检查
                    （**追加**到已有 `checks[]`：同一份体检里可以多个流程段各自报）
   --gate           闸门模式：只有**阻断类** FAIL 才非零退出（WARN / 非阻断 FAIL 都放行）。
                    给 `flow localize` 用 —— 渲染完就守门，别把坏配置带进 `up`。
+  -V, --version    打印版本
   -h, --help       本帮助
 
 退出码：
@@ -35,7 +36,13 @@ wist-stackcheck — 栈级配置检查
 ";
 
 fn main() -> ExitCode {
-    let args = match Args::parse(std::env::args().skip(1)) {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    // `--version` 不走完整解析：排障时运维只想拿一行版本号。
+    if argv.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("{}", version_line());
+        return ExitCode::SUCCESS;
+    }
+    let args = match Args::parse(argv.into_iter()) {
         Ok(Some(args)) => args,
         Ok(None) => {
             print!("{USAGE}");
@@ -146,6 +153,10 @@ struct Args {
     json: bool,
     gate: bool,
     result: Option<PathBuf>,
+}
+
+fn version_line() -> String {
+    format!("wist-stackcheck {}", env!("CARGO_PKG_VERSION"))
 }
 
 impl Args {
@@ -336,6 +347,35 @@ mod tests {
             .collect();
         // gops 对重复 code 会**整份拒收**，所以重复的必须去掉。
         assert_eq!(codes, vec!["a", "b"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_line_is_stable() {
+        let line = version_line();
+        assert!(line.starts_with("wist-stackcheck "), "{line}");
+        assert!(!line.trim().ends_with(" "), "{line}");
+    }
+
+    #[test]
+    fn write_result_overwrites_an_unparseable_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "wist-stackcheck-badjson-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("result.json");
+        std::fs::write(&path, "这不是 JSON").unwrap();
+
+        let mine = serde_json::json!({
+            "checks": [{"code": "tls.san_covers_domain", "status": "ok", "title": "t"}]
+        });
+        write_result(&path, &mine).unwrap();
+
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(merged["schema_version"], "1");
+        assert_eq!(merged["checks"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

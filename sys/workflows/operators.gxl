@@ -8,6 +8,13 @@ mod operators {
   // （galaxy-ops >= 1.3.4 / galaxy-flow >= 0.14）。合并后的配置以**环境变量**注入本子进程，
   // 用 $(printenv XXX) 读。每个动作都**幂等**（存在即跳过）——证书/密钥绝不能每次重生成。
   flow localize {
+    // ⓿ **前置条件（必须第一个跑）**：这一组只问「这台机器能不能跑 localize」。
+    //    为什么放最前：升级由 gwlinkd 派生，它的 PATH 里没有 Homebrew —— 证书脚本用到的
+    //    openssl 能力若在**这份 PATH** 下不成立，后面的 `init-gateway.sh` 会**静默退 1**
+    //    （2026-10-23 的事故：`x509 -ext` 在 LibreSSL 上不支持，管道在 `set -e` + `pipefail`
+    //    下直接退出，stderr 是空的）。放最后就晚了：那时证书已经签坏/升级已经回滚。
+    //    为什么带 `--only prereq`：这一刻包刚换完、还没重渲，全量闸门会误报「渲染不新鲜」。
+    gx.cmd ( "./scripts/check-stack.sh --gate --only prereq" );
     // 确保安装包投放目录存在（只读挂到网关容器 /packages；容器读不到宿主路径）
     gx.cmd ( "mkdir -p packages" );
     // ③ 备料：Ed25519 签名密钥 / 网关 TLS 证书 / 渲染值 value.json（缺什么补什么）

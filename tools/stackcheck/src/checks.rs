@@ -4,8 +4,10 @@
 //! `sys/docker-compose.yml`（挂载）、`packages/`（投放区）、`identity/`（密钥）。
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 use crate::{Finding, Stack};
@@ -159,6 +161,313 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+// ── 0. 环境前置条件（prereq）─────────────────────────────────────────────
+//
+// 这一组回答的不是「栈生成的东西对不对」，而是 **「这台机器能不能跑这个栈的 localize」**。
+//
+// 加它的直接原因（2026-10-23 升级事故）：`init-gateway.sh` 在 `openssl x509 -ext` 上静默退 1
+// —— 交互式 shell 的 PATH 里有 Homebrew 的 OpenSSL（支持 `-ext`），而升级流程由 gwlinkd 派生，
+// 解析到的是 macOS 自带的 LibreSSL（**不支持**）。同一份脚本、同一个栈，换个人跑就成/不成。
+//
+// 判据看两份 PATH（都要看，结论不同）：
+//   1. **当前进程的 PATH**（= 这次 flow 实际会用的那份）：不满足就**阻断** —— 后面必然失败；
+//   2. **守护进程的最低 PATH**（`/usr/bin:/bin:/usr/sbin:/sbin`）：交互式能过、这里过不了，
+//      说明「本机能跑，但交给 gwlinkd 定时跑就炸」——报 WARN，不阻断（避免误拦开发机）。
+//
+// ⚠ 这里**不重新实现** SAN 解析：直接执行随包的 `scripts/lib/tls-san.sh`。
+//    判据必须与真正跑的代码是**同一份实现**，否则又会变成「检查器说行、脚本说不行」的死锁。
+
+/// 守护进程（launchd / systemd / gwlinkd 派生）能保证的最低 PATH。
+const DAEMON_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// localize 流程里真正会用到、且**不保证**在最小 PATH 里的命令。
+/// 不列 sed / awk / grep / tar：那些缺了整台机器都不正常，不用栈来报。
+const REQUIRED_COMMANDS: &[&str] = &["bash", "openssl", "python3"];
+
+/// 在给定 `PATH` 里找可执行文件（不 spawn 子进程，便于单测）。
+fn which(command: &str, path: Option<&OsStr>) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = path?;
+    for dir in std::env::split_paths(path) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = dir.join(command);
+        let Ok(meta) = fs::metadata(&candidate) else {
+            continue;
+        };
+        if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 当前 `PATH` 下缺哪些必需命令（`sha256sum` 与 `shasum` 至少有一样即可）。
+fn missing_commands(path: Option<&OsStr>) -> Vec<String> {
+    let mut missing: Vec<String> = REQUIRED_COMMANDS
+        .iter()
+        .filter(|command| which(command, path).is_none())
+        .map(|command| (*command).to_string())
+        .collect();
+    if which("sha256sum", path).is_none() && which("shasum", path).is_none() {
+        missing.push("sha256sum|shasum".to_string());
+    }
+    missing
+}
+
+/// `prereq.toolchain`：localize 要用的命令是否两套 PATH 都找得到。
+pub fn prereq_toolchain() -> Vec<Finding> {
+    const CODE: &str = "prereq.toolchain";
+
+    let inherited = std::env::var_os("PATH");
+    let missing_current = missing_commands(inherited.as_deref());
+    let missing_daemon = missing_commands(Some(OsStr::new(DAEMON_PATH)));
+    vec![toolchain_finding(CODE, &missing_current, &missing_daemon)]
+}
+
+/// 把两组「缺什么」折成一条 `Finding`（纯函数，单测直接喂结果）。
+fn toolchain_finding(code: &str, missing_current: &[String], missing_daemon: &[String]) -> Finding {
+    // 当前 PATH 就缺 = 这次 flow 必然失败（不是「可能」）。
+    if !missing_current.is_empty() {
+        return Finding::fail(
+            code,
+            "localize 需要的命令在这台机器上不可用",
+            format!(
+                "当前 PATH 缺：{}（会依次跑 init-gateway / init-gwlinkd / install-initial-knowledge 等脚本）",
+                missing_current.join("、")
+            ),
+        )
+        .with_hint(
+            "装好这些命令并放进 PATH；升级流程由 gwlinkd 派生，**不会**读你的交互式 shell 配置",
+        );
+    }
+    // 交互式能过、守护进程的 PATH 过不了 = 现在能跑，哪天交给 gwlinkd 就炸。
+    if !missing_daemon.is_empty() {
+        return Finding::warn(
+            code,
+            "交互式能跑，但守护进程的 PATH 下缺命令",
+            format!(
+                "当前 PATH 齐全；缺的是守护进程的 PATH（{}）：{}",
+                DAEMON_PATH,
+                missing_daemon.join("、")
+            ),
+        )
+        .with_hint(
+            "把这些命令放到 /usr/bin，或固定进 gwlinkd 的 PATH（dev/gwlinkd.sh 的 plist/unit）",
+        );
+    }
+    Finding::ok(
+        code,
+        "localize 需要的命令齐备",
+        format!(
+            "{}（当前 PATH 与守护进程的 PATH 都验过）",
+            REQUIRED_COMMANDS.join("、") + "、sha256sum|shasum"
+        ),
+    )
+}
+
+/// 用某个 `PATH` 读网关叶证书 SAN 的结果。
+enum SanProbe {
+    /// 还没有叶证书（首次部署，localize 会签）。
+    NoCert,
+    /// 读出来了（可能是空串：证书里没有 DNS 型 SAN）。
+    Read(String),
+    /// 读失败（openssl 能力不足 / 输出被吞）。
+    Failed(String),
+    /// 随包 helper 不在（包不完整 / 有人手工拷过 `scripts/`）。
+    /// 与 `Failed` 分开：**修法不同**（重解包 vs 换 openssl），提示不能写错。
+    MissingHelper(String),
+}
+
+/// 执行**随包**的 `scripts/lib/tls-san.sh` 读 SAN。
+///
+/// `path` 为 `None` 时用当前进程的 PATH；给值时换成那份（用来探「守护进程能不能跑」）。
+fn probe_san(stack: &Stack, cert: Option<&Path>, path: Option<&OsStr>) -> SanProbe {
+    let Some(cert) = cert else {
+        return SanProbe::NoCert;
+    };
+    let helper = stack.at("scripts/lib/tls-san.sh");
+    if !helper.is_file() {
+        return SanProbe::MissingHelper(format!("缺少 {}（安装包不完整）", helper.display()));
+    }
+
+    let mut command = Command::new("bash");
+    command
+        .arg("-c")
+        .arg(". \"$1\" && wist_san_dns \"$2\"")
+        .arg("wist-stackcheck-probe") // $0
+        .arg(&helper) // $1
+        .arg(cert); // $2
+    if let Some(path) = path {
+        // 探「守护进程能不能跑」时**清掉**交互式环境：`OPENSSL_CONF` / `OPENSSL_MODULES`
+        // 这类变量会影响结果，留着就会把「本机能跑」误当成「守护进程也能跑」。
+        command.env_clear().env("PATH", path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        command.env("HOME", home);
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(err) => return SanProbe::Failed(format!("无法执行 bash：{err}")),
+    };
+    if !output.status.success() {
+        let code = output
+            .status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "被信号终止".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        return SanProbe::Failed(if stderr.is_empty() {
+            format!("helper 退出码 {code}（stderr 为空）")
+        } else {
+            format!("helper 退出码 {code}：{stderr}")
+        });
+    }
+    SanProbe::Read(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// `prereq.tls_san_reader`：证书脚本在这台机器上读得出 SAN 吗。
+pub fn prereq_tls_san(stack: &Stack) -> Vec<Finding> {
+    const CODE: &str = "prereq.tls_san_reader";
+
+    let cert = leaf_cert_spec(stack)
+        .and_then(|(_, candidates)| candidates.into_iter().find(|path| path.is_file()));
+    let inherited = probe_san(stack, cert.as_deref(), None);
+    let daemon = probe_san(stack, cert.as_deref(), Some(OsStr::new(DAEMON_PATH)));
+    vec![san_finding(CODE, cert.as_deref(), &inherited, &daemon)]
+}
+
+/// 把两次探测结果折成一条 `Finding`（纯函数，单测直接喂结果）。
+fn san_finding(
+    code: &str,
+    cert: Option<&Path>,
+    inherited: &SanProbe,
+    daemon: &SanProbe,
+) -> Finding {
+    let Some(cert) = cert else {
+        if let SanProbe::Failed(reason) | SanProbe::MissingHelper(reason) = inherited {
+            // 没有证书时也可能说读不出（缺随包 helper）：那也是包不完整，要拦。
+            return Finding::fail(code, "证书脚本缺失", reason.clone())
+                .with_hint("重新解包部署包（scripts/lib/tls-san.sh 随包发布）");
+        }
+        return Finding::ok(
+            code,
+            "还没有网关叶证书，跳过 SAN 读取",
+            "首次部署由 init-gateway.sh 签发；签发后再跑一次就能验",
+        );
+    };
+
+    // 0) 随包 helper 不在：不是 openssl 的问题，修法是重新解包。
+    if let SanProbe::MissingHelper(reason) = inherited {
+        return Finding::fail(code, "证书脚本缺失", reason.clone()).with_hint(
+            "重新解包部署包（`scripts/lib/tls-san.sh` 自 0.2.6-alpha 起随包发布）；\
+             手工拷过 scripts/ 的站点最容易缺它",
+        );
+    }
+
+    // 1) **当前 PATH 读不出**：这次 flow 后面必然失败，直接拦。
+    if let SanProbe::Failed(reason) = inherited {
+        return Finding::fail(
+            code,
+            "证书脚本读不出叶证书 SAN",
+            format!(
+                "{}；openssl: {}；{reason}",
+                cert.display(),
+                describe_openssl()
+            ),
+        )
+        .with_hint(
+            "脚本已改用 `openssl x509 -text`（LibreSSL 也支持）；还读不出就是 openssl 本身有问题：\
+             把它换掉，或给流程的 PATH 加一份支持 `-text` 的 openssl",
+        );
+    }
+
+    // 2) 交互式能读，换成守护进程的 PATH 就不行。
+    //
+    // ⚠ 这里必须把「读不出（退出码非 0）」和「**静默读空**」一起算进来：
+    //   老实现 `x509 -ext | tr | sed` 在 LibreSSL 下 openssl 失败但管道退出码来自 sed ——
+    //   于是 helper **退出 0、输出为空**。只看退出码就会把事故判成 OK。
+    let daemon_problem = match daemon {
+        SanProbe::Failed(reason) | SanProbe::MissingHelper(reason) => {
+            Some(format!("读不出：{reason}"))
+        }
+        SanProbe::Read(names) if names.is_empty() => {
+            Some("静默读空（一个 DNS 名都没有）".to_string())
+        }
+        _ => None,
+    };
+    let names = match inherited {
+        SanProbe::Read(names) => names,
+        _ => {
+            return Finding::ok(
+                code,
+                "还没有网关叶证书，跳过 SAN 读取",
+                cert.display().to_string(),
+            );
+        }
+    };
+
+    if names.is_empty() {
+        // 两套 PATH 都读空：要么证书真的没有 DNS 型 SAN，要么环境两边都不行。
+        // 不阻断（localize 下一轮会重签），只提醒。
+        return Finding::warn(
+            code,
+            "叶证书里读不出 DNS 型 SAN",
+            format!(
+                "{}：{} 与守护进程的 PATH 下都是空的",
+                cert.display(),
+                describe_openssl()
+            ),
+        )
+        .with_hint("localize 下一轮会按 WEB_DOMAIN 重签（幂等），无需手工处理");
+    }
+    if let Some(problem) = daemon_problem {
+        return Finding::warn(
+            code,
+            "交互式能读证书，但守护进程的 PATH 下读不了 SAN",
+            format!(
+                "{}：PATH={} 下{problem}；当前用的是 {}",
+                cert.display(),
+                DAEMON_PATH,
+                describe_openssl()
+            ),
+        )
+        .with_hint("把能用的 openssl 放进 /usr/bin，或固定进 gwlinkd 的 PATH（dev/gwlinkd.sh）");
+    }
+    Finding::ok(
+        code,
+        "证书脚本能读出叶证书 SAN",
+        format!("{}：[{}]", cert.display(), names.replace('\n', ", ")),
+    )
+}
+
+/// 报错时点明「用的是哪份 openssl」——PATH 差异正是事故里最难反查的部分。
+///
+/// 不打整条 PATH：几百个字符里没人看得出关键的那一个目录。
+fn describe_openssl() -> String {
+    let inherited = std::env::var_os("PATH");
+    let Some(bin) = which("openssl", inherited.as_deref()) else {
+        return "当前 PATH 里找不到 openssl".to_string();
+    };
+    let version = Command::new(&bin)
+        .arg("version")
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        // `openssl version` 会带一长串 `(Library: …)`：只留前半句，告警里够用。
+        .map(|version| match version.split(" (Library:").next() {
+            Some(head) => head.trim().to_string(),
+            None => version,
+        })
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| "版本未知".to_string());
+    format!("{}（{version}）", bin.display())
 }
 
 // ── 1. 投放目录 / 挂载自洽 ─────────────────────────────────────────────────
@@ -1009,23 +1318,34 @@ fn relative_candidates(stack: &Stack, raw: &str) -> Vec<PathBuf> {
 /// `openssl x509 -ext subjectAltName | grep -q "DNS:${domain}"`：
 /// 正则里的 `.` 是**通配符**，且是**子串**匹配 —— 证书 SAN 为
 /// `gw.example.com.evil.net` 时也会判过。这里做真解析 + 精确匹配。
+/// 网关叶证书的「配置里写的值 + 它可能所在的绝对路径」。
+///
+/// 两个调用方：`tls_certificate`（真解析 SAN / 有效期）与 `prereq_tls_san`
+/// （拿**随包脚本**去读 SAN，验「这台机器跑不跑得动 localize」）。
+fn leaf_cert_spec(stack: &Stack) -> Option<(String, Vec<PathBuf>)> {
+    let toml_path = stack.at("configs/gateway/wist-gateway.toml");
+    // 真实形状是 `[server] tls_cert_file = …`；也认文档根（以后搬家不会静默失效）。
+    let raw = config_str(&toml_path, Some("server"), "tls_cert_file")
+        .or_else(|| config_str(&toml_path, None, "tls_cert_file"))?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some((raw.to_string(), relative_candidates(stack, raw)))
+}
+
 pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
     const CODE: &str = "tls.san_covers_domain";
 
     let toml_path = stack.at("configs/gateway/wist-gateway.toml");
-    // 真实形状是 `[server] tls_cert_file = …`；也认文档根（以后搬家不会静默失效）。
-    let raw = config_str(&toml_path, Some("server"), "tls_cert_file")
-        .or_else(|| config_str(&toml_path, None, "tls_cert_file"));
-    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+    let Some((raw, candidates)) = leaf_cert_spec(stack) else {
         return vec![Finding::warn(
             CODE,
             "网关配置里没有 tls_cert_file",
             toml_path.display().to_string(),
         )];
     };
-    let raw = raw.trim();
 
-    let candidates = relative_candidates(stack, raw);
     let Some(found) = candidates.iter().find(|path| path.is_file()) else {
         return vec![Finding::fail(
             CODE,
@@ -2538,6 +2858,151 @@ jx0fk6s=\n\
             finding.detail.contains("wist-gateway-pub.toml"),
             "{}",
             finding.detail
+        );
+    }
+
+    // ── prereq（环境前置条件）────────────────────────────────────────────────
+
+    #[test]
+    fn which_requires_an_executable_in_one_of_the_path_dirs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = Tree::new("which");
+        let bin = tree.root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let path = Some(bin.as_os_str());
+
+        // 不存在
+        assert!(which("openssl", path).is_none());
+
+        // 存在但不可执行（多发生在拷贝 / 解包丢了权限位）
+        let plain = bin.join("openssl");
+        fs::write(&plain, "").unwrap();
+        fs::set_permissions(&plain, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(which("openssl", path).is_none());
+
+        // 可执行
+        fs::set_permissions(&plain, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(which("openssl", path), Some(plain));
+
+        // 空 PATH（`set -u` 筛掉空段）不能“碰运气命中当前目录”
+        assert!(which("openssl", Some(OsStr::new(""))).is_none());
+    }
+
+    #[test]
+    fn missing_commands_reports_hash_tool_as_one_item() {
+        let tree = Tree::new("missing-cmds");
+        let bin = tree.root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let path = Some(bin.as_os_str());
+
+        let missing = missing_commands(path);
+        assert!(missing.contains(&"openssl".to_string()));
+        assert!(missing.contains(&"python3".to_string()));
+        assert!(missing.contains(&"sha256sum|shasum".to_string()));
+
+        // 有一条 sha256 工具就不再报那个合成项
+        let shasum = bin.join("shasum");
+        fs::write(&shasum, "").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&shasum, fs::Permissions::from_mode(0o755)).unwrap();
+        let missing = missing_commands(path);
+        assert!(!missing.contains(&"sha256sum|shasum".to_string()));
+        assert!(missing.contains(&"openssl".to_string()));
+    }
+
+    #[test]
+    fn toolchain_finding_blocks_on_current_path_but_only_warns_on_daemon_path() {
+        let missing = vec!["openssl".to_string()];
+
+        // 当前 PATH 就缺 → 阻断（后面必然失败）
+        let blocked = toolchain_finding("prereq.toolchain", &missing, &missing);
+        assert_eq!(blocked.status, Status::Fail);
+        assert!(blocked.blocking);
+        assert!(blocked.detail.contains("openssl"), "{}", blocked.detail);
+
+        // 只在守护进程的 PATH 下缺 → 只 WARN（开发机不该被拦住）
+        let warned = toolchain_finding("prereq.toolchain", &[], &missing);
+        assert_eq!(warned.status, Status::Warn);
+        assert!(!warned.blocking);
+        assert!(warned.hint.contains("gwlinkd"), "{}", warned.hint);
+
+        // 两套 PATH 都齐全 → OK
+        let fine = toolchain_finding("prereq.toolchain", &[], &[]);
+        assert_eq!(fine.status, Status::Ok);
+    }
+
+    #[test]
+    fn san_finding_maps_the_real_world_outcomes() {
+        let cert = Path::new("/tmp/leaf.pem");
+        let names = SanProbe::Read("gw.example.test\nlocalhost".to_string());
+        // 老实现在 LibreSSL 下的形状：**退出码 0、输出为空**（管道退出码来自 sed）
+        let empty = SanProbe::Read(String::new());
+        let boom = SanProbe::Failed("helper 退出码 1".to_string());
+
+        // 还没有证书：跳过（首次部署），不报错
+        let none = san_finding("prereq.tls_san_reader", None, &SanProbe::NoCert, &SanProbe::NoCert);
+        assert_eq!(none.status, Status::Ok);
+        assert!(none.title.contains("还没有"), "{}", none.title);
+
+        // 当前 PATH 读不出 = 后面 localize 必然炸 → 阻断，且 detail 点明用的是哪份 openssl
+        let blocked = san_finding("prereq.tls_san_reader", Some(cert), &boom, &boom);
+        assert_eq!(blocked.status, Status::Fail);
+        assert!(blocked.blocking);
+        assert!(blocked.detail.contains("openssl"), "{}", blocked.detail);
+
+        // 交互式能读、守护进程的 PATH 读不了 → 只 WARN（开发机不该被拦住）
+        let warned = san_finding("prereq.tls_san_reader", Some(cert), &names, &boom);
+        assert_eq!(warned.status, Status::Warn);
+        assert!(!warned.blocking);
+        assert!(warned.title.contains("守护进程"), "{}", warned.title);
+
+        // **静默读空**也必须算「守护进程不行」——2026-10-23 事故就是这个形状，
+        // 只看退出码会把它判成 OK。
+        let silent = san_finding("prereq.tls_san_reader", Some(cert), &names, &empty);
+        assert_eq!(silent.status, Status::Warn);
+        assert!(!silent.blocking);
+        assert!(silent.detail.contains("静默读空"), "{}", silent.detail);
+
+        // 两套 PATH 都读空 → WARN（证书可能真没 DNS SAN；localize 会重签）
+        let blank = san_finding("prereq.tls_san_reader", Some(cert), &empty, &empty);
+        assert_eq!(blank.status, Status::Warn);
+        assert!(!blank.blocking);
+
+        // 读得出 → OK，detail 列出 SAN
+        let fine = san_finding("prereq.tls_san_reader", Some(cert), &names, &names);
+        assert_eq!(fine.status, Status::Ok);
+        assert!(fine.detail.contains("localhost"), "{}", fine.detail);
+
+        // 没证书但随包 helper 缺失（包不完整）仍然要拦
+        let broken = san_finding(
+            "prereq.tls_san_reader",
+            None,
+            &SanProbe::Failed("缺少 scripts/lib/tls-san.sh".to_string()),
+            &SanProbe::NoCert,
+        );
+        assert_eq!(broken.status, Status::Fail);
+        assert!(broken.blocking);
+
+        // helper 缺失（旧包 / 手工拷过 scripts/）与 openssl 能力不足要分开：
+        // 两者的修法不同，提示不能写成“换 openssl”。
+        let no_helper = san_finding(
+            "prereq.tls_san_reader",
+            Some(cert),
+            &SanProbe::MissingHelper("缺少 scripts/lib/tls-san.sh（安装包不完整）".to_string()),
+            &SanProbe::MissingHelper("缺少 scripts/lib/tls-san.sh（安装包不完整）".to_string()),
+        );
+        assert_eq!(no_helper.status, Status::Fail);
+        assert!(no_helper.blocking);
+        assert!(
+            no_helper.hint.contains("重新解包"),
+            "helper 缺失的提示应是“重新解包”，实际：{}",
+            no_helper.hint
+        );
+        assert!(
+            !no_helper.hint.contains("openssl"),
+            "helper 缺失不该建议换 openssl：{}",
+            no_helper.hint
         );
     }
 }

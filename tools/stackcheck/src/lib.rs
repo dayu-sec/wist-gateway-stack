@@ -130,6 +130,12 @@ impl Stack {
 pub struct Options {
     /// 跳过需要联网的检查（镜像可达）。离线站点应该打开。
     pub offline: bool,
+    /// 只跑某一组（按 code 前缀过滤，`--only prereq`）。
+    ///
+    /// 为什么需要：`flow localize` **开头**要跑一次前置条件检查，而那一刻
+    /// `apply` 刚把新包的文件换过来、还没重渲 —— `render.freshness.*` 这类判据
+    /// 会**合理地**判 FAIL（模板新于渲染产物）。全量闸门放在那里会误拦一切升级。
+    pub only: Option<String>,
 }
 
 /// 跑全部检查（默认选项）。顺序固定（输出可 diff、可回归）。
@@ -138,17 +144,49 @@ pub fn run(stack: &Stack) -> Vec<Finding> {
 }
 
 pub fn run_with(stack: &Stack, options: &Options) -> Vec<Finding> {
+    // `--only <前缀>`：按组懒惰过滤（不跑的检查既不 spawn 进程，也不会产生
+    // 「这一刻本来就不该判」的 FAIL）。
+    let wanted = |group: &str| {
+        options
+            .only
+            .as_deref()
+            .is_none_or(|only| group.starts_with(only))
+    };
+
     let mut out = Vec::new();
-    out.extend(checks::package_dir_consistency(stack));
-    out.extend(checks::render_freshness(stack));
-    out.extend(checks::render_placeholders(stack));
-    out.extend(checks::secret_perms(stack));
-    out.extend(checks::package_pairing(stack));
-    out.extend(checks::identity_paths(stack));
-    out.extend(checks::initial_knowledge_layout(stack));
-    out.extend(checks::tls_certificate(stack));
-    out.extend(checks::ports_available(stack));
-    out.extend(checks::image_reachable(stack, options.offline));
+    // 前置条件放最前：它是「后面这些能不能成立」的前提。
+    if wanted("prereq") {
+        out.extend(checks::prereq_toolchain());
+        out.extend(checks::prereq_tls_san(stack));
+    }
+    if wanted("package") {
+        out.extend(checks::package_dir_consistency(stack));
+    }
+    if wanted("render") {
+        out.extend(checks::render_freshness(stack));
+        out.extend(checks::render_placeholders(stack));
+    }
+    if wanted("secret") {
+        out.extend(checks::secret_perms(stack));
+    }
+    if wanted("package") {
+        out.extend(checks::package_pairing(stack));
+    }
+    if wanted("identity") {
+        out.extend(checks::identity_paths(stack));
+    }
+    if wanted("knowledge") {
+        out.extend(checks::initial_knowledge_layout(stack));
+    }
+    if wanted("tls") {
+        out.extend(checks::tls_certificate(stack));
+    }
+    if wanted("port") {
+        out.extend(checks::ports_available(stack));
+    }
+    if wanted("image") {
+        out.extend(checks::image_reachable(stack, options.offline));
+    }
     out
 }
 
@@ -171,6 +209,47 @@ pub fn has_blocking_failure(findings: &[Finding]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_prefix_runs_one_group_only() {
+        let root = std::env::temp_dir().join(format!(
+            "wist-stackcheck-only-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let stack = Stack::new(&root);
+
+        let findings = run_with(
+            &stack,
+            &Options {
+                offline: true,
+                only: Some("prereq".to_string()),
+            },
+        );
+        // 空目录里 prereq 只产生两条（命令齐备 / 还没证书），且都在 prereq.* 下。
+        assert!(!findings.is_empty());
+        assert!(
+            findings.iter().all(|finding| finding.code.starts_with("prereq.")),
+            "--only prereq 不该带出别的组：{:?}",
+            findings.iter().map(|f| &f.code).collect::<Vec<_>>()
+        );
+
+        // 别的组同样不会捞到 prereq（否则开头那次前置检查就成了全量跑的伪装）
+        let package = run_with(
+            &stack,
+            &Options {
+                offline: true,
+                only: Some("package".to_string()),
+            },
+        );
+        assert!(
+            package.iter().all(|finding| !finding.code.starts_with("prereq.")),
+            "--only package 不应包含 prereq：{:?}",
+            package.iter().map(|f| &f.code).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn blocking_flag_separates_gate_failures_from_soft_ones() {

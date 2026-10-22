@@ -26,6 +26,9 @@ wist-stackcheck — 栈级配置检查
                    （**追加**到已有 `checks[]`：同一份体检里可以多个流程段各自报）
   --gate           闸门模式：只有**阻断类** FAIL 才非零退出（WARN / 非阻断 FAIL 都放行）。
                    给 `flow localize` 用 —— 渲染完就守门，别把坏配置带进 `up`。
+  --only <前缀>    只跑某一组判据（当前可用：prereq / package / render / secret /
+                   identity / knowledge / tls / port / image）。`flow localize` 开头用
+                   `--only prereq`：那一刻包刚换完、还没重渲，全量闸门会误报渲染不新鲜。
   --offline        跳过需要联网的检查（镜像可达）—— 离线站点应该打开
   -V, --version    打印版本
   -h, --help       本帮助
@@ -59,6 +62,7 @@ fn main() -> ExitCode {
         &Stack::new(&args.root),
         &Options {
             offline: args.offline,
+            only: args.only.clone(),
         },
     );
     let verdict = worst(&findings);
@@ -159,6 +163,7 @@ struct Args {
     json: bool,
     gate: bool,
     offline: bool,
+    only: Option<String>,
     result: Option<PathBuf>,
 }
 
@@ -172,6 +177,7 @@ impl Args {
         let mut format = String::from("text");
         let mut gate = false;
         let mut offline = false;
+        let mut only: Option<String> = None;
         let mut result: Option<PathBuf> = None;
 
         while let Some(arg) = args.next() {
@@ -179,6 +185,9 @@ impl Args {
                 "-h" | "--help" => return Ok(None),
                 "--gate" => gate = true,
                 "--offline" => offline = true,
+                "--only" => {
+                    only = Some(args.next().ok_or("--only 需要一个组名前缀（如 prereq）")?);
+                }
                 "--root" => {
                     let value = args.next().ok_or("--root 需要一个路径")?;
                     root = Some(PathBuf::from(value));
@@ -213,6 +222,7 @@ impl Args {
             json,
             gate,
             offline,
+            only,
             result,
         }))
     }
@@ -277,6 +287,14 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Option<Args>, String> {
         Args::parse(args.iter().map(|value| value.to_string()))
+    }
+
+    #[test]
+    fn parses_only_group_filter() {
+        let args = parse(&["--only", "prereq"]).unwrap().unwrap();
+        assert_eq!(args.only.as_deref(), Some("prereq"));
+        // 不给值要报错（而不是默默全量跑）
+        assert!(parse(&["--only"]).is_err());
     }
 
     #[test]

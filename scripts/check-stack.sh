@@ -5,11 +5,14 @@
 # sed 正则，抓空还不报错（这正是它要防的那类故障）。
 #
 # 用法：
-#   scripts/check-stack.sh [--format text|json] [--result <文件>]
+#   scripts/check-stack.sh [--format text|json] [--result <文件>] [--gate] [--only <前缀>]
 #
 # 退出码：0 全好 / 1 有 WARN / 2 有 FAIL。
 # 例外：由 `gops run diagnose` 调用（设置了 GOPS_DIAGNOSE_RESULT）时始终 0 ——
 #       结论写在结果文件的 checks[] 里，不该让流程中断。
+#
+# `--only <前缀>` 只跑一组（如 `--only prereq`）：`flow localize` 拿它在**开头**查前置条件，
+# 那一刻包刚换完、还没重渲，全量闸门会把 `render.freshness.*` 误判成 FAIL。
 #
 # **找不到预编译件必须失败**：静默跳过等于检查没做，比不检查更危险。
 set -euo pipefail

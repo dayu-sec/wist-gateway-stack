@@ -1,6 +1,6 @@
 [package]
 name = "wist-stackcheck"
-version = "0.2.5" #@gxl:set(version)
+version = "0.2.6" #@gxl:set(version)
 edition = "2024"
 license = "Apache-2.0"
 description = "Stack-level config checks for the wist gateway stack: layout/mount consistency, render freshness, placeholders, secret perms, package pairing."

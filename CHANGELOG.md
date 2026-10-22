@@ -3,6 +3,57 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.6-alpha] - 2026-10-23
+
+### 修复
+
+- **升级在 `regenerate` 阶段静默失败（无任何可读报错）** —— 现场表现为「打完两行 CA note 就 exit 1，
+  stderr 空白」。根因不是证书逻辑：`init-gateway.sh` 用了 `openssl x509 -ext`，而 **macOS 自带的
+  LibreSSL 不支持该选项**；升级流程由 gwlinkd 派生，它的 PATH 里没有 Homebrew，解析到的正是它。
+  `set -e` + `pipefail` 让管道直接退出，`2>/dev/null` 把原因一起吞掉。
+  - 新增 `scripts/lib/tls-san.sh`：SAN 的读取与「是否覆盖域名」**只此一处实现**，改用
+    `x509 -text`（两种实现都支持），与 `tools/stackcheck` 的 `san_covers` 同口径；
+    读不出时告警并按「不覆盖」重签，不再静默。
+  - `init-web-tls.sh` 顺带修同类问题：原来在升级 PATH 下**每轮都重签** web 证书（且是子串匹配）。
+- **两处「裸反引号被当命令替换执行」**：`init-knowledge-signing.sh` 的报错文案
+  （实际输出 `-----BEGIN: command not found`，关键信息丢失）、`restore-gateway.sh` 的恢复后自检标题
+  （真跑了一遍 stackcheck 并把输出塞进标题）。
+- **`sed … | head -n1` 在 `pipefail` 下的 SIGPIPE 静默退出**：知识库 `manifest.json` 出现多处
+  `"version"` 时整个 localize 退 141（用 123 KB manifest 复现 3/3）；`init-gateway` / `import-*` /
+  `show-wparse-state` 的同类位置一并改掉。
+- **知识库验签公钥指纹在 LibreSSL 下恒为空**：`openssl pkey -pubin` 读不了 Ed25519 公钥，
+  且原先依赖只有 macOS 才有的 `shasum`。改用 python3 对 PEM 的 DER 取 sha256，两个平台一致
+  （仍是 `502d6b90a96afb0b…`），并有测试钉住。
+- `shasum` 不再硬编码（`import-package` / `import-knowledge` 回落 `sha256sum`）；
+  `init-gateway` / `init-knowledge-signing` 缺 python3 时前置报错，不再半途死掉。
+- ERR trap 的提示自身也是错的：`$(basename "$0")` 是命令替换，同串里会先把 `$?` 冲成 0。
+  改为 `trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR`。
+
+### 新增
+
+- **`wist-stackcheck` 增加 `prereq.*`（判据 17 → 19）** —— 判的是「这台机器能不能跑这个栈的 localize」，
+  不是「栈生成的东西对不对」：
+  - `prereq.toolchain`：`bash` / `openssl` / `python3` / sha256 工具在**当前 PATH** 与
+    **守护进程最低 PATH**（`/usr/bin:/bin:/usr/sbin:/sbin`）下是否都在。当前 PATH 缺 → **阻断**；
+    只有守护进程的 PATH 缺 → **WARN**（本机能用，不拦开发机）。
+  - `prereq.tls_san_reader`：用**随包** `scripts/lib/tls-san.sh` 在两份 PATH 下各读一次叶证书 SAN。
+    「读不出」与「**静默读空**」（老实现在 LibreSSL 下的形态：退出 0、输出为空）都算失败，
+    并在 detail 里点明用的是哪份 openssl。「随包 helper 缺失」单独一类（修法是重新解包，不是换 openssl）。
+  - `--only <前缀>`：只跑一组判据；`flow localize` **开头**新增
+    `./scripts/check-stack.sh --gate --only prereq` —— 前置条件不成立时，在改证书/回滚**之前**就失败。
+    不用全量闸门放开头是因为那一刻包刚换完、还没重渲，`render.freshness.*` 会合理地判 FAIL。
+
+### 工程
+
+- `dev/tests/`：新增 `localize-cert-paths`（42 条）、`knowledge-signing-fingerprint`（16 条），
+  并给知识库测试加「大 manifest 不许 SIGPIPE」一组。**全部故意用守护进程的最小 PATH 跑**
+  （macOS 那一路才能复现 LibreSSL / bash 3.2 的差异）。
+- `./dev/lint.sh`：shellcheck 两道 —— `-S warning`（错误/警告）+ `-S style --include=SC2006`（反引号，
+  默认会被 `-S warning` 过滤掉）。CI 与本地跑的是同一条命令。
+- CI：新增 `scripts.yml`（`scripts/**`、`dev/**`、`sys/**` 变更即跑，**ubuntu + macOS 双平台**）；
+  `release.yml` 新增 shellcheck 且 `package` 依赖它与脚本测试 —— 脚本不干净就出不了包。
+- README「开发态」补「本地自检」三项（lint / 脚本回归 / 检查器单测）与「为什么要换 PATH」。
+
 ## [0.2.5-alpha] - 2026-10-23
 
 ### 新增

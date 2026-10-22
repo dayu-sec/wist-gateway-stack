@@ -1,0 +1,27 @@
+# 站点本地覆盖层：不随 project_remote 发布，请勿放入 conf/
+# Local overlay: not managed by project_remote sync.
+#
+# 为什么放这里：`[project_remote]` 的 infra 同步会**整体替换** `conf/`，旧写法
+# （`conf/wparse.toml` 里的 `[admin_api]`）会在每次远程发布后被重置成远端模板值，
+# 导致远程控制端口失效。wparse >= 0.32.0 优先读取本文件里的 `[admin_api]`。
+#
+# 交付方式：本文件是 `sys/data-plane/` 只读种子的一部分，容器启动时 `cp -an` 到工作根
+# （已存在则不覆盖）。现场要改管理面端口 / TLS / token 路径，就改工作根里的这一份。
+#
+# 管理面：容器内绑 0.0.0.0 + TLS（非回环绑定必须 TLS）；宿主只发布 127.0.0.1:19090，
+# 由本机 gwlinkd 调用，用于 WarpStation 的发布/状态查询。
+[admin_api]
+enabled = true
+bind = "0.0.0.0:19090"
+request_timeout_ms = 15000
+max_body_bytes = 4096
+
+[admin_api.tls]
+enabled = true
+cert_file = "/data/identity/admin-tls.crt.pem"
+key_file = "/data/identity/admin-tls.key.pem"
+
+[admin_api.auth]
+mode = "bearer_token"
+# 相对工作根 /data；由 scripts/init-wparse-admin.sh 生成（600/gops perms 对齐）。
+token_file = ".run/admin_api.token"

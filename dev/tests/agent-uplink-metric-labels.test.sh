@@ -34,8 +34,8 @@ if [[ -f "${WORK}/models/knowledge/knowdb.toml" ]]; then
   grep -v '\${' "${WORK}/models/knowledge/knowdb.toml" > "${WORK}/models/knowledge/knowdb.clean.toml"
   mv "${WORK}/models/knowledge/knowdb.clean.toml" "${WORK}/models/knowledge/knowdb.toml"
 fi
-grep -v 'token_file' "${WORK}/conf/wparse.toml" > "${WORK}/conf/wparse.clean.toml"
-mv "${WORK}/conf/wparse.clean.toml" "${WORK}/conf/wparse.toml"
+# 管理面配置在项目根 `wparse.local.toml`（batch 不启管理面）；移除它，测试就不依赖 token 文件。
+rm -f "${WORK}/wparse.local.toml"
 
 # 只保留 file source，避免测试去 bind TCP/syslog 端口。
 rm -rf "${WORK}/topology/sources"

@@ -87,7 +87,7 @@ WEB_LOG="${WEB_LOG:-/tmp/wist-gateway-web.log}"
 WEB_PIDFILE="${WEB_PIDFILE:-/tmp/wist-gateway-web.pid}"
 # ── 数据面 wparse ──
 # 只读种子（随包交付、随版本升级）与开发工作根（可写）分开：
-#   种子     sys/data-plane          conf/connectors/models/topology
+#   种子     sys/data-plane          conf/connectors/models/topology（wparse.local.toml 由本脚本生成开发态版本）
 #   开发工作根 data-plane-run/dev    data/ 与 .run/ 是运行态（不入 git，也受 sys-prj protect）
 WPARSE_SEED="${WPARSE_SEED:-${STACK_ROOT}/sys/data-plane}"
 WPARSE_WORK_ROOT="${WPARSE_WORK_ROOT:-${STACK_ROOT}/data-plane-run/dev}"
@@ -257,6 +257,40 @@ start_wparse() {
       mkdir -p "${WPARSE_WORK_ROOT}/${d}"
       cp -an "${WPARSE_SEED}/${d}/." "${WPARSE_WORK_ROOT}/${d}/"
     done
+  fi
+
+  # 站点本地覆盖层（[admin_api]）：种子那份是**发布态**（容器内 0.0.0.0 + TLS + /data 路径），
+  # 宿主进程用不了，所以开发态自己生成一份（回环 + 无 TLS）；已有现场修改不覆盖。
+  # 端口用 19091：发布态容器已经把宿主 127.0.0.1:19090 占住了（两者可能同时跑）。
+  mkdir -p "${WPARSE_WORK_ROOT}/.run"
+  local local_conf="${WPARSE_WORK_ROOT}/wparse.local.toml"
+  if [[ ! -f "${local_conf}" ]]; then
+    cat >"${local_conf}" <<'EOF'
+# 开发态站点本地覆盖层（dev/svc.sh 生成；只补缺失，不覆盖现场修改）。
+# 发布态对应文件绑 0.0.0.0:19090 + TLS；宿主进程改成回环 + 明文，端口避开发布态。
+[admin_api]
+enabled = true
+bind = "127.0.0.1:19091"
+request_timeout_ms = 15000
+max_body_bytes = 4096
+
+[admin_api.tls]
+enabled = false
+cert_file = ""
+key_file = ""
+
+[admin_api.auth]
+mode = "bearer_token"
+# 相对开发工作根；下面缺则生成（0600）。
+token_file = ".run/admin_api.token"
+EOF
+    echo "  已生成开发态本地覆盖层：${local_conf}（管理面 127.0.0.1:19091）"
+  fi
+  # 引擎要求 token 文件 0600 且属主为运行用户；开发态直接放在 bind 目录里。
+  if [[ ! -s "${WPARSE_WORK_ROOT}/.run/admin_api.token" ]]; then
+    python3 -c 'import secrets; print(secrets.token_hex(32))' >"${WPARSE_WORK_ROOT}/.run/admin_api.token"
+    chmod 600 "${WPARSE_WORK_ROOT}/.run/admin_api.token"
+    echo "  已生成开发态 wparse admin token：${WPARSE_WORK_ROOT}/.run/admin_api.token"
   fi
 
   [[ -f "${WPARSE_WORK_ROOT}/conf/wparse.toml" ]] || die "缺少 wparse 配置：${WPARSE_WORK_ROOT}/conf/wparse.toml（种子：${WPARSE_SEED}）"

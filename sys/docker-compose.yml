@@ -134,6 +134,10 @@ services:
           mkdir -p "/data/$$d"
           cp -an "/seed/$$d/." "/data/$$d/"
         done
+        # 站点本地覆盖层（[admin_api]）：位于 conf/ 之外，project_remote 不会替换；缺失才补。
+        if [ -f /seed/wparse.local.toml ]; then
+          cp -an /seed/wparse.local.toml /data/wparse.local.toml
+        fi
         exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
           /usr/local/bin/wparse daemon --work-root /data
     environment:

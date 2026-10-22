@@ -12,7 +12,7 @@
 ```
 wist-gateway-stack/
   sys/            # gops 系统定义（发布态）
-  sys/data-plane/ # wparse 工程（只读种子：conf/connectors/models/topology），开发态与发布态共用
+  sys/data-plane/ # wparse 工程（只读种子：conf/connectors/models/topology + wparse.local.toml），开发态与发布态共用
   data-plane-run/ # wparse 运行态根（发布态 data/.run/work；开发态 dev/）
   dev/            # 本目录：svc.sh + 一次性工具 + 本地二进制
 ```
@@ -169,6 +169,9 @@ gateway 的 pidfile 记的是**网关进程自身**的 pid（后台常驻，与 
 > 别翻文件：`./dev/svc.sh token`（只认开发态 home，顺带打印 token 出处）。
 wparse 侧则是**配置共用、运行态分开**：配置在 `sys/data-plane/{conf,connectors,models,topology}`（只读种子，发布态挂进容器），
 运行态开发态在 `data-plane-run/dev/{data,.run}`、发布态在 `../data-plane-run/`。
+站点本地覆盖层（`[admin_api]`）在项目根 `wparse.local.toml`：发布态由种子补进工作根（容器内 `0.0.0.0:19090` + TLS），
+开发态由 `svc.sh` 生成一份宿主可用的（`127.0.0.1:19091`、无 TLS；避开发布态已占用的宿主 19090），
+两边都**不覆盖已存在的文件**。
 
 网关注册表存在内嵌 SQLite 里（`state/wist-gateway-store.db`，由 `agent.store_file` 默认值 `.json`
 改后缀而来），启动时自动迁移。若库中**既无 Agent 也无注册 token**，会一次性导入遗留的
@@ -191,8 +194,8 @@ wparse 侧则是**配置共用、运行态分开**：配置在 `sys/data-plane/{
 | `WEB_LOG` / `WEB_PIDFILE` | 前端日志与 pidfile | `/tmp/wist-gateway-web.log` / `.pid` |
 | `WARP_INSIGHT_WEB_PROXY_TARGET` | vite 的 `/api` 反代目标 | 从网关配置推导（见下） |
 | `WPARSE_BIN` | wparse 可执行文件 | `dev/bin/wparse` |
-| `WPARSE_SEED` | wparse 只读种子（conf/connectors/models/topology） | `<栈根>/sys/data-plane` |
-| `WPARSE_WORK_ROOT` | wparse 开发工作根（启动时从种子 `cp -an` 补缺） | `<栈根>/data-plane-run/dev` |
+| `WPARSE_SEED` | wparse 只读种子（conf/connectors/models/topology + wparse.local.toml） | `<栈根>/sys/data-plane` |
+| `WPARSE_WORK_ROOT` | wparse 开发工作根（启动时从种子 `cp -an` 补缺；`wparse.local.toml` / admin token 由 `svc.sh` 生成） | `<栈根>/data-plane-run/dev` |
 | `WPARSE_VM_ENDPOINT` | wparse 写指标的 VM 端点 | `http://127.0.0.1:18429` |
 | `WPARSE_GATEWAY_ENDPOINT` | wparse 的 agent-facts sink 端点 | `http://127.0.0.1:3001` |
 | `GATEWAY_LISTEN` | `setup-domain.sh` 写进配置的监听地址 | `0.0.0.0:443` |

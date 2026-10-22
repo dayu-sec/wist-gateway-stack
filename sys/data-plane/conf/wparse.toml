@@ -60,20 +60,5 @@ init_version = ""
 repo = "${WPARSE_PROJECT_INFRA_REPO}"
 init_version = ""
 
-[admin_api]
-# 容器内绑 0.0.0.0 + TLS（非回环绑定必须 TLS）；宿主只发布 127.0.0.1:19090。
-# 由本机 gwlinkd 调用，用于 WarpStation 的发布/状态查询。
-enabled = true
-bind = "0.0.0.0:19090"
-request_timeout_ms = 15000
-max_body_bytes = 4096
-
-[admin_api.tls]
-enabled = true
-cert_file = "/data/identity/admin-tls.crt.pem"
-key_file = "/data/identity/admin-tls.key.pem"
-
-[admin_api.auth]
-mode = "bearer_token"
-# 相对工作根 /data；由 scripts/init-wparse-admin.sh 生成（600/gops perms 对齐）。
-token_file = ".run/admin_api.token"
+# [admin_api] 不在这里：infra 同步会**整体替换** conf/，把远程控制端口重置成远端模板值。
+# 管理面配置见项目根目录的 wparse.local.toml（wparse >= 0.32.0 优先读取它）。

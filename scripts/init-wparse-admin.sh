@@ -20,7 +20,7 @@ RUN_DIR="${STACK_ROOT}/data-plane-run"
 TOKEN_HOST="${RUN_DIR}/.run/admin_api.token.host"
 LEGACY_TOKEN="${RUN_DIR}/.run/admin_api.token"
 VOLUME="${WPARSE_RUN_VOLUME:-wist-gateway-stack-wparse-run}"
-IMAGE="${WARP_SPC:-ghcr.io/wp-labs}/warp-parse:${WPARSE_TAG:-0.30.0-alpha}"
+IMAGE="${WARP_SPC:-ghcr.io/wp-labs}/warp-parse:${WPARSE_TAG:-0.32.1-alpha}"
 
 note() { echo "  $*"; }
 warn() { echo "  ⚠ $*" >&2; }

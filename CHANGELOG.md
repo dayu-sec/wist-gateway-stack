@@ -3,6 +3,27 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.4-alpha] - 2026-10-22
+
+### 变更
+
+- **初始知识库包地址拆成「源基址 + 稳定路径」**：`ARTIFACT_HOME` 现在包含**仓库 + 发布渠道前缀**
+  （COS 镜像或 GitHub 的 `…/releases/download`），`KNOWLEDGE_PATH` 只写**跨源稳定**的
+  `<版本>/<文件名>`。换制品源/换网络**只改 `ARTIFACT_HOME`**，不再需要跟着改路径。
+  - 缺省源改为 COS 镜像：`https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge`，
+    `KNOWLEDGE_PATH = v0.4.0/wist-knowledge-0.4.0.tar.gz`。
+  - 直连 GitHub 时把 `ARTIFACT_HOME` 覆盖成
+    `https://github.com/dayu-sec/wist-knowledge/releases/download` 即可（路径不变）。
+
+### 升级注意
+
+- **覆盖过 `ARTIFACT_HOME` 的部署要跟着改**：旧口径里它是裸基址（如 `https://github.com/dayu-sec`），
+  现在要写成**含仓库/渠道前缀**的形式，否则拼出来的地址会 404。
+- COS 镜像需要**随知识库发版同步**：新版本（如 `v0.5.0`）上传到 `wist-knowledge/v0.5.0/…` 后，
+  只改本栈的 `KNOWLEDGE_PATH` 版本段即可；`gx.download` 按文件名判重，不会复用旧包。
+- `gx.download` 对已存在的同名包会跳过（`reuse_cache`）；网络不可达时仍可把包手工放进
+  `packages/` —— `install-initial-knowledge.sh` 会照常解包并在缺包时明确报错。
+
 ## [0.2.3-alpha] - 2026-10-22
 
 ### 变更

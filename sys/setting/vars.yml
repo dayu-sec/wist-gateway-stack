@@ -126,19 +126,24 @@ system:
 
   # 初始知识库内容包（出厂自带）：`gops sys localize` 时把它拉到 PACKAGE_DIR（packages/），
   # 网关「知识库」页的「本地来源」填 /packages/<文件名> 即可录入（录入 ≠ 生效，还要点激活）。
-  #   下载地址 = ARTIFACT_HOME + "/" + KNOWLEDGE_PATH —— **拆成两段**，便于整段换制品源：
-  #   - ARTIFACT_HOME：制品存放的**基址**（境外缺省 GitHub；内网 / 镜像源在 values/value.yml 覆盖）
-  #   - KNOWLEDGE_PATH：相对基址的**路径**（带版本、文件名随版本变：升版本只改这里）
+  #   下载地址 = ARTIFACT_HOME + "/" + KNOWLEDGE_PATH（**两段**）：
+  #   - ARTIFACT_HOME：**制品源基址**，已包含「仓库 + 发布渠道」前缀。
+  #        国内缺省走 COS 镜像（COS 对象键与下面这段路径一一对应）；
+  #        境外 / 直连 GitHub 时改成
+  #            https://github.com/dayu-sec/wist-knowledge/releases/download
+  #        现场覆盖写在 `values/sys_value.yml`（或 ops 工程的 `values/<sys>/sys_value.yml`）。
+  #   - KNOWLEDGE_PATH：**跨源稳定的相对路径** = `<版本>/<文件名>`。
+  #        换镜像 / 换网络只改 ARTIFACT_HOME，**不要**在这里再拼仓库名或 `releases/download`；
+  #        升知识库版本只改这里的版本段（文件名随版本变，gx.download 才不会复用旧包）。
   #   - 任一为空 = 跳过这一步（离线 / 不需要初始包；把包手工放进 packages/ 效果相同）
-  #   - 文件名随版本变：升版本不会复用上一版的包（gx.download 按文件名判重）
   #   - 包本身的完整性由网关把关（manifest.json 摘要 + 配了验签公钥就验签），下载只保证不残缺
   - name: ARTIFACT_HOME
-    value: https://github.com/dayu-sec
+    value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
   - name: KNOWLEDGE_PATH
-    value: wist-knowledge/releases/download/v0.4.0/wist-knowledge-0.4.0.tar.gz
-  # 内网 / 镜像源示例（把上面两段**一起**换）：
-  #   ARTIFACT_HOME: https://github-1347593047.cos.ap-hongkong.myqcloud.com
-  #   KNOWLEDGE_PATH: wist-knowledge/v0.1.5/wist-knowledge-0.1.5.tar.gz
+    value: v0.4.0/wist-knowledge-0.4.0.tar.gz
+  # 换源示例（**只改上一段**；COS 上必须已放好同相对路径的包）：
+  #   ARTIFACT_HOME: https://github.com/dayu-sec/wist-knowledge/releases/download
+  #   KNOWLEDGE_PATH 保持 v0.4.0/wist-knowledge-0.4.0.tar.gz 不变
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
   #    **分两份**（与网关的 impl/pub 同口径）：

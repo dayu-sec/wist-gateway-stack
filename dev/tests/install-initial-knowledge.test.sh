@@ -36,7 +36,8 @@ chk "空 URL 不阻断 localize（exit 0）" "0" "${rc}"
 has "空载" "${out}" "告警说清了后果（网关将空载）"
 
 echo "== 2) URL 有但包没落盘 → **失败**并给出处置 =="
-out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid" KNOWLEDGE_PATH="${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+# 新口径：KNOWLEDGE_PATH = `<版本>/<文件名>`（跨制品源稳定），基址里才带仓库 / 渠道前缀。
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge" KNOWLEDGE_PATH="v9.9.9/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
 chk "缺包时 exit 1（不装出一个空网关）" "1" "${rc}"
 has "不可达" "${out}" "报错点明了可能原因（不可达）"
 has "${PKG_NAME}" "${out}" "报错给出了包名，便于手工放包"
@@ -49,7 +50,7 @@ for f in catalog.toml packs.toml templates.toml purpose-rules.toml aspect-polici
 done
 printf '{}\n' > "${STAGE}/manifest.json"
 tar -czf "${TMP}/site/packages/${PKG_NAME}" -C "${TMP}/stage" wist-knowledge-9.9.9-test
-out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid" KNOWLEDGE_PATH="${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge" KNOWLEDGE_PATH="v9.9.9/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
 chk "包在时 exit 0" "0" "${rc}"
 missing=""
 for f in catalog.toml packs.toml templates.toml purpose-rules.toml aspect-policies.toml; do

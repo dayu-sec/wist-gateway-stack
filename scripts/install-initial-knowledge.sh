@@ -12,8 +12,11 @@
 #
 # 用法：scripts/install-initial-knowledge.sh
 # 环境（由 `gops sys localize` 以合并后的值注入）：
-#   ARTIFACT_HOME         制品基址；与 KNOWLEDGE_PATH 拼成包地址（= flow 里 gx.download 用的同一个值）
-#   KNOWLEDGE_PATH        相对基址的路径；**两者任一为空 = 跳过**
+#   ARTIFACT_HOME         制品源**基址**（已含仓库 + 发布渠道前缀，如 COS 桶下的 `wist-knowledge`
+#                         或 GitHub 的 `.../wist-knowledge/releases/download`）；
+#                         与 KNOWLEDGE_PATH 拼成包地址（= flow 里 gx.download 用的同一个值）
+#   KNOWLEDGE_PATH        相对基址的**稳定路径** `<版本>/<文件名>`（换镜像只改基址）；
+#                         **两者任一为空 = 跳过**
 #                         （但会**显式告警**并说清网关将空载，不再静默）
 #   GATEWAY_CONFIG_DIR    网关配置目录（默认 ./configs/gateway）
 #   KNOWLEDGE_SOURCE_DIR  解到哪儿（相对网关配置目录；默认 knowledge/initial，须与 tpl 一致）
@@ -47,9 +50,10 @@ dst="${gcd}/${sd}"
 
 if [[ ! -f "${pkg}" ]]; then
   echo "初始知识库包不在 ${pkg} —— gx.download 没能把它拉下来。" >&2
-  echo "  多半是 ARTIFACT_HOME + KNOWLEDGE_PATH 拼出的地址在这台机器上不可达（外网 / GitHub 被墙 / 域名解析不到）：" >&2
+  echo "  多半是 ARTIFACT_HOME + KNOWLEDGE_PATH 拼出的地址在这台机器上不可达（制品源 / 网络 / 域名解析）：" >&2
   echo "    ${url}" >&2
-  echo "  处置：把 ${pkg_name} 手工拷进 packages/ 后重跑本步，或把 ARTIFACT_HOME 换成可达镜像。" >&2
+  echo "  处置：把 ${pkg_name} 手工拷进 packages/ 后重跑本步，或把 ARTIFACT_HOME 换成可达的制品源基址" >&2
+  echo "        （换源**只改 ARTIFACT_HOME**，KNOWLEDGE_PATH 保持 ${KNOWLEDGE_PATH:-<版本>/<文件名>} 不变）。" >&2
   exit 1
 fi
 

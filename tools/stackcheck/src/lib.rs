@@ -125,8 +125,19 @@ impl Stack {
     }
 }
 
-/// 跑全部检查。顺序固定（输出可 diff、可回归）。
+/// 运行选项（由 CLI 传入）。
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// 跳过需要联网的检查（镜像可达）。离线站点应该打开。
+    pub offline: bool,
+}
+
+/// 跑全部检查（默认选项）。顺序固定（输出可 diff、可回归）。
 pub fn run(stack: &Stack) -> Vec<Finding> {
+    run_with(stack, &Options::default())
+}
+
+pub fn run_with(stack: &Stack, options: &Options) -> Vec<Finding> {
     let mut out = Vec::new();
     out.extend(checks::package_dir_consistency(stack));
     out.extend(checks::render_freshness(stack));
@@ -136,6 +147,8 @@ pub fn run(stack: &Stack) -> Vec<Finding> {
     out.extend(checks::identity_paths(stack));
     out.extend(checks::initial_knowledge_layout(stack));
     out.extend(checks::tls_certificate(stack));
+    out.extend(checks::ports_available(stack));
+    out.extend(checks::image_reachable(stack, options.offline));
     out
 }
 

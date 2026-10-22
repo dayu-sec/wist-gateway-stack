@@ -1135,8 +1135,6 @@ fn san_covers(san: &str, domain: &str) -> bool {
         .is_some_and(|label| !label.is_empty() && !label.contains('.'))
 }
 
-// ── 测试 ───────────────────────────────────────────────────────────────
-
 /// `configs/gateway/knowledge/initial/` 的五份数据文件。
 ///
 /// `install-initial-knowledge.sh` 解包后会校验一次，但**只在那一刻**；之后手工动过目录、
@@ -1192,6 +1190,449 @@ pub fn initial_knowledge_layout(stack: &Stack) -> Vec<Finding> {
         "初始知识库布局完整",
         format!("5 份文件齐全，版本 {version}"),
     )]
+}
+
+// ── 9. 宿主端口 ──────────────────────────────────────────────────────────
+
+/// 一个发布到宿主的端口。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublishedPort {
+    host_port: u16,
+    protocol: String,
+}
+
+/// 展开 compose 里的 `${VAR}` / `${VAR:-default}`（只认这两种）。
+fn expand(raw: &str, vars: &BTreeMap<String, String>) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find('}') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let expr = &after[..end];
+        let (name, default) = match expr.split_once(":-") {
+            Some((name, default)) => (name, Some(default)),
+            None => (expr, None),
+        };
+        match vars.get(name.trim()) {
+            Some(value) if !value.trim().is_empty() => out.push_str(value),
+            _ => out.push_str(default.unwrap_or("")),
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 取 compose 里**所有**同名块键（`ports:`）下缩进更深的行。
+///
+/// 必须扫全部块：`ports:` 每个 service 各有一份，只取第一个的话，
+/// 端口检查实际只看了一个服务（实测：第 1 个是 VM，于是其余 4 个端口全没查）。
+fn compose_blocks<'a>(compose: &'a str, key: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut block_indent: Option<usize> = None;
+    let header = format!("{key}:");
+    for line in compose.lines() {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        let is_header = trimmed == header || trimmed.starts_with(&header);
+        match block_indent {
+            Some(base) if indent > base => {
+                if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                    out.push(line);
+                }
+            }
+            Some(_) | None => {
+                // 块结束（或还没开始）：这一行本身可能是下一个块头。
+                block_indent = is_header.then_some(indent);
+            }
+        }
+    }
+    out
+}
+
+fn compose_ports(compose: &str, vars: &BTreeMap<String, String>) -> Vec<PublishedPort> {
+    let mut out = Vec::new();
+    let lines = compose_blocks(compose, "ports");
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index].trim();
+        index += 1;
+        let Some(item) = line.strip_prefix("- ") else {
+            continue; // 长语法的后续键，已在上一个条目里处理
+        };
+        // 长语法：`- target: 3000` 加后续 `published: 443` / `protocol: udp`
+        if item.contains("target:") || item.contains("published:") {
+            let mut published = None;
+            let mut protocol = "tcp".to_string();
+            let mut scan = |text: &str| {
+                if let Some((_, value)) = text.split_once("published:")
+                    && let Ok(port) = value.trim().trim_matches('"').parse::<u16>()
+                {
+                    published = Some(port);
+                }
+                if let Some((_, value)) = text.split_once("protocol:") {
+                    protocol = value.trim().trim_matches('"').to_string();
+                }
+            };
+            scan(item);
+            while index < lines.len() && !lines[index].trim().starts_with("- ") {
+                scan(lines[index]);
+                index += 1;
+            }
+            if let Some(host_port) = published {
+                out.push(PublishedPort {
+                    host_port,
+                    protocol,
+                });
+            }
+            continue;
+        }
+        // 短语法：`"[ip:]host:container[/proto]"`
+        let expanded = expand(item.trim().trim_matches('"'), vars);
+        let owned = expanded.replace(['\'', '"'], "");
+        let (spec, protocol) = match owned.split_once('/') {
+            Some((spec, protocol)) => (spec.to_string(), protocol.to_string()),
+            None => (owned.clone(), "tcp".to_string()),
+        };
+        let parts: Vec<&str> = spec.split(':').collect();
+        // 短语法：`HOST:CONTAINER` 或 `IP:HOST:CONTAINER`（前者 2 段、后者 3 段）。
+        // 且：2 段时**第一段**才是宿主端口 —— 取错就会拿容器端口去查宿主，永远查不出冲突。
+        let host = match parts.as_slice() {
+            [host, _container] => *host,
+            [_ip, host, _container] => *host,
+            _ => continue, // 只写了容器端口 = 不发布到宿主
+        };
+        if let Ok(host_port) = host.trim().parse::<u16>() {
+            out.push(PublishedPort {
+                host_port,
+                protocol,
+            });
+        }
+    }
+    out
+}
+
+fn compose_images(compose: &str, vars: &BTreeMap<String, String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in compose.lines() {
+        let trimmed = line.trim();
+        let Some(value) = trimmed.strip_prefix("image:") else {
+            continue;
+        };
+        let image = expand(value.trim().trim_matches('"').trim_matches('\''), vars);
+        if !image.is_empty() {
+            out.push(image);
+        }
+    }
+    out
+}
+
+/// 解析 `docker ps --format '{{.Ports}}'` 的发布端口（`0.0.0.0:443->3000/tcp, …`）。
+fn published_ports_from_ps(output: &str) -> std::collections::HashSet<u16> {
+    let mut ours = std::collections::HashSet::new();
+    for chunk in output.split(',') {
+        let Some((host_side, _)) = chunk.split_once("->") else {
+            continue;
+        };
+        let Some((_, port)) = host_side.trim().rsplit_once(':') else {
+            continue;
+        };
+        if let Ok(port) = port.parse::<u16>() {
+            ours.insert(port);
+        }
+    }
+    ours
+}
+
+fn tcp_port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+}
+
+/// compose 的**项目名**（容器标签 `com.docker.compose.project` 的值）。
+///
+/// 为什么不用 `project.working_dir`：栈目录改过位置/换过名字后，仍在跑的容器会带着**旧路径**
+/// 标签，按路径过滤会漏掉自己（典型症状：VM 容器属于同一项目却认不出来，18429 被当成
+/// 「别的进程占用」）。项目名跨路径稳定。
+fn compose_project_name(stack: &Stack, compose: &str) -> String {
+    if let Ok(value) = std::env::var("COMPOSE_PROJECT_NAME")
+        && !value.trim().is_empty()
+    {
+        return value.trim().to_string();
+    }
+    for line in compose.lines() {
+        // 只认**顶格**的 `name:`（项目名）。缩进的是 volumes/networks 里的名字，
+        // 例如 `volumes:\n  wparse-run:\n    name: wist-gateway-stack-wparse-run` ——
+        // 认错会让项目名变成那个卷名，端口归属就全查不到了。
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let Some(value) = line.strip_prefix("name:") else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        if !value.is_empty() {
+            return value.to_string();
+        }
+        break;
+    }
+    stack
+        .root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("wist-gateway-stack")
+        .to_string()
+}
+
+fn our_published_ports(stack: &Stack, compose: &str) -> Option<std::collections::HashSet<u16>> {
+    let filter = format!(
+        "label=com.docker.compose.project={}",
+        compose_project_name(stack, compose)
+    );
+    let (ok, stdout, _) = run_with_timeout(
+        "docker",
+        &["ps", "--filter", &filter, "--format", "{{.Ports}}"],
+        10,
+    )?;
+    ok.then(|| published_ports_from_ps(&stdout))
+}
+
+/// 发布到宿主的端口是否真的空着。
+///
+/// 必须排除**本栈自己**占着的端口：升级的 `localize` 阶段容器正在跑，
+/// 不排除就会每次误报。
+fn ports_available_with(
+    stack: &Stack,
+    ours: Option<&std::collections::HashSet<u16>>,
+) -> Vec<Finding> {
+    const CODE: &str = "port.available";
+    let Ok((vars, _)) = effective_vars(stack) else {
+        return vec![Finding::warn(CODE, "读不到变量，跳过端口检查", "")];
+    };
+    let Some(compose_path) = compose_file(stack) else {
+        return Vec::new(); // 缺 compose 已由 package.compose_mount 报
+    };
+    let Ok(compose) = fs::read_to_string(&compose_path) else {
+        return vec![Finding::warn(CODE, "读不到 compose，跳过端口检查", "")];
+    };
+    let ports = compose_ports(&compose, &vars);
+    if ports.is_empty() {
+        return vec![Finding::ok(CODE, "没有发布到宿主的端口", "")];
+    }
+    let Some(ours) = ours else {
+        return vec![Finding::warn(
+            CODE,
+            "无法确认端口归属，跳过占用检查",
+            "docker 不可用（没装或守护进程没起）",
+        )
+        .with_hint("栈跑着时端口本就被自己占着；手工确认用 `docker ps` / `lsof -i`")];
+    };
+
+    let mut conflicts = Vec::new();
+    let mut skipped = 0usize;
+    for port in &ports {
+        if port.protocol != "tcp" || ours.contains(&port.host_port) {
+            skipped += 1;
+            continue;
+        }
+        if !tcp_port_is_free(port.host_port) {
+            conflicts.push(port.host_port);
+        }
+    }
+    conflicts.sort_unstable();
+    conflicts.dedup();
+
+    if conflicts.is_empty() {
+        let checked = ports.len() - skipped;
+        if checked == 0 {
+            return vec![Finding::ok(
+                CODE,
+                "端口都由本栈自己占着，跳过占用检查",
+                format!("{} 个发布端口（栈在运行）", ports.len()),
+            )];
+        }
+        vec![Finding::ok(
+            CODE,
+            "宿主端口都空着",
+            format!("已检查 {checked}/{}（{} 个由本栈占着 / udp）", ports.len(), skipped),
+        )]
+    } else {
+        vec![
+            Finding::fail(
+                CODE,
+                "宿主端口已被别的进程占用",
+                format!(
+                    "占用中：{}",
+                    conflicts
+                        .iter()
+                        .map(u16::to_string)
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ),
+            )
+            .with_hint("`compose up` 会失败（port is already allocated）；腾端口或改 *_PORT"),
+        ]
+    }
+}
+
+/// 本栈**自己**已经发布的端口（用 compose 的 workdir 标签认出本栈容器）。
+/// `None` = 无法判定 —— 那时不能拿「端口被占」去吓人。
+fn run_with_timeout(program: &str, args: &[&str], secs: u64) -> Option<(bool, String, String)> {
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().ok()?;
+                return Some((
+                    status.success(),
+                    String::from_utf8_lossy(&output.stdout).to_string(),
+                    String::from_utf8_lossy(&output.stderr).to_string(),
+                ));
+            }
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Some((false, String::new(), format!("超时（{secs}s）")));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(err) => return Some((false, String::new(), err.to_string())),
+        }
+    }
+}
+
+pub fn ports_available(stack: &Stack) -> Vec<Finding> {
+    let compose = compose_file(stack).and_then(|path| fs::read_to_string(path).ok());
+    let ours = compose
+        .as_deref()
+        .and_then(|text| our_published_ports(stack, text));
+    ports_available_with(stack, ours.as_ref())
+}
+
+// ── 10. 镜像可达 ──────────────────────────────────────────────────────────
+
+/// 网络类错误（整个站点离线时会全部命中）—— 收敛成一条提示，不按镜像刷屏。
+fn looks_like_network_error(message: &str) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    [
+        "no such host",
+        "timeout",
+        "超时",
+        "connection refused",
+        "temporary failure in name resolution",
+        "network is unreachable",
+        "i/o timeout",
+        "tls handshake timeout",
+        "context deadline exceeded",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+fn image_reachable_with(
+    stack: &Stack,
+    probe: &(dyn Fn(&str) -> Result<(), String> + Sync),
+) -> Vec<Finding> {
+    const CODE: &str = "image.reachable";
+    let Ok((vars, _)) = effective_vars(stack) else {
+        return vec![Finding::warn(CODE, "读不到变量，跳过镜像检查", "")];
+    };
+    let Some(compose_path) = compose_file(stack) else {
+        return Vec::new();
+    };
+    let Ok(compose) = fs::read_to_string(&compose_path) else {
+        return Vec::new();
+    };
+    let images = compose_images(&compose, &vars);
+    if images.is_empty() {
+        return vec![Finding::ok(CODE, "compose 里没有镜像", "")];
+    }
+
+    let mut broken = Vec::new();
+    let mut offline = 0usize;
+    // 并行探测：串行时一个慢 registry 会把体检拖成几十秒（实测 ghcr 单个 34s）。
+    let results: Vec<Result<(), String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = images
+            .iter()
+            .map(|image| scope.spawn(move || probe(image)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|_| Err("探测线程崩溃".to_string()))
+            })
+            .collect()
+    });
+    for (image, result) in images.iter().zip(results) {
+        match result {
+            Ok(()) => {}
+            Err(err) if looks_like_network_error(&err) => offline += 1,
+            Err(err) => broken.push(format!("{image}（{err}）")),
+        }
+    }
+
+    if !broken.is_empty() {
+        let shown = broken.iter().take(5).cloned().collect::<Vec<_>>().join("；");
+        return vec![
+            Finding::warn(
+                CODE,
+                "镜像在源上取不到",
+                format!("{} 个：{shown}", broken.len()),
+            )
+            .non_blocking()
+            .with_hint("确认 tag 与镜像源前缀（*_SPC / *_TAG）；`compose pull` 会失败在这里"),
+        ];
+    }
+    if offline == images.len() {
+        return vec![Finding::warn(
+            CODE,
+            "镜像源不可达（离线？）",
+            format!("{offline} 个镜像全部拿不到 manifest"),
+        )
+        .with_hint("离线站点用 `--offline` 跳过本项，免得每次体检都报")];
+    }
+    vec![Finding::ok(
+        CODE,
+        "镜像在源上都能取到",
+        format!("{} 个", images.len()),
+    )]
+}
+
+pub fn image_reachable(stack: &Stack, offline: bool) -> Vec<Finding> {
+    if offline {
+        return vec![Finding::ok(
+            "image.reachable",
+            "跳过镜像可达检查（--offline）",
+            "",
+        )];
+    }
+    image_reachable_with(stack, &|image| {
+        // 本地已有 → 不需要网络（`pull` 也会直接跳过）；这一步 55ms，远端 manifest 可能 34s。
+        if let Some((true, _, _)) = run_with_timeout("docker", &["image", "inspect", image], 5) {
+            return Ok(());
+        }
+        let Some((ok, _, stderr)) = run_with_timeout("docker", &["manifest", "inspect", image], 6)
+        else {
+            return Err("docker 不可用".to_string());
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(stderr.trim().lines().next().unwrap_or("未知错误").to_string())
+        }
+    })
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────────
@@ -1900,6 +2341,186 @@ jx0fk6s=\n\
         // 后缀攻击：不能因为“以它结尾”就放行。
         assert!(!san_covers("gw.example.test", "gw.example.test.evil"));
         assert!(!san_covers("other.example.test", "gw.example.test"));
+    }
+
+    // ── 端口 / 镜像用例 ─────────────────────────────────────────────
+
+    #[test]
+    fn expands_compose_variables_with_defaults() {
+        let mut vars = BTreeMap::new();
+        vars.insert("GATEWAY_PORT".to_string(), "443".to_string());
+        vars.insert("EMPTY".to_string(), String::new());
+
+        assert_eq!(expand("${GATEWAY_PORT}", &vars), "443");
+        assert_eq!(expand("x${MISSING:-3000}y", &vars), "x3000y");
+        // 空值当作未设，用缺省值（与 compose 一致）。
+        assert_eq!(expand("${EMPTY:-9000}", &vars), "9000");
+        assert_eq!(expand("no vars", &vars), "no vars");
+    }
+
+    #[test]
+    fn reads_ports_from_every_service_block() {
+        // 每个 service 各有一份 `ports:`，只取第一个就会漏掉后面的（实测：只查了 VM 一个）。
+        let compose = "services:\n  a:\n    ports:\n      - \"1111:1\"\n  b:\n    ports:\n      - \"2222:2\"\n      - \"3333:3/udp\"\n";
+        let ports = compose_ports(compose, &BTreeMap::new());
+        assert_eq!(
+            ports.iter().map(|port| port.host_port).collect::<Vec<_>>(),
+            vec![1111, 2222, 3333]
+        );
+    }
+
+    #[test]
+    fn project_name_ignores_indented_volume_names() {
+        let compose = "services:\n  a:\n    image: x\nvolumes:\n  run:\n    name: wist-gateway-stack-wparse-run\n";
+        assert_eq!(
+            compose_project_name(&Stack::new("/tmp/my-stack"), compose),
+            "my-stack"
+        );
+
+        let named = "name: explicit-project\nservices: {}\n";
+        assert_eq!(
+            compose_project_name(&Stack::new("/tmp/my-stack"), named),
+            "explicit-project"
+        );
+    }
+
+    #[test]
+    fn reads_published_ports_from_compose() {
+        let mut vars = BTreeMap::new();
+        vars.insert("GATEWAY_PORT".to_string(), "443".to_string());
+        vars.insert("VM_PORT".to_string(), "18429".to_string());
+        let compose = "services:\n  g:\n    ports:\n      - \"${GATEWAY_PORT}:3000\"\n      - \"127.0.0.1:${VM_PORT}:8428\"\n      - \"9000:9000/udp\"\n";
+
+        assert_eq!(
+            compose_ports(compose, &vars),
+            vec![
+                PublishedPort {
+                    host_port: 443,
+                    protocol: "tcp".into()
+                },
+                PublishedPort {
+                    host_port: 18429,
+                    protocol: "tcp".into()
+                },
+                PublishedPort {
+                    host_port: 9000,
+                    protocol: "udp".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_long_syntax_ports() {
+        let compose = "services:\n  g:\n    ports:\n      - target: 3000\n        published: 8443\n        protocol: tcp\n";
+        assert_eq!(
+            compose_ports(compose, &BTreeMap::new()),
+            vec![PublishedPort {
+                host_port: 8443,
+                protocol: "tcp".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn reads_images_and_ignores_comments() {
+        let mut vars = BTreeMap::new();
+        vars.insert("WIST_SPC".to_string(), "ghcr.io/dayu-sec".to_string());
+        vars.insert("GATEWAY_TAG".to_string(), "v0.19.0-alpha".to_string());
+        let compose = "# image: ignored/comment:1\n    image: ${WIST_SPC}/wist-gateway:${GATEWAY_TAG}\n";
+
+        assert_eq!(
+            compose_images(compose, &vars),
+            vec!["ghcr.io/dayu-sec/wist-gateway:v0.19.0-alpha".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_published_ports_from_docker_ps() {
+        let text = "0.0.0.0:443->3000/tcp, [::]:443->3000/tcp, 127.0.0.1:18429->8428/tcp";
+        let ports = published_ports_from_ps(text);
+        assert!(ports.contains(&443));
+        assert!(ports.contains(&18429));
+        assert_eq!(ports.len(), 2);
+    }
+
+    #[test]
+    fn flags_a_port_taken_by_another_process() {
+        // 拿一个真实空端口，自己占住它（用通配地址，与 compose 发布方式一致）。
+        let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).expect("bind ephemeral");
+        let port = listener.local_addr().unwrap().port();
+
+        let tree = Tree::new("port-conflict");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            "sys/docker-compose.yml",
+            &format!("services:\n  gateway:\n    ports:\n      - \"{port}:3000\"\n"),
+        );
+
+        let findings = ports_available_with(&tree.stack(), Some(&std::collections::HashSet::new()));
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "port.available")
+            .expect("应有端口检查");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(finding.detail.contains(&port.to_string()), "{finding:#?}");
+
+        // 这个端口是本栈自己发布的（栈在跑）：不该报。
+        let mut ours = std::collections::HashSet::new();
+        ours.insert(port);
+        let findings = ports_available_with(&tree.stack(), Some(&ours));
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn image_check_collapses_when_the_whole_site_is_offline() {
+        let tree = Tree::new("images-offline");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            "sys/docker-compose.yml",
+            "services:\n  a:\n    image: a:1\n  b:\n    image: b:1\n",
+        );
+
+        let findings = image_reachable_with(&tree.stack(), &|_| {
+            Err("dial tcp: lookup registry: no such host".to_string())
+        });
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+        assert!(findings[0].title.contains("离线"), "{findings:#?}");
+    }
+
+    #[test]
+    fn image_check_reports_a_missing_tag() {
+        let tree = Tree::new("images-missing");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            "sys/docker-compose.yml",
+            "services:\n  a:\n    image: repo/app:v9\n",
+        );
+
+        let findings = image_reachable_with(&tree.stack(), &|_| {
+            Err("manifest unknown".to_string())
+        });
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+        assert!(findings[0].title.contains("取不到"), "{findings:#?}");
+        assert!(!findings[0].blocking);
+    }
+
+    #[test]
+    fn image_check_passes_when_all_are_reachable() {
+        let tree = Tree::new("images-ok");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write("sys/docker-compose.yml", "services:\n  a:\n    image: a:1\n");
+
+        let findings = image_reachable_with(&tree.stack(), &|_| Ok(()));
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn image_check_is_skipped_when_offline_is_requested() {
+        let tree = Tree::new("images-skip");
+        let findings = image_reachable(&tree.stack(), true);
+        assert_eq!(findings[0].status, Status::Ok);
+        assert!(findings[0].title.contains("--offline"), "{findings:#?}");
     }
 
     #[test]

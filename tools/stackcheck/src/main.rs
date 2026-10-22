@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use wist_stackcheck::{Finding, Stack, Status, has_blocking_failure, run, worst};
+use wist_stackcheck::{Finding, Options, Stack, Status, has_blocking_failure, run_with, worst};
 
 const USAGE: &str = "\
 wist-stackcheck — 栈级配置检查
@@ -26,6 +26,7 @@ wist-stackcheck — 栈级配置检查
                    （**追加**到已有 `checks[]`：同一份体检里可以多个流程段各自报）
   --gate           闸门模式：只有**阻断类** FAIL 才非零退出（WARN / 非阻断 FAIL 都放行）。
                    给 `flow localize` 用 —— 渲染完就守门，别把坏配置带进 `up`。
+  --offline        跳过需要联网的检查（镜像可达）—— 离线站点应该打开
   -V, --version    打印版本
   -h, --help       本帮助
 
@@ -54,7 +55,12 @@ fn main() -> ExitCode {
         }
     };
 
-    let findings = run(&Stack::new(&args.root));
+    let findings = run_with(
+        &Stack::new(&args.root),
+        &Options {
+            offline: args.offline,
+        },
+    );
     let verdict = worst(&findings);
 
     if args.json {
@@ -152,6 +158,7 @@ struct Args {
     root: PathBuf,
     json: bool,
     gate: bool,
+    offline: bool,
     result: Option<PathBuf>,
 }
 
@@ -164,12 +171,14 @@ impl Args {
         let mut root: Option<PathBuf> = None;
         let mut format = String::from("text");
         let mut gate = false;
+        let mut offline = false;
         let mut result: Option<PathBuf> = None;
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(None),
                 "--gate" => gate = true,
+                "--offline" => offline = true,
                 "--root" => {
                     let value = args.next().ok_or("--root 需要一个路径")?;
                     root = Some(PathBuf::from(value));
@@ -203,6 +212,7 @@ impl Args {
             root: root.unwrap_or_else(|| PathBuf::from(".")),
             json,
             gate,
+            offline,
             result,
         }))
     }

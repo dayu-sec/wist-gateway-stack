@@ -47,6 +47,14 @@
     （支持 `*.example.com` 但只覆盖一层）。原来 `init-gateway.sh` 里是
     `openssl x509 … | grep -q "DNS:${domain}"` —— 正则 `.` 是通配符、且是子串匹配，
     证书 SAN 为 `gw.example.com.evil.net` 时也会放过。
+  - `port.available`：宿主端口是否真的空着。排除**本栈自己**已发布的端口
+    （按 compose 项目名认出本栈容器 —— 用 `workdir` 标签会在栈目录改过位置后漏掉自己）；
+    其余端口做 bind 试探，被别的进程占就报**阻断类** FAIL（`compose up` 必然失败）。
+  - `image.reachable`：镜像在源上是否存在。**本地已有的直接跳过网络**（55ms），
+    其余并行取 manifest（各 6s 超时）；整个站点离线时收敛成**一条** WARN 而不是按镜像刷屏。
+    离线站点用 `--offline` 或 `STACKCHECK_OFFLINE=1` 关掉。
+
+  > 后两项需要宿主 `docker` CLI；不可用时分别报「无法确认端口归属」/「docker 不可用」，不误报。
 
 - **`restore-gateway.sh` 还原后自检**：恢复完成时对栈根跑一次检查（只读），把
   「文件写回去了但互相矛盾」当场报出来，而不是等下次 `localize`。不改变恢复的退出码。
@@ -81,7 +89,7 @@
 - **发布包内含栈检查器**：CI 为 `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl` /
   `aarch64-apple-darwin` 三个平台编译 `wist-stackcheck`，`tar -rf` 追加到**同一个**部署包里
   （`bin/<triple>/`）。制品仍是平台无关的单包、同一个下载地址，升级协议不用改；
-  体积 +约 1.8 MB（单平台 605 KB）。其他架构运行时会明确报错（不静默跳过）。
+  体积 +约 2 MB（单平台 672 KB）。其他架构运行时会明确报错（不静默跳过）。
 
 ### 升级注意
 

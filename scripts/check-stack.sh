@@ -27,10 +27,21 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 BIN="${ROOT}/bin/${triple}/wist-stackcheck"
+
+# 离线站点：`STACKCHECK_OFFLINE=1` 跳过镜像可达（否则每次体检都会报「镜像源不可达」）。
+#
+# 不用数组（`EXTRA+=(--offline)` + `"${EXTRA[@]}"`）：macOS 自带的 bash 3.2 在 `set -u` 下
+# 展开空数组会报 `unbound variable`——而这正是部署机最常见的 shell。
+offline=0
+[ "${STACKCHECK_OFFLINE:-}" = "1" ] && offline=1
+
 if [ -x "$BIN" ]; then
   # 预编译件可能是别的架构（手工拷错 / 平台包拿错）：先自报版本，
   # 失败就明确说架构问题，而不是让 `exec` 报 126/127 让人去猜。
   if "$BIN" --version >/dev/null 2>&1; then
+    if [ "$offline" = 1 ]; then
+      exec "$BIN" --root "$ROOT" --offline "$@"
+    fi
     exec "$BIN" --root "$ROOT" "$@"
   fi
   echo "预编译件无法执行：${BIN}" >&2
@@ -42,6 +53,9 @@ fi
 # 开发态回落：仓里带源码就现编现跑（发布包里一定带预编译件，不会走到这里）。
 if [ -f "${ROOT}/tools/stackcheck/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
   echo "（bin/${triple}/wist-stackcheck 不存在，回落到 cargo run）" >&2
+  if [ "$offline" = 1 ]; then
+    exec cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" --offline "$@"
+  fi
   exec cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" "$@"
 fi
 

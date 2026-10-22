@@ -28,11 +28,19 @@ fn merged_vars(stack: &Stack) -> Result<BTreeMap<String, String>, String> {
             name = Some(unquote(rest.trim()).to_string());
             continue;
         }
-        if let Some(rest) = trimmed.strip_prefix("value:") {
-            if let Some(current) = name.take() {
-                out.insert(current, unquote(rest.trim()).to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix("value:")
+            && let Some(current) = name.take()
+        {
+            out.insert(current, unquote(rest.trim()).to_string());
         }
+    }
+    // 文件在但一条也没解出来 = 形状变了（改名 / 截断 / 换成别的 YAML 风格）。
+    // 不能静默返回空表：下面的检查会回落到缺省值，于是「什么都没配」看起来像「配对了」。
+    if out.is_empty() {
+        return Err(format!(
+            "{} 里没有任何 `- name:` / `value:` 条目（格式不认识）",
+            path.display()
+        ));
     }
     Ok(out)
 }
@@ -86,6 +94,11 @@ fn locate_key(value: &toml::Value, key: &str, prefix: &str) -> Option<String> {
 
 fn root_str(doc: &toml::Value, key: &str) -> Option<String> {
     doc.as_table()?.get(key)?.as_str().map(str::to_string)
+}
+
+/// 文档根上的原始值（用于判「是不是字符串」）。
+fn root_value<'a>(doc: &'a toml::Value, key: &str) -> Option<&'a toml::Value> {
+    doc.as_table()?.get(key)
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -207,7 +220,36 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
                 .with_hint("模板必须渲染该项：② Agent 包交付缺它就会 fail-closed"),
             ),
             Some(section) if section.is_empty() => {
-                let actual = root_str(&doc, key).unwrap_or_default();
+                let Some(raw) = root_value(&doc, key) else {
+                    out.push(Finding::fail(
+                        code,
+                        format!("{what}读不到值"),
+                        format!("`{key}` 在表结构里但取不到"),
+                    ));
+                    continue;
+                };
+                let Some(actual) = raw.as_str() else {
+                    out.push(Finding::fail(
+                        code,
+                        format!("{what}不是字符串"),
+                        format!("`{key}` 渲染成了非字符串：{raw} —— 模板里少了引号？"),
+                    ));
+                    continue;
+                };
+
+                // gwlinkd 的 cwd 不定：宿主路径必须是绝对的，否则会落到启动目录下。
+                if key == "agent_package_drop_dir" && !Path::new(actual.trim()).is_absolute() {
+                    out.push(
+                        Finding::fail(
+                            code,
+                            format!("{what}不是绝对路径"),
+                            format!("实际 `{actual}`"),
+                        )
+                        .with_hint("init-gwlinkd.sh 会把相对 PACKAGE_DIR 绝对化；别手工改回相对路径"),
+                    );
+                    continue;
+                }
+
                 let actual_path = normalize(Path::new(actual.trim()));
                 let expected_path = normalize(Path::new(&expected));
                 let same = if key == "agent_package_drop_dir" {
@@ -335,24 +377,42 @@ pub fn render_freshness(stack: &Stack) -> Vec<Finding> {
     for &(code, rendered_rel, source_rel) in PAIRS {
         let rendered = stack.at(rendered_rel);
         let source = stack.at(source_rel);
-        let (Some(rendered_at), Some(source_at)) = (modified(&rendered), modified(&source)) else {
-            continue; // 两者都在才判（未部署的组不报）。
-        };
-        if render_is_stale(rendered_at, source_at) {
-            out.push(
-                Finding::fail(
-                    code,
-                    "渲染产物比它的值文件旧",
-                    format!("{rendered_rel} 早于 {source_rel}"),
-                )
-                .with_hint("跑一次 `gops sys localize`（改了值必须重渲才生效）"),
-            );
-        } else {
-            out.push(Finding::ok(
+        let (rendered_at, source_at) = (modified(&rendered), modified(&source));
+        match (rendered_at, source_at) {
+            // 两侧都在：正常判。
+            (Some(rendered_at), Some(source_at)) => {
+                if render_is_stale(rendered_at, source_at) {
+                    out.push(
+                        Finding::fail(
+                            code,
+                            "渲染产物比它的值文件旧",
+                            format!("{rendered_rel} 早于 {source_rel}"),
+                        )
+                        .with_hint("跑一次 `gops sys localize`（改了值必须重渲才生效）"),
+                    );
+                } else {
+                    out.push(Finding::ok(
+                        code,
+                        "渲染产物不早于值文件",
+                        rendered_rel.to_string(),
+                    ));
+                }
+            }
+            // 只有值文件：渲染没生成 → 该跑 localize（不能当成「这个组未部署」而静默跳过）。
+            (None, Some(_)) => out.push(Finding::warn(
                 code,
-                "渲染产物不早于值文件",
+                "值文件在，但渲染产物缺失",
                 rendered_rel.to_string(),
-            ));
+            )
+            .with_hint("跑一次 `gops sys localize`")),
+            // 只有渲染产物：判不了新旧（但说明目录对得上，不必报）。
+            (Some(_), None) => out.push(Finding::ok(
+                code,
+                "无值文件，跳过新鲜度比较",
+                rendered_rel.to_string(),
+            )),
+            // 两侧都没有：这个组未部署，静默跳过。
+            (None, None) => {}
         }
     }
     out
@@ -368,6 +428,8 @@ pub fn render_placeholders(stack: &Stack) -> Vec<Finding> {
         "configs/gateway/wist-gateway.toml",
         "configs/gateway/wist-gateway.value.json",
         "configs/web/nginx.conf",
+        // 接口层（现场态）：对外基址 / 客户归属 —— 现场没填过就是模板占位值。
+        "identity/gateway/public/wist-gateway-pub.toml",
     ];
     const PATTERNS: &[&str] = &["example.com", "CHANGEME", "changeme"];
 
@@ -388,6 +450,15 @@ pub fn render_placeholders(stack: &Stack) -> Vec<Finding> {
     }
 
     if hits.is_empty() {
+        // 一个文件都没扫到 = `--root` 指错了，或配置根本还没渲染。不能报绿：
+        // 那会让「什么都没查」看起来像「都没问题」。
+        if scanned == 0 {
+            return vec![Finding::warn(
+                "render.placeholder",
+                "找不到任何渲染产物，跳过占位值检查",
+                "configs/ 下没有可读的配置文件（--root 指对了吗？跑过 localize 吗？）",
+            )];
+        }
         return vec![Finding::ok(
             "render.placeholder",
             "渲染产物里没有占位值",
@@ -439,6 +510,17 @@ pub fn secret_perms(stack: &Stack) -> Vec<Finding> {
                         )
                         .with_hint("改成 640（容器靠属组读，不需要放开 world 位）"),
                     );
+                } else if mode & 0o020 != 0 {
+                    // 属组可写 = 同组任何人都能改写 admin token。不能阻断（有些现场靠 660
+                    // 让容器属组写入），但必须提示。
+                    out.push(
+                        Finding::warn(
+                            "secret.file_mode",
+                            "栈根密钥对属组可写",
+                            format!(".wist/sec-value.yml 权限 {:o}", mode),
+                        )
+                        .with_hint("若不需要属组写入，收到 640"),
+                    );
                 } else {
                     out.push(Finding::ok(
                         "secret.file_mode",
@@ -447,11 +529,15 @@ pub fn secret_perms(stack: &Stack) -> Vec<Finding> {
                     ));
                 }
             }
-            Err(_) => out.push(Finding::warn(
-                "secret.file_mode",
-                "找不到栈根密钥文件",
-                format!("{}", secret.display()),
-            )),
+            // 缺这个文件 = 网关装载密钥失败（fail-closed），这是真问题，不是提示。
+            Err(_) => out.push(
+                Finding::fail(
+                    "secret.file_mode",
+                    "找不到栈根密钥文件",
+                    format!("{}（网关装载密钥会 fail-closed）", secret.display()),
+                )
+                .with_hint("跑一次 `gops sys localize`（init-gateway.sh 会生成它）"),
+            ),
         }
 
         // 私钥：扫 identity/，按内容识别（不靠文件名猜）。
@@ -542,7 +628,7 @@ pub fn package_pairing(stack: &Stack) -> Vec<Finding> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if name.starts_with("wist-knowledge-") && name.ends_with(".tar.gz") {
+        if name.starts_with("wist-knowledge-") && name.ends_with(".tar.gz") && path.is_file() {
             tarballs.push((
                 modified(&path).unwrap_or(SystemTime::UNIX_EPOCH),
                 path.clone(),
@@ -560,7 +646,7 @@ pub fn package_pairing(stack: &Stack) -> Vec<Finding> {
         )];
     }
 
-    tarballs.sort_by(|a, b| b.0.cmp(&a.0));
+    tarballs.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     let signing = knowledge_signing_configured(stack);
     let mut out = Vec::new();
 
@@ -828,8 +914,8 @@ name = \"galaxy-flow\"
             .find(|finding| finding.code == "package.knowledge_signature")
             .expect("应有配对检查");
         assert_eq!(finding.status, Status::Fail, "{finding:#?}");
-
-        // 补上签名后应转 OK。
+        // 缺签名是「不阻断」的：它不该拦下升级。
+        assert!(!finding.blocking, "缺签名不应阻断升级");
         tree.write("packages/wist-knowledge-0.4.0.tar.gz.sig", "c2ln");
         let findings = package_pairing(&tree.stack());
         let finding = findings
@@ -837,5 +923,185 @@ name = \"galaxy-flow\"
             .find(|finding| finding.code == "package.knowledge_signature")
             .expect("应有配对检查");
         assert_eq!(finding.status, Status::Ok, "{finding:#?}");
+    }
+
+    // ── 第一轮审阅补的边界 ──────────────────────────────────────────────
+
+    #[test]
+    fn merged_vars_with_an_unknown_shape_fails_loudly() {
+        let tree = Tree::new("vars-shape");
+        // 文件在，但不是 gops 的 `- name:/value:` 形状（改名 / 截断 / 换了 YAML 风格）。
+        tree.write("sys/merged_vars.yml", "variables:\n  PACKAGE_DIR: ./packages\n");
+        tree.write("configs/gwlinkd/gwlinkd.toml", "agent_package_drop_dir = \"/tmp/a\"\n");
+
+        let findings = package_dir_consistency(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.vars")
+            .expect("形状不认识时必须有 package.vars");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(finding.detail.contains("格式不认识"), "{}", finding.detail);
+    }
+
+    #[test]
+    fn flags_a_drop_dir_that_is_not_a_string() {
+        let tree = Tree::new("non-string");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        // 模板里少了引号 —— 渲染出来就是布尔/整数，gwlinkd 反序列化直接失败。
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "agent_package_drop_dir = true\nagent_package_container_dir = \"/packages/agents\"\n",
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.drop_dir")
+            .expect("应有 package.drop_dir");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(
+            finding.title.contains("不是字符串") && finding.detail.contains("true"),
+            "{finding:#?}"
+        );
+    }
+
+    #[test]
+    fn flags_a_relative_drop_dir() {
+        let tree = Tree::new("relative-drop");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "agent_package_drop_dir = \"packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.drop_dir")
+            .expect("应有 package.drop_dir");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(finding.title.contains("绝对路径"), "{finding:#?}");
+    }
+
+    #[test]
+    fn accepts_a_render_that_is_newer_than_its_value_file() {
+        let tree = Tree::new("fresh-render");
+        tree.write("configs/gwlinkd/gwlinkd.value.json", "{}\n");
+        tree.write("configs/gwlinkd/gwlinkd.toml", "state_dir = \"/tmp\"\n");
+
+        let findings = render_freshness(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "render.freshness.gwlinkd")
+            .expect("应有新鲜度检查");
+        assert_eq!(finding.status, Status::Ok, "{finding:#?}");
+    }
+
+    #[test]
+    fn reports_history_gaps_and_orphan_signatures() {
+        let tree = Tree::new("pairing-history");
+        tree.write(
+            "identity/gateway/public/knowledge-signing.pub.pem",
+            "-----BEGIN PUBLIC KEY-----\n",
+        );
+        tree.write("packages/wist-knowledge-0.3.0.tar.gz", "old");
+        tree.write("packages/wist-knowledge-0.4.0.tar.gz", "new");
+        tree.write("packages/wist-knowledge-0.4.0.tar.gz.sig", "c2ln");
+        // 孤立的 .sig：对应的包已经不在了。
+        tree.write("packages/wist-knowledge-0.2.0.tar.gz.sig", "c2ln");
+
+        let findings = package_pairing(&tree.stack());
+        let by = |code: &str| {
+            findings
+                .iter()
+                .find(|finding| finding.code == code)
+                .unwrap_or_else(|| panic!("缺 {code}：{findings:#?}"))
+        };
+        assert_eq!(by("package.knowledge_signature").status, Status::Ok);
+        assert_eq!(
+            by("package.knowledge_signature.history").status,
+            Status::Warn
+        );
+        assert_eq!(
+            by("package.knowledge_signature.orphan").status,
+            Status::Warn
+        );
+    }
+
+    #[test]
+    fn flags_a_missing_root_secret_file() {
+        let tree = Tree::new("no-secret");
+        let findings = secret_perms(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "secret.file_mode")
+            .expect("应有密钥权限检查");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+        assert!(finding.blocking, "缺密钥文件会让网关 fail-closed，应阻断");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grades_root_secret_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = Tree::new("secret-modes");
+        let path = tree.write(".wist/sec-value.yml", "admin_token: x\n");
+        let check = |mode: u32| {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            secret_perms(&tree.stack())
+                .into_iter()
+                .find(|finding| finding.code == "secret.file_mode")
+                .expect("应有密钥权限检查")
+        };
+
+        assert_eq!(check(0o600).status, Status::Ok);
+        assert_eq!(check(0o640).status, Status::Ok);
+        assert_eq!(check(0o644).status, Status::Fail, "world 可读");
+        assert_eq!(check(0o660).status, Status::Warn, "属组可写只提示");
+    }
+
+    // ── 第三轮审阅补的「假绿」用例 ────────────────────────────────────
+
+    #[test]
+    fn warns_instead_of_passing_when_nothing_was_scanned() {
+        let tree = Tree::new("nothing-scanned");
+        let findings = render_placeholders(&tree.stack());
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+        assert!(findings[0].title.contains("跳过"), "{findings:#?}");
+    }
+
+    #[test]
+    fn warns_when_the_value_file_exists_but_the_render_is_missing() {
+        let tree = Tree::new("missing-render");
+        tree.write("configs/gwlinkd/gwlinkd.value.json", "{}\n");
+
+        let findings = render_freshness(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "render.freshness.gwlinkd")
+            .expect("值文件在时应报一项");
+        assert_eq!(finding.status, Status::Warn, "{finding:#?}");
+        assert!(finding.title.contains("缺失"), "{finding:#?}");
+    }
+
+    #[test]
+    fn scans_the_site_face_file_for_placeholders() {
+        let tree = Tree::new("pub-placeholder");
+        tree.write(
+            "identity/gateway/public/wist-gateway-pub.toml",
+            "public_base_url = \"https://gw.example.com\"\n",
+        );
+
+        let findings = render_placeholders(&tree.stack());
+        let finding = &findings[0];
+        assert_eq!(finding.status, Status::Fail);
+        assert!(
+            finding.detail.contains("wist-gateway-pub.toml"),
+            "{}",
+            finding.detail
+        );
     }
 }

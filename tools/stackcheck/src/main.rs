@@ -29,8 +29,8 @@ wist-stackcheck — 栈级配置检查
   -h, --help       本帮助
 
 退出码：
+  --gate → 0（无阻断类 FAIL）/ 2（有）；**优先于**下面的结果文件规则；
   写了结果文件（diagnose 模式）→ 始终 0，结论看 checks[]；
-  --gate → 0（无阻断类 FAIL）/ 2（有）；
   否则 → 0 全好 / 1 有 WARN / 2 有 FAIL。
 ";
 
@@ -58,24 +58,28 @@ fn main() -> ExitCode {
 
     // 闸门模式（`flow localize`）：只拦「阻断类」失败 —— WARN 与「失败但不阻断」
     // 都不应该让一次升级/部署停下来。
-    let gate_verdict = if has_blocking_failure(&findings) {
-        Status::Fail
-    } else {
-        Status::Ok
-    };
-
     let Some(path) = &args.result else {
-        return ExitCode::from(if args.gate {
-            gate_verdict.exit_code()
-        } else {
-            verdict.exit_code()
-        });
+        return ExitCode::from(exit_code_for(args.gate, false, &findings));
     };
     if let Err(err) = write_result(path, &to_json(&findings)) {
         eprintln!("写结果文件失败 {}：{err}", path.display());
         return ExitCode::from(2);
     }
-    ExitCode::SUCCESS
+    ExitCode::from(exit_code_for(args.gate, true, &findings))
+}
+
+/// 退出码优先级：**闸门 > 结果文件 > 严重度**。
+///
+/// 闸门放第一位是必须的：如果环境里恰好有 `GOPS_DIAGNOSE_RESULT`（或调用方同时传了
+/// `--result`），「结果模式始终退 0」会把守门彻底绕过——那时 localize 永远是绿的。
+fn exit_code_for(gate: bool, has_result: bool, findings: &[Finding]) -> u8 {
+    if gate {
+        return if has_blocking_failure(findings) { 2 } else { 0 };
+    }
+    if has_result {
+        return 0;
+    }
+    worst(findings).exit_code()
 }
 
 /// 写 Flow Result v1；文件已存在时**追加** `checks[]`。
@@ -84,14 +88,21 @@ fn main() -> ExitCode {
 /// （wparse 漂移、栈级配置…）。谁都不该默默覆盖前面那份，所以这里做追加：
 /// 先读旧 `checks`，再接上自己的。旧文件不是合法 JSON 时告警后重写（不静默丢数据）。
 fn write_result(path: &std::path::Path, mine: &serde_json::Value) -> std::io::Result<()> {
+    // 保留旧文件里的**其他顶层字段**（schema_version / source / 以后新增的），只换 `checks`。
+    let mut doc = serde_json::Map::new();
     let mut checks: Vec<serde_json::Value> = Vec::new();
+
     if let Ok(text) = std::fs::read_to_string(path)
         && !text.trim().is_empty()
     {
         match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(existing) => {
-                if let Some(items) = existing.get("checks").and_then(|value| value.as_array()) {
-                    checks.extend(items.iter().cloned());
+                if let Some(object) = existing.as_object() {
+                    if let Some(items) = object.get("checks").and_then(|value| value.as_array()) {
+                        checks.extend(items.iter().cloned());
+                    }
+                    doc = object.clone();
+                    doc.remove("checks");
                 }
             }
             Err(err) => eprintln!(
@@ -100,14 +111,33 @@ fn write_result(path: &std::path::Path, mine: &serde_json::Value) -> std::io::Re
             ),
         }
     }
+
     if let Some(items) = mine.get("checks").and_then(|value| value.as_array()) {
-        checks.extend(items.iter().cloned());
+        // gops 对**同一次运行内重复的 code** 直接拒收整份结果文件，所以这里去重：
+        // 已经报过的 code 不再追加（同一份体检里重复报也无信息量）。
+        let mut seen: std::collections::HashSet<String> = checks
+            .iter()
+            .filter_map(|check| check.get("code").and_then(|value| value.as_str()))
+            .map(str::to_string)
+            .collect();
+        for item in items {
+            let code = item.get("code").and_then(|value| value.as_str());
+            match code {
+                Some(code) if !seen.insert(code.to_string()) => {
+                    eprintln!("提示：code={code} 已存在，跳过一条重复结果");
+                }
+                _ => checks.push(item.clone()),
+            }
+        }
     }
-    let merged = serde_json::json!({
-        "schema_version": "1",
-        "source": "diagnose",
-        "checks": checks,
-    });
+
+    doc.entry("schema_version".to_string())
+        .or_insert_with(|| serde_json::json!("1"));
+    doc.entry("source".to_string())
+        .or_insert_with(|| serde_json::json!("diagnose"));
+    doc.insert("checks".to_string(), serde_json::Value::Array(checks));
+
+    let merged = serde_json::Value::Object(doc);
     std::fs::write(path, format!("{merged}\n"))
 }
 
@@ -174,6 +204,9 @@ fn to_json(findings: &[Finding]) -> serde_json::Value {
             serde_json::json!({
                 "code": finding.code,
                 "status": finding.status.as_str(),
+                // `blocking=false`：该修，但不该拦住升级/启动。
+                // gops 按 key 读、不认识就忽略，所以加字段是安全的。
+                "blocking": finding.blocking,
                 "title": finding.title,
                 "detail": finding.detail,
                 "hint": finding.hint,
@@ -249,6 +282,61 @@ mod tests {
     #[test]
     fn rejects_unknown_flag() {
         assert!(parse(&["--nope"]).is_err());
+    }
+
+    #[test]
+    fn gate_takes_precedence_over_result_mode() {
+        use wist_stackcheck::{Finding, Status};
+
+        let hard = vec![Finding::fail("package.drop_dir", "t", "")];
+        let soft = vec![
+            Finding::fail("package.knowledge_signature", "t", "").non_blocking(),
+            Finding::warn("package.knowledge_signature.history", "t", ""),
+        ];
+
+        // 同时有结果文件时，闸门不能被「结果模式退 0」绕过。
+        assert_eq!(exit_code_for(true, true, &hard), 2);
+        assert_eq!(exit_code_for(true, true, &soft), 0);
+        // 结果模式（diagnose）：总是 0，结论在 checks[]。
+        assert_eq!(exit_code_for(false, true, &hard), 0);
+        // 普通模式：严重度即退出码。
+        assert_eq!(exit_code_for(false, false, &hard), Status::Fail.exit_code());
+        assert_eq!(exit_code_for(false, false, &soft), Status::Fail.exit_code());
+    }
+
+    #[test]
+    fn write_result_drops_duplicate_codes() {
+        let dir = std::env::temp_dir().join(format!(
+            "wist-stackcheck-dedup-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("result.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":"1","source":"diagnose","checks":[{"code":"a","status":"ok","title":"t"}]}"#,
+        )
+        .unwrap();
+
+        let mine = serde_json::json!({
+            "checks": [
+                {"code": "a", "status": "fail", "title": "dup"},
+                {"code": "b", "status": "ok", "title": "new"}
+            ]
+        });
+        write_result(&path, &mine).unwrap();
+
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let codes: Vec<&str> = merged["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|check| check["code"].as_str().unwrap())
+            .collect();
+        // gops 对重复 code 会**整份拒收**，所以重复的必须去掉。
+        assert_eq!(codes, vec!["a", "b"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

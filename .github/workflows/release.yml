@@ -90,6 +90,7 @@ jobs:
             chmod 755 "stage/bin/${triple}/wist-stackcheck"
           done
           # 包内必须真的有三个平台：少一个就会让那部分现场无法体检。
+          [ -d stage/bin ] || { echo "::error::没有 stage/bin（stackcheck 构建产物缺失）"; exit 1; }
           count=$(ls -1 stage/bin | wc -l | tr -d ' ')
           [ "${count}" -ge 3 ] || { echo "::error::stackcheck 只构建出 ${count} 个平台"; exit 1; }
           find stage -type f -exec ls -lh {} \;

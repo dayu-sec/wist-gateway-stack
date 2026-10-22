@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3-alpha] - 2026-10-22
+
+### 变更
+
+- **网关 `v0.19.0-alpha` / 前端 `v0.13.0-alpha`**：采集目录接受「文件族」来源 ——
+  `FileGlob` 的目标可以是绝对路径 + 单层 glob（`*` 不跨目录、`**` 不支持），
+  并可声明 `exclude_globs` 把不该采的文件剔掉；页面同步显示排除项与可采判定。
+- **初始知识库 `0.4.0`**：`audit.log` 改为整文件采集（`linux-audit-log`，8 个 `host_audit_*`
+  由数据面按 `type=` 分派），auth 面加 `path_exists` 门控（Debian 派 `auth.log`、RHEL 派 `secure`，
+  不存在的路径在派活时被裁掉）。
+
+### 升级注意
+
+- **agentd 需 `0.8.0-alpha` 才能采文件族**：旧 agentd 会把 glob 来源如实报成 `unsupported`
+  （不影响其它面）。知识库里靠通配的单元仍是 `draft`，等机队升级验证后再单独发一版目录翻 `active`。
+- 本版目录里没有单元声明 `exclude_globs`，所以**网关不必与目录同版**；将来目录一旦带上排除项，
+  就需要网关 ≥ 0.19。
+- 初始知识库版本变了：`gops sys localize` 会重新下载并覆盖 `configs/gateway/knowledge/initial/`
+  （该目录是生成物，不入库）。
+
 ## [0.2.2-alpha] - 2026-10-22
 
 ### 修复

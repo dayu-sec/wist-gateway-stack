@@ -373,6 +373,9 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
   与 `cloud/wist-gateway` 的扁平命名一致；要保留源路径加 `--keep-path`；换目标用 `--registry`。
 - 默认走 `docker buildx imagetools create`：**不落本地、保留多架构 manifest**（`docker pull/tag/push`
   只推当前宿主那一种架构）；无 buildx 时自动回落 `--method pull`。
+  ⚠ 所以 `--method pull` **必须在现场同架构的机器上跑**：在 Apple Silicon 上推出来的 `warp-parse`
+  只有 arm64，amd64 现场拉到后 `docker run` 直接 `exec format error`（localize 阶段会在
+  `scripts/init-wparse-admin.sh` 上失败并触发整工程回滚）。
 - 推完按脚本末尾提示把 compose 指过来：compose 的三个源前缀 `WIST_SPC` / `WARP_SPC` / `VM_SPC`
   （默认见 `sys/setting/vars.yml`）在 `values/value.yml` 覆盖成 `${TARGET_REGISTRY}` 后 `gops sys localize`
   （tag 不变）。例：VM 撞 Docker Hub 限流时，把 `VM_SPC` 指到 `quay.io/victoriametrics` 即可换源。

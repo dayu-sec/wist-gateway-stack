@@ -104,6 +104,9 @@ mod operators {
     //     还必须在 `docker compose up` **之前**：Docker 会把缺失的挂载源目录建成 root:root，
     //     属主一旦是 root，之后的部署账号就写不动了。
     //     幂等：已对齐时不写盘、也不要任何权限；`gops sys perms --check` 可单独做只读自检。
+    //     这里可以直接写裸 `gops`：gops 拉起 `gx` 时会把自身目录（及 `argv[0]` 所在目录）
+    //     前置进子进程 PATH（非交互场景 gwlinkd / systemd 同理，自 galaxy-ops 2.10.1 起）。
+    //     注意：`${VAR}` 是 GXL 流程变量空间（会被 gx 提前替换），shell 变量要写 `$VAR`。
     gx.cmd ( "gops sys perms --help >/dev/null 2>&1 || { echo '错误：本栈需要 gops >= 2.7（gops sys perms）'; exit 1; }; gops sys perms --apply" );
   }
 

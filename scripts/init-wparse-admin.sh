@@ -22,6 +22,16 @@ LEGACY_TOKEN="${RUN_DIR}/.run/admin_api.token"
 VOLUME="${WPARSE_RUN_VOLUME:-wist-gateway-stack-wparse-run}"
 IMAGE="${WARP_SPC:-ghcr.io/wp-labs}/warp-parse:${WPARSE_TAG:-0.32.1-alpha}"
 
+# 显式按**宿主架构**钉平台：镜像源里可能只有单一架构（如从 Apple Silicon 用 push-images.sh
+# 的 pull 方式推成 arm64-only），本地也可能缓存了异架构的同名 tag。此时 `docker run` 直接
+# `exec format error`，报错完全不指向「镜像架构不对」这个真正原因。
+HOST_PLATFORM=""
+case "$(uname -m)" in
+  x86_64 | amd64) HOST_PLATFORM="linux/amd64" ;;
+  aarch64 | arm64) HOST_PLATFORM="linux/arm64" ;;
+esac
+PLATFORM_ARG="${HOST_PLATFORM:+--platform ${HOST_PLATFORM}}"
+
 note() { echo "  $*"; }
 warn() { echo "  ⚠ $*" >&2; }
 
@@ -53,8 +63,13 @@ if ! docker volume inspect "${VOLUME}" >/dev/null 2>&1; then
 fi
 
 # 命名卷默认 root:root；wparse 以 999 运行，需要可写。
-docker run --rm -u 0:0 -v "${VOLUME}:/run" --entrypoint /bin/sh "${IMAGE}" \
-  -c 'chown 999:999 /run && chmod 2770 /run' >/dev/null
+if ! docker run --rm -u 0:0 ${PLATFORM_ARG} -v "${VOLUME}:/run" --entrypoint /bin/sh "${IMAGE}" \
+  -c 'chown 999:999 /run && chmod 2770 /run' >/dev/null; then
+  warn "运行态命名卷初始化失败：${IMAGE}（宿主平台 ${HOST_PLATFORM:-未知}）"
+  warn "常见原因：该 tag 在镜像源里缺宿主架构（arm64-only 镜像跑在 amd64 宿主）——"
+  warn "  用 ./dev/push-images.sh 重新同步（buildx imagetools 保留多架构），或把 WARP_SPC 指回 ghcr.io/wp-labs"
+  exit 1
+fi
 note "运行态命名卷已对齐 999:999 / 2770：${VOLUME}"
 
 note "WarpParse 管理面：容器 0.0.0.0:19090 + TLS；宿主仅 127.0.0.1:${WPARSE_ADMIN_PORT:-19090}"

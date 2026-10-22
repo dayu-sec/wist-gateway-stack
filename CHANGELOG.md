@@ -5,6 +5,22 @@
 
 ## [未发布]
 
+### 新增
+
+- **`wist-stackcheck`：栈级配置检查器**（`tools/stackcheck` + `scripts/check-stack.sh`）。
+  只查**栈自己生成的东西**，共 5 组 11 条结论：
+  - `package.*`：投放目录 / 容器路径 / compose 挂载三者与 `PACKAGE_DIR` 派生值自洽；
+    **键落在别的 TOML 段**时明确指出真实位置（本次现场故障的判据）；
+  - `render.freshness.*`：渲染产物不得早于它的值文件（改了值没重渲）；
+  - `render.placeholder`：渲染产物里还有 `example.com` 之类占位值；
+  - `secret.*`：栈根密钥与私钥不得对其他用户开放（按内容识别私钥，不靠文件名猜）；
+  - `package.knowledge_signature*`：最新知识库包必须有 `.sig`，历史包缺失只计数。
+  输出对齐 `gops run diagnose` 的 Flow Result v1（`schema_version` + `checks[]`），
+  设了 `GOPS_DIAGNOSE_RESULT` 时始终退出 0（结论在 `checks[]` 里），否则退出码即判定。
+
+  分工：**栈检查器管文件与约定**（模板渲染、挂载、包配对），**组件管自己的键语义**
+  （`deny_unknown_fields` + `diagnose`）—— 只有组件知道键是什么意思。
+
 ### 修复
 
 - **`push-agent-package` 计划必然失败（「未配置 agent_package_drop_dir」）**：

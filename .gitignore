@@ -57,3 +57,9 @@ wist-gateway-identity-*.tar.gz
 .run*
 # 迁移（gops >= 1.4）：模块按目标模型分组
 sys/*/mods
+
+# stackcheck 预编译件（CI 构建后塞进发布包，不入库）
+/bin/*/wist-stackcheck
+
+# stackcheck 构建产物
+/tools/stackcheck/target/

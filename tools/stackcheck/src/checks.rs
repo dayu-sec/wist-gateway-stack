@@ -1,0 +1,839 @@
+//! 五组栈级检查。每组只回答一个问题，输出 `Finding`（Flow Result v1 的 `checks[]`）。
+//!
+//! 判据全部来自**栈自己生成的东西**：`sys/merged_vars.yml`（变量）、`configs/*`（渲染产物）、
+//! `sys/docker-compose.yml`（挂载）、`packages/`（投放区）、`identity/`（密钥）。
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use crate::{Finding, Stack};
+
+// ── 通用工具 ────────────────────────────────────────────────────────────────
+
+/// 读 `sys/merged_vars.yml` 的 `- name: / value:` 对。
+///
+/// 用行扫描而不是引入 YAML 依赖：该文件由 gops 生成、形状固定（`- name: X` 紧接
+/// `  value: Y`）。读不到时返回 `Err` —— 让检查报 FAIL，而不是静默当成「没配」。
+fn merged_vars(stack: &Stack) -> Result<BTreeMap<String, String>, String> {
+    let path = stack.at("sys/merged_vars.yml");
+    let text = fs::read_to_string(&path)
+        .map_err(|err| format!("读不到 {}：{err}", path.display()))?;
+    let mut out = BTreeMap::new();
+    let mut name: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("- name:") {
+            name = Some(unquote(rest.trim()).to_string());
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("value:") {
+            if let Some(current) = name.take() {
+                out.insert(current, unquote(rest.trim()).to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn unquote(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
+            || (bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"'))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
+/// 在 TOML 文档里定位某个键，返回它**所在段的路径**（文档根 = 空串）。
+///
+/// 这是「键被渲染进错误的段」这类故障的判据：TOML 里段头（`[table]` / `[[array]]`）之后
+/// 的键归属该段，写在 `[[upgrade.component]]` 之后就会变成最后一个元素的字段，
+/// 组件在文档根读到的是 `None`。
+fn locate_key(value: &toml::Value, key: &str, prefix: &str) -> Option<String> {
+    match value {
+        toml::Value::Table(table) => {
+            if table.contains_key(key) {
+                return Some(prefix.to_string());
+            }
+            for (name, child) in table {
+                let child_prefix = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{prefix}.{name}")
+                };
+                if let Some(hit) = locate_key(child, key, &child_prefix) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        toml::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                if let Some(hit) = locate_key(child, key, &format!("{prefix}[{index}]")) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn root_str(doc: &toml::Value, key: &str) -> Option<String> {
+    doc.as_table()?.get(key)?.as_str().map(str::to_string)
+}
+
+fn modified(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).ok().and_then(|meta| meta.modified().ok())
+}
+
+/// 渲染产物早于它的值文件 = 改了值没重渲。
+fn render_is_stale(rendered: SystemTime, source: SystemTime) -> bool {
+    rendered < source
+}
+
+fn trim_slash(value: &str) -> &str {
+    value.trim_end_matches('/')
+}
+
+/// 词法归一：去掉 `.` 分量并折叠 `..`。
+///
+/// 不能用 `canonicalize`：被检查的路径可能还不存在（现场首次部署），而且它会把符号链接
+/// 解析成真身 —— 而这里要比的是「配置里写的那个路径」。
+fn normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+// ── 1. 投放目录 / 挂载自洽 ─────────────────────────────────────────────────
+
+/// `PACKAGE_DIR` ↔ compose 挂载 ↔ `agent_package_container_dir` ↔ `agent_package_drop_dir`
+/// 四者必须指向同一份目录，且交付区是它的 `agents` 子目录（独占：gwlinkd 交付后按 mtime
+/// 只留最新 N 份且不区分类型，与知识库包混放会把后者清掉）。
+pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
+    let mut out = Vec::new();
+
+    let vars = match merged_vars(stack) {
+        Ok(vars) => vars,
+        Err(err) => {
+            out.push(
+                Finding::fail("package.vars", "读不到合并后的系统变量", err)
+                    .with_hint("先跑一次 `gops sys update`（生成 sys/merged_vars.yml）再检查"),
+            );
+            return out;
+        }
+    };
+
+    let package_dir = vars
+        .get("PACKAGE_DIR")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("./packages");
+    let container_base = vars
+        .get("GWLINKD_AGENT_PACKAGE_CONTAINER_DIR")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("/packages");
+
+    let host_base = if Path::new(package_dir).is_absolute() {
+        PathBuf::from(package_dir)
+    } else {
+        stack.root.join(package_dir)
+    };
+    let expected_drop = normalize(&host_base.join("agents"));
+    let expected_drop = expected_drop.display().to_string();
+    let expected_container = format!("{}/agents", trim_slash(container_base));
+
+    let toml_path = stack.at("configs/gwlinkd/gwlinkd.toml");
+    let doc: toml::Value = match fs::read_to_string(&toml_path) {
+        Ok(text) => match toml::from_str(&text) {
+            Ok(doc) => doc,
+            Err(err) => {
+                out.push(Finding::fail(
+                    "package.config",
+                    "gwlinkd 主配置无法解析",
+                    format!("{}：{err}", toml_path.display()),
+                ));
+                return out;
+            }
+        },
+        Err(err) => {
+            out.push(Finding::fail(
+                "package.config",
+                "读不到 gwlinkd 主配置",
+                format!("{}：{err}", toml_path.display()),
+            ));
+            return out;
+        }
+    };
+
+    for (code, key, expected, what) in [
+        (
+            "package.drop_dir",
+            "agent_package_drop_dir",
+            expected_drop.clone(),
+            "宿主投放目录",
+        ),
+        (
+            "package.container_dir",
+            "agent_package_container_dir",
+            expected_container.clone(),
+            "容器内投放路径",
+        ),
+    ] {
+        match locate_key(&doc, key, "") {
+            None => out.push(
+                Finding::fail(
+                    code,
+                    format!("{what}未配置"),
+                    format!("{} 里找不到 `{key}`", toml_path.display()),
+                )
+                .with_hint("模板必须渲染该项：② Agent 包交付缺它就会 fail-closed"),
+            ),
+            Some(section) if section.is_empty() => {
+                let actual = root_str(&doc, key).unwrap_or_default();
+                let actual_path = normalize(Path::new(actual.trim()));
+                let expected_path = normalize(Path::new(&expected));
+                let same = if key == "agent_package_drop_dir" {
+                    actual_path == expected_path
+                } else {
+                    trim_slash(actual.trim()) == trim_slash(&expected)
+                };
+                if same {
+                    out.push(Finding::ok(
+                        code,
+                        format!("{what}与 PACKAGE_DIR 派生值一致"),
+                        actual,
+                    ));
+                } else {
+                    out.push(
+                        Finding::fail(
+                            code,
+                            format!("{what}与 PACKAGE_DIR 派生值不一致"),
+                            format!("实际 `{actual}`，期望 `{expected}`"),
+                        )
+                        .with_hint(
+                            "两项由 scripts/init-gwlinkd.sh 从 PACKAGE_DIR / \
+                             GWLINKD_AGENT_PACKAGE_CONTAINER_DIR 派生，别手工错位",
+                        ),
+                    );
+                }
+            }
+            Some(section) => out.push(
+                Finding::fail(
+                    code,
+                    format!("{what}落在了错误的 TOML 段"),
+                    format!(
+                        "`{key}` 在 `{section}` 里，不在文档根 —— gwlinkd 在根读到的是 None"
+                    ),
+                )
+                .with_hint("把它渲染到任何段头（[table] / [[array]]）之前"),
+            ),
+        }
+    }
+
+    // compose 挂载：容器路径必须与 GWLINKD_AGENT_PACKAGE_CONTAINER_DIR 同源。
+    let compose_path = stack.at("sys/docker-compose.yml");
+    match fs::read_to_string(&compose_path) {
+        Ok(compose) => match package_mount_target(&compose) {
+            Some(target) if trim_slash(&target) == trim_slash(container_base) => out.push(
+                Finding::ok(
+                    "package.compose_mount",
+                    "compose 已把投放目录挂到容器",
+                    format!("${{PACKAGE_DIR}}:{target}"),
+                ),
+            ),
+            Some(target) => out.push(
+                Finding::fail(
+                    "package.compose_mount",
+                    "compose 挂载点与配置不一致",
+                    format!(
+                        "compose 挂 `{target}`，配置用 `{}`",
+                        trim_slash(container_base)
+                    ),
+                )
+                .with_hint("两侧都由 GWLINKD_AGENT_PACKAGE_CONTAINER_DIR 派生"),
+            ),
+            None => out.push(
+                Finding::fail(
+                    "package.compose_mount",
+                    "compose 里找不到投放目录挂载",
+                    format!(
+                        "{} 里没有 `${{PACKAGE_DIR}}:…` 的 volume",
+                        compose_path.display()
+                    ),
+                )
+                .with_hint("网关容器读不到宿主路径，本地包必须先落到被挂进来的目录"),
+            ),
+        },
+        Err(err) => out.push(Finding::warn(
+            "package.compose_mount",
+            "读不到 compose 文件，跳过挂载检查",
+            format!("{}：{err}", compose_path.display()),
+        )),
+    }
+
+    out
+}
+
+/// 从 compose 文本里取 `${PACKAGE_DIR}:<target>[:ro]` 的 target。
+fn package_mount_target(compose: &str) -> Option<String> {
+    for line in compose.lines() {
+        let Some(rest) = line.trim().strip_prefix("- ") else {
+            continue;
+        };
+        let Some((src, dst)) = rest.split_once(':') else {
+            continue;
+        };
+        if !src.contains("PACKAGE_DIR") {
+            continue;
+        }
+        return Some(dst.split(':').next().unwrap_or(dst).trim().to_string());
+    }
+    None
+}
+
+// ── 2. 渲染产物新鲜度 ──────────────────────────────────────────────────────
+
+/// 渲染产物（`gx.tpl` 的输出）必须不早于它的值文件 —— 否则就是「改了值没重渲」。
+pub fn render_freshness(stack: &Stack) -> Vec<Finding> {
+    const PAIRS: &[(&str, &str, &str)] = &[
+        (
+            "render.freshness.gwlinkd",
+            "configs/gwlinkd/gwlinkd.toml",
+            "configs/gwlinkd/gwlinkd.value.json",
+        ),
+        (
+            "render.freshness.gateway",
+            "configs/gateway/wist-gateway.toml",
+            "configs/gateway/wist-gateway.value.json",
+        ),
+        (
+            "render.freshness.web",
+            "configs/web/nginx.conf",
+            "configs/web/nginx.value.json",
+        ),
+    ];
+
+    let mut out = Vec::new();
+    for &(code, rendered_rel, source_rel) in PAIRS {
+        let rendered = stack.at(rendered_rel);
+        let source = stack.at(source_rel);
+        let (Some(rendered_at), Some(source_at)) = (modified(&rendered), modified(&source)) else {
+            continue; // 两者都在才判（未部署的组不报）。
+        };
+        if render_is_stale(rendered_at, source_at) {
+            out.push(
+                Finding::fail(
+                    code,
+                    "渲染产物比它的值文件旧",
+                    format!("{rendered_rel} 早于 {source_rel}"),
+                )
+                .with_hint("跑一次 `gops sys localize`（改了值必须重渲才生效）"),
+            );
+        } else {
+            out.push(Finding::ok(
+                code,
+                "渲染产物不早于值文件",
+                rendered_rel.to_string(),
+            ));
+        }
+    }
+    out
+}
+
+// ── 3. 占位符 ──────────────────────────────────────────────────────────────
+
+/// 渲染产物里不该留占位值（`example.com` 之类）—— 否则脚本会拿它当真值去连。
+pub fn render_placeholders(stack: &Stack) -> Vec<Finding> {
+    const FILES: &[&str] = &[
+        "configs/gwlinkd/gwlinkd.toml",
+        "configs/gwlinkd/gwlinkd.value.json",
+        "configs/gateway/wist-gateway.toml",
+        "configs/gateway/wist-gateway.value.json",
+        "configs/web/nginx.conf",
+    ];
+    const PATTERNS: &[&str] = &["example.com", "CHANGEME", "changeme"];
+
+    let mut hits = Vec::new();
+    let mut scanned = 0usize;
+    for rel in FILES {
+        let Ok(text) = fs::read_to_string(stack.at(rel)) else {
+            continue;
+        };
+        scanned += 1;
+        for (index, line) in text.lines().enumerate() {
+            for pattern in PATTERNS {
+                if line.contains(pattern) {
+                    hits.push(format!("{rel}:{}: {pattern}", index + 1));
+                }
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        return vec![Finding::ok(
+            "render.placeholder",
+            "渲染产物里没有占位值",
+            format!("扫描 {scanned} 个文件"),
+        )];
+    }
+    let shown = hits.iter().take(10).cloned().collect::<Vec<_>>().join("；");
+    vec![
+        Finding::fail(
+            "render.placeholder",
+            "渲染产物里还有占位值",
+            format!("{} 处：{shown}", hits.len()),
+        )
+        .with_hint("把 WEB_DOMAIN 等站点值写进 values/ 后重渲；占位值会让脚本连到不存在的域名"),
+    ]
+}
+
+// ── 4. 密钥文件权限 ────────────────────────────────────────────────────────
+
+/// 栈根密钥与私钥不能被「其他用户」读到。权限位语义各家不同，这里只看 world 位。
+pub fn secret_perms(stack: &Stack) -> Vec<Finding> {
+    #[cfg(not(unix))]
+    {
+        let _ = stack;
+        return vec![Finding::ok(
+            "secret.file_mode",
+            "非 unix 平台，跳过权限检查",
+            "",
+        )];
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut out = Vec::new();
+
+        // 栈根密钥文件（含 admin token）。
+        let secret = stack.at(".wist/sec-value.yml");
+        match fs::metadata(&secret) {
+            Ok(meta) => {
+                let mode = meta.permissions().mode() & 0o777;
+                if mode & 0o007 != 0 {
+                    out.push(
+                        Finding::fail(
+                            "secret.file_mode",
+                            "栈根密钥对其他用户可读",
+                            format!(".wist/sec-value.yml 权限 {:o}（含 admin token）", mode),
+                        )
+                        .with_hint("改成 640（容器靠属组读，不需要放开 world 位）"),
+                    );
+                } else {
+                    out.push(Finding::ok(
+                        "secret.file_mode",
+                        "栈根密钥权限正常",
+                        format!("{:o}", mode),
+                    ));
+                }
+            }
+            Err(_) => out.push(Finding::warn(
+                "secret.file_mode",
+                "找不到栈根密钥文件",
+                format!("{}", secret.display()),
+            )),
+        }
+
+        // 私钥：扫 identity/，按内容识别（不靠文件名猜）。
+        let mut files = Vec::new();
+        walk_files(&stack.at("identity"), 5, &mut files);
+        let mut leaked = Vec::new();
+        let mut checked = 0usize;
+        for path in files {
+            let Ok(meta) = fs::metadata(&path) else {
+                continue;
+            };
+            if meta.len() > 512 * 1024 {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if !text.contains("PRIVATE KEY") {
+                continue;
+            }
+            checked += 1;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode & 0o007 != 0 {
+                leaked.push(format!(
+                    "{}（{:o}）",
+                    path.strip_prefix(&stack.root).unwrap_or(&path).display(),
+                    mode
+                ));
+            }
+        }
+
+        if leaked.is_empty() {
+            out.push(Finding::ok(
+                "secret.private_key_mode",
+                "私钥文件不对其他用户开放",
+                format!("检查 {checked} 个私钥文件"),
+            ));
+        } else {
+            out.push(
+                Finding::fail(
+                    "secret.private_key_mode",
+                    "私钥对其他用户可读",
+                    leaked.join("；"),
+                )
+                .with_hint("私钥应为 600/640；world 位一律收回"),
+            );
+        }
+
+        out
+    }
+}
+
+fn walk_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_files(&path, depth - 1, out);
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+}
+
+// ── 5. 知识库包与签名配对 ──────────────────────────────────────────────────
+
+/// 配了验签公钥时，**最新**那个知识库包必须有同名 `.sig` —— 否则导入会在用到时才 422。
+/// 历史包的缺失只计数（不报），因为它们本来就不再被重放。
+pub fn package_pairing(stack: &Stack) -> Vec<Finding> {
+    let dir = stack.at("packages");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return vec![Finding::ok(
+            "package.knowledge_signature",
+            "没有投放目录，跳过包配对检查",
+            dir.display().to_string(),
+        )];
+    };
+
+    let mut tarballs: Vec<(SystemTime, PathBuf)> = Vec::new();
+    let mut sigs: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with("wist-knowledge-") && name.ends_with(".tar.gz") {
+            tarballs.push((
+                modified(&path).unwrap_or(SystemTime::UNIX_EPOCH),
+                path.clone(),
+            ));
+        } else if name.ends_with(".sig") {
+            sigs.push(path);
+        }
+    }
+
+    if tarballs.is_empty() {
+        return vec![Finding::ok(
+            "package.knowledge_signature",
+            "投放目录里没有知识库包",
+            dir.display().to_string(),
+        )];
+    }
+
+    tarballs.sort_by(|a, b| b.0.cmp(&a.0));
+    let signing = knowledge_signing_configured(stack);
+    let mut out = Vec::new();
+
+    let (_, newest) = &tarballs[0];
+    let newest_name = newest
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let newest_sig = newest.with_file_name(format!("{newest_name}.sig"));
+
+    if !signing {
+        out.push(Finding::ok(
+            "package.knowledge_signature",
+            "未配置知识库验签公钥，签名非必需",
+            newest_name.to_string(),
+        ));
+    } else if newest_sig.is_file() {
+        out.push(Finding::ok(
+            "package.knowledge_signature",
+            "最新知识库包有签名",
+            format!("{newest_name}.sig"),
+        ));
+    } else {
+        out.push(
+            Finding::fail(
+                "package.knowledge_signature",
+                "最新知识库包缺签名",
+                format!("{} 旁边没有 .sig（导入会 422 package_signature_invalid）", newest_name),
+            )
+            .with_hint("把发布侧的 *.tar.gz.sig 一起放进 packages/；签名是 base64 文本"),
+        );
+    }
+
+    let missing_old = tarballs
+        .iter()
+        .skip(1)
+        .filter(|(_, path)| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| !path.with_file_name(format!("{name}.sig")).is_file())
+                .unwrap_or(false)
+        })
+        .count();
+    if signing && missing_old > 0 {
+        out.push(Finding::warn(
+            "package.knowledge_signature.history",
+            "历史知识库包缺签名",
+            format!("{missing_old} 个旧包没有 .sig（不影响已生效内容）"),
+        ));
+    }
+
+    let orphans: Vec<String> = sigs
+        .iter()
+        .filter(|sig| {
+            sig.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_suffix(".sig"))
+                .map(|base| !dir.join(base).is_file())
+                .unwrap_or(false)
+        })
+        .map(|sig| {
+            sig.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    if !orphans.is_empty() {
+        out.push(Finding::warn(
+            "package.knowledge_signature.orphan",
+            "有 .sig 找不到对应的包",
+            orphans.join("、"),
+        ));
+    }
+
+    out
+}
+
+fn knowledge_signing_configured(stack: &Stack) -> bool {
+    if stack
+        .at("identity/gateway/public/knowledge-signing.pub.pem")
+        .is_file()
+    {
+        return true;
+    }
+    let path = stack.at("configs/gateway/wist-gateway.toml");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(doc) = toml::from_str::<toml::Value>(&text) else {
+        return false;
+    };
+    root_str(&doc, "knowledge_signing_pubkey").is_some_and(|value| !value.trim().is_empty())
+}
+
+// ── 测试 ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::Status;
+
+    /// 临时栈根；`Drop` 时清理。
+    struct Tree {
+        root: PathBuf,
+    }
+
+    impl Tree {
+        fn new(tag: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "wist-stackcheck-{}-{tag}-{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn write(&self, rel: &str, body: &str) -> PathBuf {
+            let path = self.root.join(rel);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&path, body).unwrap();
+            path
+        }
+
+        fn stack(&self) -> Stack {
+            Stack::new(&self.root)
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    const VARS: &str = "\
+- name: PACKAGE_DIR
+  value: ./packages
+- name: GWLINKD_AGENT_PACKAGE_CONTAINER_DIR
+  value: /packages
+";
+
+    const COMPOSE: &str = "\
+services:
+  gateway:
+    volumes:
+      - ${PACKAGE_DIR}:/packages:ro
+";
+
+    #[test]
+    fn flags_a_key_that_landed_in_another_toml_section() {
+        let tree = Tree::new("wrong-section");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "\
+state_dir = \"/tmp/state\"
+
+[[upgrade.component]]
+name = \"galaxy-flow\"
+install = \"tool-copy\"
+binary = \"gx\"
+agent_package_drop_dir = \"/tmp/packages/agents\"
+agent_package_container_dir = \"/packages/agents\"
+",
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        let drop = findings
+            .iter()
+            .find(|finding| finding.code == "package.drop_dir")
+            .expect("应有 package.drop_dir");
+        assert_eq!(drop.status, Status::Fail);
+        assert!(
+            drop.detail.contains("upgrade.component[0]"),
+            "detail 应指出真实位置：{}",
+            drop.detail
+        );
+    }
+
+    #[test]
+    fn accepts_the_expected_layout() {
+        let tree = Tree::new("good-layout");
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        let drop = tree.root.join("packages/agents");
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            &format!(
+                "\
+agent_package_drop_dir = \"{}\"
+agent_package_container_dir = \"/packages/agents\"
+
+[[upgrade.component]]
+name = \"galaxy-flow\"
+",
+                drop.display()
+            ),
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        assert!(
+            findings.iter().all(|finding| finding.status == Status::Ok),
+            "{findings:#?}"
+        );
+    }
+
+    #[test]
+    fn flags_a_render_older_than_its_value_file() {
+        let tree = Tree::new("stale-render");
+        let rendered = tree.write("configs/gwlinkd/gwlinkd.toml", "state_dir = \"/tmp\"\n");
+        tree.write("configs/gwlinkd/gwlinkd.value.json", "{\"state_dir\":\"/tmp\"}\n");
+
+        // 把渲染产物拨回一分钟前（值文件保持「现在」）。
+        let file = File::options().write(true).open(&rendered).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
+
+        let findings = render_freshness(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "render.freshness.gwlinkd")
+            .expect("应有 gwlinkd 的新鲜度检查");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+    }
+
+    #[test]
+    fn flags_placeholder_values_in_rendered_config() {
+        let tree = Tree::new("placeholder");
+        tree.write(
+            "configs/gateway/wist-gateway.value.json",
+            "{\"public_base_url\":\"https://gw.example.com\"}\n",
+        );
+
+        let findings = render_placeholders(&tree.stack());
+        let finding = &findings[0];
+        assert_eq!(finding.status, Status::Fail);
+        assert!(finding.detail.contains("example.com"), "{}", finding.detail);
+    }
+
+    #[test]
+    fn flags_the_newest_knowledge_package_without_a_signature() {
+        let tree = Tree::new("pairing");
+        tree.write("packages/wist-knowledge-0.4.0.tar.gz", "dummy");
+        tree.write(
+            "identity/gateway/public/knowledge-signing.pub.pem",
+            "-----BEGIN PUBLIC KEY-----\n",
+        );
+
+        let findings = package_pairing(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.knowledge_signature")
+            .expect("应有配对检查");
+        assert_eq!(finding.status, Status::Fail, "{finding:#?}");
+
+        // 补上签名后应转 OK。
+        tree.write("packages/wist-knowledge-0.4.0.tar.gz.sig", "c2ln");
+        let findings = package_pairing(&tree.stack());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.code == "package.knowledge_signature")
+            .expect("应有配对检查");
+        assert_eq!(finding.status, Status::Ok, "{finding:#?}");
+    }
+}

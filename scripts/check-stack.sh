@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# 栈级配置检查（薄壳）：挑本机 triple 的预编译件；没有就回落到源码现编（开发态）。
+#
+# 为什么不是一段 shell 判据：判据要真解析 TOML/JSON、比路径、看编码位 —— shell 只能靠
+# sed 正则，抓空还不报错（这正是它要防的那类故障）。
+#
+# 用法：
+#   scripts/check-stack.sh [--format text|json] [--result <文件>]
+#
+# 退出码：0 全好 / 1 有 WARN / 2 有 FAIL。
+# 例外：由 `gops run diagnose` 调用（设置了 GOPS_DIAGNOSE_RESULT）时始终 0 ——
+#       结论写在结果文件的 checks[] 里，不该让流程中断。
+#
+# **找不到预编译件必须失败**：静默跳过等于检查没做，比不检查更危险。
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-aarch64 | Linux-arm64) triple="aarch64-unknown-linux-musl" ;;
+  Linux-x86_64 | Linux-amd64) triple="x86_64-unknown-linux-musl" ;;
+  Darwin-arm64) triple="aarch64-apple-darwin" ;;
+  *)
+    echo "没有 $(uname -s)-$(uname -m) 的 stackcheck 预编译件；已支持：Linux-aarch64 / Linux-x86_64 / Darwin-arm64" >&2
+    exit 2
+    ;;
+esac
+
+BIN="${ROOT}/bin/${triple}/wist-stackcheck"
+if [ -x "$BIN" ]; then
+  exec "$BIN" --root "$ROOT" "$@"
+fi
+
+# 开发态回落：仓里带源码就现编现跑（发布包里一定带预编译件，不会走到这里）。
+if [ -f "${ROOT}/tools/stackcheck/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+  echo "（bin/${triple}/wist-stackcheck 不存在，回落到 cargo run）" >&2
+  exec cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" "$@"
+fi
+
+echo "缺少 stackcheck 预编译件：${BIN}" >&2
+echo "包内 bin/ 现有：$(ls "${ROOT}/bin" 2>/dev/null || echo '<空>')" >&2
+exit 2

@@ -9,6 +9,10 @@ publish = false
 [dependencies]
 serde_json = "1"
 toml = "0.8"
+# 证书 SAN / 有效期解析：只读 PEM，不验签（验签是 openssl/网关的事）。
+# 用它而不是 shell 出 `openssl x509`：一是工具不依赖外部命令，二是原来的
+# `grep -q "DNS:${domain}"` 是子串匹配（`gw.example.com.evil` 也会过）。
+x509-parser = "0.16"
 
 [profile.release]
 opt-level = "z"

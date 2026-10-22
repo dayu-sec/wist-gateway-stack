@@ -43,11 +43,22 @@
     指向不存在的路径时提示（悬空信任锚会让 gwlinkd 报 UnknownIssuer）。
   - `knowledge.initial_layout`：`configs/gateway/knowledge/initial/` 的五份数据文件必须齐
     （`install-initial-knowledge.sh` 只在解包那一刻校验过，之后没人再管）。
+  - `tls.san_covers_domain`：网关叶证书必须在有效期内，且 SAN **精确**覆盖 `WEB_DOMAIN`
+    （支持 `*.example.com` 但只覆盖一层）。原来 `init-gateway.sh` 里是
+    `openssl x509 … | grep -q "DNS:${domain}"` —— 正则 `.` 是通配符、且是子串匹配，
+    证书 SAN 为 `gw.example.com.evil.net` 时也会放过。
 
 - **`restore-gateway.sh` 还原后自检**：恢复完成时对栈根跑一次检查（只读），把
   「文件写回去了但互相矛盾」当场报出来，而不是等下次 `localize`。不改变恢复的退出码。
 
 ### 修复
+
+- **检查器拿的是默认值，不是生效值**：原先只读 `sys/merged_vars.yml`，而那是 gops 的
+  **INITIAL**（`sys localize` 输出的 INITIAL 列），生效值写在栈根 `.env`。站点一旦覆盖
+  `PACKAGE_DIR`（完全合法的现场选择），路径自洽就永远对不上 —— 而这条一旦误判，
+  就是「升级被闸门拦住」。现在优先读 `.env`，没有才回落默认值并在 detail 里写明来源。
+  同一处也修了 `WEB_DOMAIN`（证书 SAN 判定）：它不仅看错值，还因为字段在 `[server]` 段
+  而不是文档根而报「没有 tls_cert_file」。
 
 - **`public_base_url` 是派生值但只在新建时写**（`scripts/init-gateway.sh`）：
   `value.json` 已存在时只同步 `victoria_metrics_url`，域名之后怎么改都不再落进去。
@@ -70,7 +81,7 @@
 - **发布包内含栈检查器**：CI 为 `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl` /
   `aarch64-apple-darwin` 三个平台编译 `wist-stackcheck`，`tar -rf` 追加到**同一个**部署包里
   （`bin/<triple>/`）。制品仍是平台无关的单包、同一个下载地址，升级协议不用改；
-  体积 +约 1.4 MB。其他架构运行时会明确报错（不静默跳过）。
+  体积 +约 1.8 MB（单平台 605 KB）。其他架构运行时会明确报错（不静默跳过）。
 
 ### 升级注意
 

@@ -135,6 +135,7 @@ pub fn run(stack: &Stack) -> Vec<Finding> {
     out.extend(checks::package_pairing(stack));
     out.extend(checks::identity_paths(stack));
     out.extend(checks::initial_knowledge_layout(stack));
+    out.extend(checks::tls_certificate(stack));
     out
 }
 

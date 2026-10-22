@@ -45,6 +45,33 @@ fn merged_vars(stack: &Stack) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
+/// 读**生效值**。
+///
+/// `gops sys localize` 把合并后的生效值写在栈根 `.env`；`sys/merged_vars.yml` 存的是
+/// **默认值**（`gops sys` 输出里叫 INITIAL，不是 EFFECTIVE）。拿默认值去判会错：
+/// 站点一旦覆盖 `PACKAGE_DIR`（完全合法的现场选择），路径自洽就永远对不上，
+/// 而这条一旦误判就变成「升级被闸门拦住」。
+fn effective_vars(stack: &Stack) -> Result<(BTreeMap<String, String>, &'static str), String> {
+    let env = stack.at(".env");
+    if let Ok(text) = fs::read_to_string(&env) {
+        let mut out = BTreeMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                out.insert(key.trim().to_string(), unquote(value.trim()).to_string());
+            }
+        }
+        if !out.is_empty() {
+            return Ok((out, ".env"));
+        }
+    }
+    // 还没 localize 过（首次部署）：只能拿默认值，并在 detail 里写明来源。
+    Ok((merged_vars(stack)?, "sys/merged_vars.yml（默认值）"))
+}
+
 fn unquote(value: &str) -> &str {
     let bytes = value.as_bytes();
     if bytes.len() >= 2
@@ -142,12 +169,12 @@ fn normalize(path: &Path) -> PathBuf {
 pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
     let mut out = Vec::new();
 
-    let vars = match merged_vars(stack) {
-        Ok(vars) => vars,
+    let (vars, vars_source) = match effective_vars(stack) {
+        Ok(pair) => pair,
         Err(err) => {
             out.push(
                 Finding::fail("package.vars", "读不到合并后的系统变量", err)
-                    .with_hint("先跑一次 `gops sys update`（生成 sys/merged_vars.yml）再检查"),
+                    .with_hint("先跑一次 `gops sys localize`（生成 .env / sys/merged_vars.yml）再检查"),
             );
             return out;
         }
@@ -261,7 +288,7 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
                     out.push(Finding::ok(
                         code,
                         format!("{what}与 PACKAGE_DIR 派生值一致"),
-                        actual,
+                        format!("{actual}（变量来源 {vars_source}）"),
                     ));
                 } else {
                     out.push(
@@ -772,21 +799,8 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
         ));
     } else {
         let raw = signing.trim();
-        // 网关在容器里以 `/config` 为基址，同一个相对路径可能落在栈根 / configs/gateway /
-        // identity/gateway 三处之一 —— 都认，避免把正常部署误判为悬空。
-        let candidates = if Path::new(raw).is_absolute() {
-            vec![PathBuf::from(raw)]
-        } else {
-            let mut candidates = vec![stack.at(raw), stack.at("configs/gateway").join(raw)];
-            // 容器里 `/config/identity/...` 挂的就是宿主 `identity/gateway/...`，
-            // 所以 `identity/public/x` 实际落在 `identity/gateway/public/x`。
-            if let Some(rest) = raw.strip_prefix("identity/") {
-                candidates.push(stack.at("identity/gateway").join(rest));
-            } else {
-                candidates.push(stack.at("identity/gateway").join(raw));
-            }
-            candidates
-        };
+        // 同一个相对路径可能落在栈根 / configs/gateway / identity/gateway 三处之一。
+        let candidates = relative_candidates(stack, raw);
         match candidates.iter().find(|path| path.is_file()) {
             Some(found) => out.push(Finding::ok(
                 "identity.signing_pubkey",
@@ -882,6 +896,17 @@ fn root_str_of(path: &Path, key: &str) -> Option<String> {
     root_str(&doc, key)
 }
 
+/// 读 `[section].key`（`section = None` 时读文档根）。两边都试一次，兼容配置搬家。
+fn config_str(path: &Path, section: Option<&str>, key: &str) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let doc = toml::from_str::<toml::Value>(&text).ok()?;
+    let table = match section {
+        Some(name) => doc.get(name)?,
+        None => &doc,
+    };
+    table.get(key)?.as_str().map(str::to_string)
+}
+
 fn resolve(stack: &Stack, raw: &str) -> PathBuf {
     let path = Path::new(raw);
     if path.is_absolute() {
@@ -891,7 +916,158 @@ fn resolve(stack: &Stack, raw: &str) -> PathBuf {
     }
 }
 
-// ── 7. 初始知识库布局 ────────────────────────────────────────────────────
+/// 网关配置里的**相对路径**（相对 `/config`）在宿主上的落点。
+///
+/// 容器里 `/config/identity/...` 挂的就是宿主 `identity/gateway/...`，所以同一串
+/// `identity/public/x.pem` 可能在三个地方之一；都认，避免把正常部署误判为悬空。
+fn relative_candidates(stack: &Stack, raw: &str) -> Vec<PathBuf> {
+    if Path::new(raw).is_absolute() {
+        return vec![PathBuf::from(raw)];
+    }
+    let mut candidates = vec![stack.at(raw), stack.at("configs/gateway").join(raw)];
+    let under_identity = match raw.strip_prefix("identity/") {
+        Some(rest) => stack.at("identity/gateway").join(rest),
+        None => stack.at("identity/gateway").join(raw),
+    };
+    candidates.push(under_identity);
+    candidates
+}
+
+// ── 8. TLS 证书 ──────────────────────────────────────────────────────────
+
+/// 网关叶证书必须在有效期内、且 SAN 覆盖 `WEB_DOMAIN`。
+///
+/// 这条原来在 `init-gateway.sh` 里是
+/// `openssl x509 -ext subjectAltName | grep -q "DNS:${domain}"`：
+/// 正则里的 `.` 是**通配符**，且是**子串**匹配 —— 证书 SAN 为
+/// `gw.example.com.evil.net` 时也会判过。这里做真解析 + 精确匹配。
+pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
+    const CODE: &str = "tls.san_covers_domain";
+
+    let toml_path = stack.at("configs/gateway/wist-gateway.toml");
+    // 真实形状是 `[server] tls_cert_file = …`；也认文档根（以后搬家不会静默失效）。
+    let raw = config_str(&toml_path, Some("server"), "tls_cert_file")
+        .or_else(|| config_str(&toml_path, None, "tls_cert_file"));
+    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+        return vec![Finding::warn(
+            CODE,
+            "网关配置里没有 tls_cert_file",
+            toml_path.display().to_string(),
+        )];
+    };
+    let raw = raw.trim();
+
+    let candidates = relative_candidates(stack, raw);
+    let Some(found) = candidates.iter().find(|path| path.is_file()) else {
+        return vec![Finding::fail(
+            CODE,
+            "网关叶证书不存在",
+            format!("`{raw}` 在 {} 个候选位置都没找到", candidates.len()),
+        )
+        .with_hint("跑一次 `gops sys localize`（init-gateway.sh 会签发）")];
+    };
+
+    let Ok(bytes) = fs::read(found) else {
+        return vec![Finding::fail(
+            CODE,
+            "网关叶证书读不了",
+            found.display().to_string(),
+        )];
+    };
+    let Ok((_, pem)) = x509_parser::pem::parse_x509_pem(&bytes) else {
+        return vec![Finding::fail(
+            CODE,
+            "网关叶证书不是合法 PEM",
+            found.display().to_string(),
+        )];
+    };
+    let Ok((_, cert)) = x509_parser::parse_x509_certificate(&pem.contents) else {
+        return vec![Finding::fail(
+            CODE,
+            "网关叶证书无法解析",
+            found.display().to_string(),
+        )];
+    };
+
+    let validity = cert.validity();
+    if !validity.is_valid() {
+        return vec![Finding::fail(
+            CODE,
+            "网关叶证书不在有效期内",
+            format!(
+                "notBefore={} notAfter={}",
+                validity.not_before, validity.not_after
+            ),
+        )
+        .with_hint("重新签发：删掉 identity/gateway/{public,private}/admin-tls.* 后跑 localize")];
+    }
+
+    let Some(domain) = effective_vars(stack)
+        .ok()
+        .and_then(|(vars, _)| vars.get("WEB_DOMAIN").cloned())
+        .map(|value| value.trim().trim_end_matches('.').to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return vec![Finding::warn(
+            CODE,
+            "WEB_DOMAIN 为空，跳过 SAN 判定",
+            "证书本身在有效期内（这一项只能判 expire）",
+        )];
+    };
+
+    let sans = certificate_dns_names(&cert);
+    if sans.iter().any(|san| san_covers(san, &domain)) {
+        return vec![Finding::ok(
+            CODE,
+            "叶证书 SAN 覆盖 WEB_DOMAIN",
+            format!("{domain} ∈ [{}]", sans.join(", ")),
+        )];
+    }
+    vec![
+        Finding::fail(
+            CODE,
+            "叶证书 SAN 不覆盖 WEB_DOMAIN",
+            format!("WEB_DOMAIN={domain}，证书 SAN=[{}]", sans.join(", ")),
+        )
+        .with_hint("跑一次 `gops sys localize`：init-gateway.sh 发现 SAN 缺域名会重签"),
+    ]
+}
+
+fn certificate_dns_names(cert: &x509_parser::prelude::X509Certificate<'_>) -> Vec<String> {
+    cert.subject_alternative_name()
+        .ok()
+        .flatten()
+        .map(|extension| {
+            extension
+                .value
+                .general_names
+                .iter()
+                .filter_map(|name| match name {
+                    x509_parser::extensions::GeneralName::DNSName(dns) => Some((*dns).to_string()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 证书 SAN 是否覆盖某个域名：**精确相等**，或通配符只覆盖**一层**。
+fn san_covers(san: &str, domain: &str) -> bool {
+    let san = san.trim().trim_end_matches('.').to_ascii_lowercase();
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if san == domain {
+        return true;
+    }
+    let Some(suffix) = san.strip_prefix("*.") else {
+        return false;
+    };
+    domain
+        .strip_suffix(suffix)
+        .and_then(|head| head.strip_suffix('.'))
+        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
+}
+
+// ── 测试 ───────────────────────────────────────────────────────────────
 
 /// `configs/gateway/knowledge/initial/` 的五份数据文件。
 ///
@@ -1375,6 +1551,139 @@ name = \"galaxy-flow\"
         let findings = initial_knowledge_layout(&tree.stack());
         assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
         assert!(findings[0].detail.contains("0.4.0"), "{findings:#?}");
+    }
+
+    // ── TLS 证书用例（PEM 固定在此，单测不依赖 openssl） ────────────
+
+    /// SAN = `DNS:gw.example.test, DNS:localhost`，有效期到 2036（生成于 2026-10-22）。
+    const GOOD_CERT: &str = "-----BEGIN CERTIFICATE-----\n\
+MIIDPDCCAiSgAwIBAgIUBUEMZZGnmtZmqcbpRU4/u8ROyTcwDQYJKoZIhvcNAQEL\n\
+BQAwGjEYMBYGA1UEAwwPZ3cuZXhhbXBsZS50ZXN0MB4XDTI2MTAyMjE2NDE0OFoX\n\
+DTM2MTAxOTE2NDE0OFowGjEYMBYGA1UEAwwPZ3cuZXhhbXBsZS50ZXN0MIIBIjAN\n\
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArraZ8kxDY14N5CBljxowDmnc5blM\n\
+iwOzL2DgGiwIHS8/6MBWUsUxmdP/9Zj4YomOQeSipQ4flUaPWDKYFWkE8L++J7YO\n\
+9RB19jewWBmHl3ToSRUPXLSkdBdfGYzc8qnrVYA6MMUuELQD/Y2HQ+nks4aLCnpv\n\
+Px8UdXcqX6wEWlrszkxNGmdgPDegifUpAUaP9rPbmM1Wy5VqRWCbLL2loN2LkBWh\n\
+3yAkqZUs7dXhCcGfaeiNPMCYcE28yHkC7l+0EELRnui6eMqEeC3evzqgligmTm7P\n\
+bYK//omudDvKeGXAYF6+ZIOACvD5CD+CUhH64D/RIvx72Nao/hJSiPp0xwIDAQAB\n\
+o3oweDAdBgNVHQ4EFgQUu5LeBBZilxpaQmIpyOAil2CcoRMwHwYDVR0jBBgwFoAU\n\
+u5LeBBZilxpaQmIpyOAil2CcoRMwDwYDVR0TAQH/BAUwAwEB/zAlBgNVHREEHjAc\n\
+gg9ndy5leGFtcGxlLnRlc3SCCWxvY2FsaG9zdDANBgkqhkiG9w0BAQsFAAOCAQEA\n\
+ftzmc2G5NLcEIskDfMxim8G6+nPDoCQ7nKz0BPdUjxVv/YhdMZEcCBDl1R2FiH8K\n\
+NIidJhrFxgUXHThuKV/tyhpBIMkYRV+2DJ1NdbMXEJyDKDOSlNqIhFCOV7Pu0JyC\n\
+ZDqFZoyo53F7E2wONySisAb0k3zI+jWjf4jzc/b+kJqip33EaIauuwMY80AYrNbg\n\
+ui3CO8QZoW9/hnQYFF2ux9y2xGjt54IBK9f34otLEV3WmNw/XoL388GnUdUKHV0W\n\
+u9jyh5qSgYj7wgb7hY2unoOJeKHxq9mAUiZwhogPtbuMMLw7mOx9PvUghZKg3Y6u\n\
+hHMwdrNwVjGziWTG80IWoA==\n\
+-----END CERTIFICATE-----\n";
+
+    /// 同一个域名，但 notBefore/notAfter = 2020-01/2020-02（早已过期）。
+    const EXPIRED_CERT: &str = "-----BEGIN CERTIFICATE-----\n\
+MIIDMTCCAhmgAwIBAgIUb1YRbrexItrAUTJSp1nkw2NxxxMwDQYJKoZIhvcNAQEL\n\
+BQAwGjEYMBYGA1UEAwwPZ3cuZXhhbXBsZS50ZXN0MB4XDTIwMDEwMTAwMDAwMFoX\n\
+DTIwMDIwMTAwMDAwMFowGjEYMBYGA1UEAwwPZ3cuZXhhbXBsZS50ZXN0MIIBIjAN\n\
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzEfGMisM9Mzc2Ru3EALIFU5nn1hp\n\
+xw3beuRzXKEsAVFjj65LC2Yxkr48OxBeQIoiPO4TA3kvYtkPUhpQ03aAfr1sCyry\n\
+hcY6ptfjIEp6tpCCoI5ff+HxYCUq7Hx7MiiQNypZt2cUf4X7xi6IrKn5aA5yuXRm\n\
+CAcip2d8W1wwzfC6v+3CGkGIyY7j6CpsQaIElD0bBGriXsYwkXgSxav9W6xNzUb+\n\
+/yVmEP6uxq6HqNwkAiEuW/vXGV4rbOub+WfLEaa/gdVxsFSWOVomoK5NHYt1/Vgw\n\
+pkicp1CfNd7eqUuYZvkAXsPBoTEEeDf+PiWmd+yIr4lKAu6ubisMetwpVwIDAQAB\n\
+o28wbTAdBgNVHQ4EFgQUXHmeVSdonPyxOVBdPoMVTpGBFsEwHwYDVR0jBBgwFoAU\n\
+XHmeVSdonPyxOVBdPoMVTpGBFsEwDwYDVR0TAQH/BAUwAwEB/zAaBgNVHREEEzAR\n\
+gg9ndy5leGFtcGxlLnRlc3QwDQYJKoZIhvcNAQELBQADggEBAMcl4TnCwGroH9y0\n\
+YsOAAYhd50MxeIK9GBZOLeYlkvGtmxi6pxQMNm8oWOd7yAFT0mclvgrVcwvU3fKh\n\
+Ok+MTnn7iRbumD9AvudqFBzTgC6OgYKT2WJnBYJoEEasx2NfBVjkFjCAN5GH22MG\n\
+qZEA78xmO6ZL1NE5GNIGy4VbPsiqnvOnVPqD64CLh53i9OjUy+yh/q7zw6LQBCWX\n\
+2RGdRHcfZ1VQjS37FTeMCmkrdmPMaKubwyrZ2Bnv27MvdpXEt0l4XGtkwYteC6LM\n\
+I2roBhIIiZ+J2lC/W8RybKGuQr1Rups3hQPmwGU1CcGM0LS9NCoXzDpgj+vYDAR7\n\
+jx0fk6s=\n\
+-----END CERTIFICATE-----\n";
+
+    fn tls_tree(tag: &str, cert: &str) -> Tree {
+        let tree = Tree::new(tag);
+        tree.write(
+            "sys/merged_vars.yml",
+            "- name: WEB_DOMAIN\n  value: gw.example.test\n",
+        );
+        tree.write(
+            "configs/gateway/wist-gateway.toml",
+            "[server]\ntls_cert_file = \"identity/public/admin-tls.crt.pem\"\n",
+        );
+        tree.write("identity/gateway/public/admin-tls.crt.pem", cert);
+        tree
+    }
+
+    #[test]
+    fn effective_values_in_env_win_over_the_default_vars_file() {
+        let tree = Tree::new("effective-vars");
+        // `sys/merged_vars.yml` 是**默认值**；站点把 PACKAGE_DIR 覆盖成别的目录完全合法。
+        tree.write("sys/merged_vars.yml", VARS);
+        tree.write(
+            ".env",
+            "PACKAGE_DIR=/data/packages\nGWLINKD_AGENT_PACKAGE_CONTAINER_DIR=/packages\n",
+        );
+        tree.write("sys/docker-compose.yml", COMPOSE);
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "agent_package_drop_dir = \"/data/packages/agents\"\nagent_package_container_dir = \"/packages/agents\"\n",
+        );
+
+        let findings = package_dir_consistency(&tree.stack());
+        assert!(
+            findings.iter().all(|finding| finding.status == Status::Ok),
+            "拿默认值比对会误拦升级：{findings:#?}"
+        );
+    }
+
+    #[test]
+    fn tls_domain_comes_from_the_effective_values_too() {
+        let tree = tls_tree("tls-env", GOOD_CERT);
+        // 现场覆盖：默认值里没有 / 不是这个域名，`.env` 里才是真的。
+        tree.write("sys/merged_vars.yml", "- name: WEB_DOMAIN\n  value: default.example.test\n");
+        tree.write(".env", "WEB_DOMAIN=gw.example.test\n");
+
+        let findings = tls_certificate(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn accepts_a_certificate_covering_the_domain() {
+        let tree = tls_tree("tls-ok", GOOD_CERT);
+        let findings = tls_certificate(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn rejects_a_certificate_that_does_not_cover_the_domain() {
+        let tree = tls_tree("tls-mismatch", GOOD_CERT);
+        // 子串匹配会放过它（`gw.example.test` 是它的前缀）；精确匹配不能。
+        tree.write(
+            "sys/merged_vars.yml",
+            "- name: WEB_DOMAIN\n  value: gw.example.test.evil\n",
+        );
+        let findings = tls_certificate(&tree.stack());
+        assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
+        assert!(findings[0].title.contains("不覆盖"), "{findings:#?}");
+    }
+
+    #[test]
+    fn rejects_an_expired_certificate() {
+        let tree = tls_tree("tls-expired", EXPIRED_CERT);
+        let findings = tls_certificate(&tree.stack());
+        assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
+        assert!(findings[0].title.contains("有效期"), "{findings:#?}");
+    }
+
+    #[test]
+    fn san_matching_is_exact_or_one_label_wildcard() {
+        assert!(san_covers("gw.example.test", "gw.example.test"));
+        assert!(san_covers("GW.Example.Test", "gw.example.test"));
+        assert!(san_covers("*.example.test", "gw.example.test"));
+        // 通配只覆盖一层。
+        assert!(!san_covers("*.example.test", "a.b.example.test"));
+        // 后缀攻击：不能因为“以它结尾”就放行。
+        assert!(!san_covers("gw.example.test", "gw.example.test.evil"));
+        assert!(!san_covers("other.example.test", "gw.example.test"));
     }
 
     #[test]

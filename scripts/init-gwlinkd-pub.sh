@@ -6,10 +6,18 @@
 # （`sys/configs/gwlinkd/gwlinkd-pub.toml.tpl` → `identity/gwlinkd/gwlinkd-pub.toml`），
 # 与其它交付物同一套渲染；重渲动不到现场（值不在这里）。
 #
-# 本脚本做两件事：
+# 本脚本做三件事：
 #   1) 把 `GWLINKD_CENTER_ENDPOINT` / `GWLINKD_GATEWAY_ID` / `GWLINKD_TRUST_BUNDLE` 按缺
 #      （**键不存在或值为空**）写进 `.env`，**非空一律保留**（现场改过 / 页面接入时写过 / 迁移搬来的）。
+#      **唯一例外是「路径型键的搬家自愈」**：非空值指向的文件已不存在、而期望位置
+#      （`<现场态目录>/control-center.pem`）确实有 —— 那就改写成期望位置。
+#      只在这一种形状下改写：指向真在的自定义路径一律保留，期望位置也没有就只告警（不猜）。
 #   2) **清掉死键**：`.env` 里存在、但同目录 `gwlinkd-pub.toml` **没有引用**的键。
+#
+# 为什么需要自愈：`.env` 是**现场值**（永不重写），而站点目录会被 `mv` / 拷贝到新位置。
+#   搬家后 `.env` 里的**绝对路径**（如信任锚）就指向旧位置 —— 指针还“有值”，于是
+#   gwlinkd 找不到 PEM、回落系统根，自签中心报 `invalid peer certificate: UnknownIssuer`。
+#   这条自愈让「搬家后跑一次 localize / 安装脚本」就能把路径拉回正位。
 #
 # 为什么值与声明分开（docker-compose 口径）：声明里只出现 `${VAR}`，真值在 `.env` ——
 #   声明可随版本覆盖（重渲），`.env` 是现场唯一写者。gwlinkd 加载时用「进程环境 > 同目录 `.env`」
@@ -55,6 +63,21 @@ DESIRED = [
     ("GWLINKD_GATEWAY_ID", gateway_id),
     ("GWLINKD_TRUST_BUNDLE", trust),
 ]
+
+# 现场态目录（= `.env` 的父目录）：路径型键的「期望位置」都相对它算。
+STATE_DIR = os.path.dirname(os.path.abspath(target))
+# 路径型键 → 期望落点。目前只有信任锚（gwlinkd 接入时就把 CA 写在这里）。
+PATH_KEYS = {"GWLINKD_TRUST_BUNDLE": os.path.join(STATE_DIR, "control-center.pem")}
+
+
+def set_line(lines, key, value):
+    """把现有的 `key=` 行换成 `key=value`（保持行序）；找不到就不动。"""
+    for idx, raw in enumerate(lines):
+        head, sep, _ = raw.partition("=")
+        if sep and head.strip() == key:
+            lines[idx] = f"{key}={value}"
+            return True
+    return False
 
 
 def unquote(value):
@@ -110,18 +133,35 @@ if os.path.exists(target):
     existing = parse(original)
     lines = original.splitlines()
     changed = False
+    healed = []
+    dangling = []
     for key, value in DESIRED:
         current = existing.get(key)
         if current is None:
             lines.append(f"{key}={value}")
             changed = True
-        elif current == "" and value != "":
-            for idx, raw in enumerate(lines):
-                head, sep, _ = raw.partition("=")
-                if sep and head.strip() == key:
-                    lines[idx] = f"{key}={value}"
-                    break
+            continue
+        if current == "" and value != "":
+            set_line(lines, key, value)
             changed = True
+            continue
+        # 搬家自愈：非空路径指向的文件已不存在（站点换过目录），而期望位置确实有 → 改写。
+        # 只对这一种形状动手：自定义路径的文件真在 → 保留；期望位置也没有 → 只告警，不猜。
+        expected = PATH_KEYS.get(key)
+        if expected and current and not os.path.exists(current):
+            if current != expected and os.path.exists(expected):
+                set_line(lines, key, expected)
+                existing[key] = expected
+                changed = True
+                healed.append(f"{key}: {current} → {expected}")
+            elif not os.path.exists(expected):
+                dangling.append(f"{key}={current}")
+    for item in dangling:
+        print(
+            f"  [WARN] {item} 指向的文件不存在，期望位置也没有；"
+            f"自签中心会回落系统根（gwlinkd 会报 UnknownIssuer）",
+            file=sys.stderr,
+        )
     # 清死键：声明没引用的键没有任何读取方（改名后的残留 / 旧版骶架留下的）。
     declared = declared_names(declaration)
     removed = []
@@ -131,7 +171,12 @@ if os.path.exists(target):
     if (not changed and not removed) or text == original:
         print(f"  现场态值与当前一致，跳过：{target}")
         sys.exit(0)
-    note = f"（清掉未声明的死键：{', '.join(sorted(set(removed)))}）" if removed else ""
+    notes = []
+    if healed:
+        notes.append("路径自愈：" + "；".join(healed))
+    if removed:
+        notes.append("清掉未声明的死键：" + ", ".join(sorted(set(removed))))
+    note = f"（{'；'.join(notes)}）" if notes else ""
     message = f"  已补齐现场态值：{target}{note}"
 else:
     text = HEADER + "\n\n" + "\n".join(f"{key}={value}" for key, value in DESIRED) + "\n"

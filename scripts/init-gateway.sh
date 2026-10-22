@@ -46,6 +46,12 @@
 #   AGENT_CA_DAYS        agent CA 有效期天数（默认 3650）
 set -euo pipefail
 
+# `set -e` 的静默退出是排查的黑洞：脚本半途死掉、stderr 空白，日志里只剩下最后一行 note。
+# 把这个黑洞堵上：任何未被 `if`/`&&` 接住的失败都把**行号**打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
 DIR="${1:-configs/gateway}"
 mkdir -p "$DIR"
 DIR="$(cd "$DIR" && pwd)"
@@ -71,6 +77,21 @@ CA_DAYS="${CA_DAYS:-3650}"
 VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
+# python3 也是硬依赖（admin token / 值文件都用它）：早说清楚，别等到第 226 行才以 127 死掉。
+command -v python3 >/dev/null 2>&1 || { echo "缺少 python3，无法生成 admin token / 更新值文件" >&2; exit 1; }
+
+# 证书 SAN 的**读取与判定**只实现在 scripts/lib/tls-san.sh：
+#   · 它用 `x509 -text` 而不是 `-ext` —— macOS 自带 /usr/bin/openssl 是 LibreSSL，不认 `-ext`；
+#     而升级流程由 gwlinkd 派生，PATH 里没有 /opt/homebrew/bin，解析到的正是它。
+#   · 「是否覆盖域名」与 tools/stackcheck/src/checks.rs::san_covers 同口径，只留一处实现。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TLS_SAN_LIB="${SCRIPT_DIR}/lib/tls-san.sh"
+if [[ ! -f "$TLS_SAN_LIB" ]]; then
+  echo "缺少 ${TLS_SAN_LIB}（安装包不完整）" >&2
+  exit 1
+fi
+# shellcheck source=lib/tls-san.sh
+. "$TLS_SAN_LIB"
 
 note() { echo "  $*"; }
 
@@ -78,13 +99,28 @@ note() { echo "  $*"; }
 # 都推不出也**不立刻判死**：只有确实要签发/重签或要新建值文件时才需要域名（见 ②/④）。
 domain="${WEB_DOMAIN:-}"
 if [[ -z "$domain" && -f "$VALUE_JSON" ]]; then
-  domain="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"https\{0,1\}:\/\/\([^"\/]*\).*/\1/p' "$VALUE_JSON" | head -n1)"
+  # 不用 `| head -n1`：`head` 读完第一行就关管道，上游 `sed` 接着写会吃 SIGPIPE（141），
+  # 在 `set -e` + `pipefail` 下**整个 localize 就无声退了**。`sed -n '1p'` 会读完全部输入。
+  domain="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"https\{0,1\}:\/\/\([^"\/]*\).*/\1/p' "$VALUE_JSON" | sed -n '1p')"
   domain="${domain%%:*}" # 去掉可能的端口
 fi
 if [[ -z "$domain" && -f "$TLS_CRT" ]]; then
-  domain="$(openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null \
-    | tr ',' '\n' | sed -n 's/^[[:space:]]*DNS:\([^[:space:],]*\).*/\1/p' | grep -v '^localhost$' | head -n1)"
-  [[ -n "$domain" ]] && note "域名取自已有叶证书的 SAN：${domain}"
+  # 读不出 SAN 也不能静默：告警后按「推不出域名」继续（只有真要签发时才会判死）。
+  san_entries=""
+  if ! san_entries="$(wist_san_dns "$TLS_CRT")"; then
+    echo "  [WARN] 读不出叶证书 SAN（openssl: $(wist_openssl_desc)）：${TLS_CRT}" >&2
+    san_entries=""
+  fi
+  while IFS= read -r san; do
+    if [[ -z "$san" || "$san" == "localhost" ]]; then
+      continue
+    fi
+    domain="$san"
+    break
+  done <<<"${san_entries}"
+  if [[ -n "$domain" ]]; then
+    note "域名取自已有叶证书的 SAN：${domain}"
+  fi
 fi
 
 # ① 网关 CA（信任锚；只建一次，绝不重生成）
@@ -140,39 +176,20 @@ if [[ -f "$TLS_CRT" && -f "$TLS_KEY" ]] \
   else
     # SAN 是否覆盖域名：**精确**相等，或 `*.a.b` 只覆盖一层（`x.a.b` 命中，`x.y.a.b` 不命中）。
     #
-    # ⚠ 两边必须同口径：本处（bash，字符串比对）
-    #   ↔ tools/stackcheck/src/checks.rs::san_covers（Rust，真解析）。
-    #   合并前先看另一边；口径不一致 → 闸门报 FAIL 而 localize 不重签（死锁）。
+    # ⚠ 判定实现在 scripts/lib/tls-san.sh，与 tools/stackcheck/src/checks.rs::san_covers
+    #   **同口径**（改一边必须改另一边）：口径不一致 → 闸门报 FAIL 而 localize 不重签（死锁）。
     #
     # 不能用 `grep -q "DNS:${domain}"`：`.` 在正则里是通配符，而且整体是**子串**匹配 ——
     # 证书 SAN 为 `gw.example.com.evil.net` 时也会判「已含」，于是**永远不会重签**。
-    san_covers() { # $1=SAN 条目  $2=域名
-      local san="$1" target="$2" suffix label
-      san="${san%.}"
-      target="${target%.}"
-      [[ "$san" == "$target" ]] && return 0
-      [[ "$san" == '*.'* ]] || return 1
-      suffix="${san#\*.}"
-      case "$target" in
-        *".${suffix}") ;;
-        *) return 1 ;;
-      esac
-      label="${target%".${suffix}"}"
-      [[ -n "$label" && "$label" != *.* ]] || return 1
-      return 0
-    }
-
-    san_entries="$(openssl x509 -in "$TLS_CRT" -noout -ext subjectAltName 2>/dev/null \
-      | tr ',' '\n' | sed -n 's/.*DNS:\([^ ]*\).*/\1/p')"
-    while IFS= read -r san; do
-      [[ -n "$san" ]] || continue
-      if san_covers "$san" "$domain"; then
-        leaf_ok=1
-        break
-      fi
-    done <<EOF
-${san_entries}
-EOF
+    san_rc=0
+    wist_san_covers_domain "$TLS_CRT" "$domain" || san_rc=$?
+    case "$san_rc" in
+      0) leaf_ok=1 ;;
+      # 读不出 SAN 就**不能**认为「已覆盖」：宁可重签（幂等），也不要默默放过。
+      # 也别让它静默退 1：`set -e` + `pipefail` 下管道里任一段非零就是这个后果
+      # （2026-10-23 升级失败就是「没有任何输出、只有 exit 1」）。
+      2) echo "  [WARN] 读不出叶证书 SAN（openssl: $(wist_openssl_desc)），按「缺域名」重签：${TLS_CRT}" >&2 ;;
+    esac
   fi
 fi
 if [[ "$leaf_ok" == 1 ]]; then
@@ -182,7 +199,9 @@ else
     echo "需要域名才能（重新）签发叶证书：设 WEB_DOMAIN=<域名> 再跑，或让已有叶证书的 SAN 提供它，或用 \`gops sys localize\` 走部署流程（它会注入 WEB_DOMAIN）" >&2
     exit 1
   fi
-  [[ -f "$TLS_CRT" ]] && note "已有叶证书与当前 CA 不对应或缺域名，重签"
+  if [[ -f "$TLS_CRT" ]]; then
+    note "已有叶证书与当前 CA 不对应或缺域名，重签"
+  fi
   if [[ ! -f "$TLS_KEY" ]]; then
     openssl genrsa -out "$TLS_KEY" 2048 >/dev/null 2>&1
     chmod 600 "$TLS_KEY"

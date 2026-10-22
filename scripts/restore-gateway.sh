@@ -186,7 +186,9 @@ fi
 # 不改变退出码 —— 恢复本身已经完成，这里只把矛盾**当场**报出来，而不是等下次 localize。
 if [[ "$(abspath "${DEST}")" == "${STACK_ROOT}" && -x "${STACK_ROOT}/scripts/check-stack.sh" ]]; then
   echo
-  echo "  恢复后自检（`scripts/check-stack.sh`）："
+  # 反引号必须转义：裸写`` `scripts/check-stack.sh` ``会被当成命令替换——
+  # 这一步会**真的跑一遍体检**，并把它的输出塞进标题里。
+  echo "  恢复后自检（\`scripts/check-stack.sh\`）："
   if selfcheck_out="$("${STACK_ROOT}/scripts/check-stack.sh" 2>&1)"; then
     echo "    通过（无 WARN / FAIL）"
   else

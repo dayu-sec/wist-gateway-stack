@@ -22,6 +22,13 @@
 #   KNOWLEDGE_SOURCE_DIR  解到哪儿（相对网关配置目录；默认 knowledge/initial，须与 tpl 一致）
 set -euo pipefail
 
+# `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
+# 任何未被 if/&& 接住的失败都把行号打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${STACK_ROOT}"
@@ -75,6 +82,8 @@ fi
 
 echo "初始知识库已就位：${dst} ← ${pkg}"
 if [[ -f "${dst}/manifest.json" ]]; then
-  ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${dst}/manifest.json" | head -n1)"
+  # 不用 `| head -n1`：manifest 里可能有**多处** `"version"`（包内每份数据自带版本），
+  # `head` 提前关管道会让上游 `sed` 吃 SIGPIPE —— `set -e` + `pipefail` 下就是无声退 1。
+  ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${dst}/manifest.json" | sed -n '1p')"
   echo "  包版本：${ver:-未知}（网关启动日志会打 knowledge source = dir:<该目录>）"
 fi

@@ -54,7 +54,6 @@ PUBCFG_ENV="WIST_GWLINKD_PUB_CONFIG"
 # 老的 nohup 形态（退役）留下的配置与 pidfile —— 只在「没有服务定义」时作兜底。
 LEGACY_HOME="${STACK_ROOT}/dev/configs/gwlinkd"
 LEGACY_CONFIG="${LEGACY_HOME}/gwlinkd.toml"
-LEGACY_PIDFILE="${LEGACY_HOME}/gwlinkd.pid"
 PUB_DEFAULT="${STACK_ROOT}/identity/gwlinkd/gwlinkd-pub.toml"
 
 # 系统级服务要 root：脚本自己提权（别整个用 sudo 跑）。

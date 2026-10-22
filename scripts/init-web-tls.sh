@@ -30,6 +30,13 @@
 #   WEB_CA_CRT/WEB_CA_KEY 复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
 set -euo pipefail
 
+# `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
+# 任何未被 if/&& 接住的失败都把行号打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
+
 DOMAIN="${1:?用法: $0 <域名> [身份目录]}"
 OUT_DIR="${2:-identity/web}"
 CERT_DAYS="${CERT_DAYS:-365}"
@@ -50,6 +57,16 @@ if ! command -v openssl >/dev/null 2>&1; then
   echo "缺少 openssl，无法生成 TLS 证书" >&2
   exit 1
 fi
+
+# SAN 读取/判定只在 scripts/lib/tls-san.sh 实现（兼容 macOS 自带 LibreSSL；与 stackcheck 同口径）。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TLS_SAN_LIB="${SCRIPT_DIR}/lib/tls-san.sh"
+if [[ ! -f "$TLS_SAN_LIB" ]]; then
+  echo "缺少 ${TLS_SAN_LIB}（安装包不完整）" >&2
+  exit 1
+fi
+# shellcheck source=lib/tls-san.sh
+. "$TLS_SAN_LIB"
 
 # ① web CA（信任锚；只建一次，绝不重生成 —— 重生成 = 换锚 = 每台浏览器都要重新导入）
 if [[ -n "${WEB_CA_CRT:-}" && -n "${WEB_CA_KEY:-}" ]]; then
@@ -74,9 +91,18 @@ fi
 #    SAN 固定带上 localhost 与 127.0.0.1：`https://localhost:8443` 是现场最常用的入口。
 leaf_ok=0
 if [[ -f "$CRT" && -f "$KEY" ]] \
-  && openssl verify -CAfile "$CA_CRT" "$CRT" >/dev/null 2>&1 \
-  && openssl x509 -in "$CRT" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:${DOMAIN}"; then
-  leaf_ok=1
+  && openssl verify -CAfile "$CA_CRT" "$CRT" >/dev/null 2>&1; then
+  # SAN 是否覆盖域名：判定在 scripts/lib/tls-san.sh（精确相等 / `*.a.b` 只覆盖一层）。
+  # 这里以前是 `openssl x509 -ext ... | grep -q "DNS:${DOMAIN}"`，两个毛病：
+  #   1. LibreSSL（macOS 自带，升级流程用的就是它）不认 `-ext` → 永远判「不覆盖」→ 每轮重签；
+  #   2. 子串匹配：SAN 为 `x.${DOMAIN}.evil.net` 也算命。
+  # 读不出 SAN（rc=2）告警并重签（幂等），不静默放过也不静默退出。
+  san_rc=0
+  wist_san_covers_domain "$CRT" "$DOMAIN" || san_rc=$?
+  case "$san_rc" in
+    0) leaf_ok=1 ;;
+    2) echo "  [WARN] 读不出叶证书 SAN（openssl: $(wist_openssl_desc)），按「缺域名」重签：${CRT}" >&2 ;;
+  esac
 fi
 if [[ "$leaf_ok" == 1 ]]; then
   note "叶证书已由当前 CA 签发且含域名 ${DOMAIN}，跳过：${CRT}"
@@ -105,7 +131,11 @@ EOF
 fi
 
 # ③ 把"要让浏览器免提示该导哪一份"递到手上（每轮都打：没导过的机器就是靠这几行做的）
-fp="$(openssl x509 -in "$CA_CRT" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')"
+# 指纹读不出也不能让整轮 localize 静默失败（升级流程靠退出码判定）。
+fp=""
+if ! fp="$(openssl x509 -in "$CA_CRT" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')"; then
+  fp="<读不出：$(wist_openssl_desc)>"
+fi
 echo
 echo "浏览器免提示：导入这份 CA（只需一次，之后换叶零动作） ——"
 echo "  ${CA_CRT}"

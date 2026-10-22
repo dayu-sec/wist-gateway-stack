@@ -17,6 +17,13 @@
 # 不需要任何转义（空白 / 引号 / 反斜杠一律拒掉，而不是写出一个「看着成了」的坏值）。
 set -euo pipefail
 
+# `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
+# 任何未被 if/&& 接住的失败都把行号打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
+
 DOMAIN="${1:-}"
 OUT_DIR="${2:-configs/web}"
 VALUE_JSON="${OUT_DIR}/nginx.value.json"

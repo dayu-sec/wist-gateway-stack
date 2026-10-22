@@ -21,6 +21,13 @@
 # （本脚本只在缺键时用缺省值种一颗），所以不会"变量改了一份、文件又是另一份"。
 set -euo pipefail
 
+# `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
+# 任何未被 if/&& 接住的失败都把行号打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
+
 DIR="${1:-identity/gateway/public}"
 OUT="${DIR}/wist-gateway-pub.toml"
 

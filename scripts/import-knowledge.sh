@@ -78,7 +78,17 @@ fi
 
 name="$(basename "$file")"
 container_path="/packages/${name}"
-sha="$(shasum -a 256 "$file" | awk '{print $1}')"
+# sha256：macOS 带的是 shasum，精简 Linux（无 perl）只有 sha256sum —— 与
+# diagnose-wparse-drift.sh / show-wparse-state.sh 同一套回落（以前硬编码 shasum）。
+if command -v sha256sum >/dev/null 2>&1; then
+  HASH="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+  HASH="shasum -a 256"
+else
+  echo "缺少 sha256 工具（sha256sum 或 shasum），无法给出包摘要" >&2
+  exit 1
+fi
+sha="$(${HASH} "$file" | awk '{print $1}')"
 
 if [[ "$DRY_RUN" == 1 ]]; then
   echo "[dry-run] cp ${file} → ${PACKAGE_DIR}/${name}"
@@ -98,10 +108,12 @@ fi
 url="${GATEWAY_URL:-}"
 token="${ADMIN_TOKEN:-}"
 if [[ -f "$VALUE_JSON" ]]; then
-  [[ -n "$url" ]] || url="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VALUE_JSON" | head -n1)"
+  # 不用 `| head -n1`：head 读完一行就关管道，上游 sed 可能吃 SIGPIPE（141）——
+  # `set -e` + `pipefail` 下这条命令就无声失败（url 空着，后面报“需要 GATEWAY_URL”）。
+  [[ -n "$url" ]] || url="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VALUE_JSON" | sed -n '1p')"
 fi
 if [[ -z "$token" && -f "${SEC_FILE}" ]]; then
-  token="$(sed -n 's/^[[:space:]]*admin_token:[[:space:]]*//p' "${SEC_FILE}" | head -n1)"
+  token="$(sed -n 's/^[[:space:]]*admin_token:[[:space:]]*//p' "${SEC_FILE}" | sed -n '1p')"
   token="${token%\"}"; token="${token#\"}"; token="${token%\'}"; token="${token#\'}"
 fi
 [[ -n "$url" ]] || { echo "需要 GATEWAY_URL（或 value.json 的 public_base_url）" >&2; exit 1; }

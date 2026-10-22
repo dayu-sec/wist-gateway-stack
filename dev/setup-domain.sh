@@ -383,7 +383,8 @@ cat <<EOF
 
 ── 自检 ────────────────────────────────────────────────────────────────
 证书 SAN（必须含 ${PRIMARY}）：
-  openssl x509 -in ${LEAF_CRT} -noout -ext subjectAltName
+  openssl x509 -in ${LEAF_CRT} -noout -text | sed -n '/Subject Alternative Name/,+1p'
+  （用 -text 不用 -ext：macOS 自带的 LibreSSL 不认 -ext，而 gwlinkd 派生的进程用的就是它）
 
 与 agent 同源校验器（curl 不算数）：用**链式**那条 —— 信任锚单独给（agent 的 trust_bundle 形态），
 \`rustls_accepts_gateway_certificate\` 只模拟「锚就是叶证书本身」，对 CA 签的叶会误判 UnknownIssuer。
@@ -425,7 +426,7 @@ cat <<EOF
 
 ── 别踩这几条 ──────────────────────────────────────────────────────────
   1. **别删 ${LEAF_CRT}**：svc.sh 发现它缺失会按 CN=localhost 重新生成，
-     域名就白切了。它每次启动还会把 `[agent] trust_bundle_file` 指回锚（有 gateway-ca 时用 CA 根）。
+     域名就白切了。它每次启动还会把 \`[agent] trust_bundle_file\` 指回锚（有 gateway-ca 时用 CA 根）。
   2. **别对已有配置跑 \`wist-gateway init-config\`**：整份重写，admin token 会变。
 EOF
 

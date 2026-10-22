@@ -84,9 +84,8 @@ collect_files() {
     [[ -e "${root}/${rel}" ]] && printf '%s\n' "${rel}"
   done
   if [[ "${LEVEL}" == "restore" ]]; then
-    for rel in configs/gateway/wist-gateway.value.json; do
-      [[ -e "${root}/${rel}" ]] && printf '%s\n' "${rel}"
-    done
+    local value_rel="configs/gateway/wist-gateway.value.json"
+    [[ -e "${root}/${value_rel}" ]] && printf '%s\n' "${value_rel}"
     for f in "${root}"/configs/gateway/state/*.db "${root}"/configs/gateway/state/*.db-wal "${root}"/configs/gateway/state/*.db-shm; do
       [[ -e "${f}" ]] && printf '%s\n' "configs/gateway/state/$(basename "${f}")"
     done

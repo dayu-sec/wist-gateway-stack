@@ -148,7 +148,7 @@ show_repo() { # $1=仓库目录名 $2=state tag $3=state revision $4..=要比对
     return
   fi
   head=$(cat "$repo/.git/HEAD")
-  origin=$(sed -n "s/^[[:space:]]*url = //p" "$repo/.git/config" | head -n 1)
+  origin=$(sed -n "s/^[[:space:]]*url = //p" "$repo/.git/config" | sed -n '1p')
   tags=$({ ls "$repo/.git/refs/tags" 2>/dev/null
            sed -n "s/^[0-9a-f]\{40\} refs\/tags\///p" "$repo/.git/packed-refs" 2>/dev/null
          } | sort -u | tr "\n" " ")
@@ -187,7 +187,9 @@ show_repo() { # $1=仓库目录名 $2=state tag $3=state revision $4..=要比对
         }' "$a" "$b" | LC_ALL=C sort)
       cnt=$(printf "%s\n" "$report" | grep -c .)
       printf "      %-12s 有差异（%s 处）：\n" "$sub" "$cnt"
-      printf "%s\n" "$report" | head -n 20 | sed "s/^/        /"
+      # 不用 `head -n 20 | sed`：head 提前关管道会让上游 printf 吃 SIGPIPE，
+      # 在 `set -e` + `pipefail` 下整段显示会无声中断（现场“什么都没打印”）。
+      printf "%s\n" "$report" | sed -n '1,20s/^/        /p'
       [ "$cnt" -gt 20 ] && printf "        …… 仅列前 20 处\n"
     fi
     rm -f "$a" "$b"

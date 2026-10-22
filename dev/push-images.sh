@@ -327,6 +327,7 @@ printf '%s\n' "${IMAGES}" | while IFS= read -r img; do
   base="${name##*/}"
 
   # 排除 wist*（未加引号 = 让 glob 生效）
+  # shellcheck disable=SC2254  # 有意让 ${EXCLUDE_GLOB} 当 glob 展开（它由 --exclude 传入）
   case "${base}" in
     ${EXCLUDE_GLOB}) continue ;;
   esac
@@ -473,7 +474,7 @@ while IFS='|' read -r src dest base; do
       push_err="${push_out}"
     else
       printf '%s\n' "${push_out}" | sed -n '/digest:/p'
-      expected="$(printf '%s\n' "${push_out}" | sed -n 's/.*digest: \(sha256:[0-9a-f]\{1,\}\).*/\1/p' | head -n1)"
+      expected="$(printf '%s\n' "${push_out}" | sed -n 's/.*digest: \(sha256:[0-9a-f]\{1,\}\).*/\1/p' | sed -n '1p')"
     fi
   fi
 

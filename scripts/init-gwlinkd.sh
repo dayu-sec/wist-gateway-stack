@@ -32,6 +32,13 @@
 # 幂等：内容与当前一致就跳过（不碰 mtime）。
 set -euo pipefail
 
+# `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
+# 任何未被 if/&& 接住的失败都把行号打到 stderr。
+# 为什么用 $0 / $? 而不用中间变量：`$(basename "$0")` 是**命令替换**，
+# 在同一个字符串里先展开它会把 `$?` 冲成 0（已实测），行号与退出码就都错了。
+trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
+
+
 OUT_DIR="${1:-configs/gwlinkd}"
 VALUE_JSON="${OUT_DIR}/gwlinkd.value.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

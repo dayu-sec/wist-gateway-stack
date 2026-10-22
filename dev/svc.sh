@@ -599,7 +599,7 @@ ensure_gateway_secret() {
   # 确保 `admin_token` 键存在（文件缺则建、键缺则补；已有其它键与已有 token 一律保留）。
   [[ -f "${GATEWAY_SEC_FILE}" ]] || : >"${GATEWAY_SEC_FILE}"
   local literal
-  literal="$(sed -n 's/^[[:space:]]*admin_api_token[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | head -1)"
+  literal="$(sed -n 's/^[[:space:]]*admin_api_token[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${config}" | sed -n '1p')"
   python3 - "${GATEWAY_SEC_FILE}" "${literal}" <<'PY'
 import re, secrets, sys
 path, literal = sys.argv[1], sys.argv[2]
@@ -979,6 +979,8 @@ start_forward() {
   #   用户身份：`( exec nohup … ) &` —— 与 web 同一口径，脚本退出也不影响它。
   local fwd_args=("${FORWARD_LISTEN}" "${target}" --bind "${FORWARD_BIND}" --pidfile "${FORWARD_PIDFILE}")
   if [[ -n "${sudo_cmd}" ]]; then
+    # 重定向由**调用者**（部署账号）打开：FORWARD_LOG 默认在 /tmp 下，不需要 root 写权限。
+    # shellcheck disable=SC2024
     sudo -b python3 "${FORWARD_SCRIPT}" "${fwd_args[@]}" >"${FORWARD_LOG}" 2>&1
   else
     (

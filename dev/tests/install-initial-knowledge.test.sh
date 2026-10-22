@@ -58,5 +58,21 @@ for f in catalog.toml packs.toml templates.toml purpose-rules.toml aspect-polici
 done
 chk "五份数据都就位" "" "${missing}"
 
+echo "== 4) manifest 里有多处 \"version\"（包内每份数据各带版本）→ 不许因管道提前关闭而死 =="
+# 旧实现是 `sed … | head -n1`：head 读完第一行就关管道，sed 接着写会吃 SIGPIPE（141），
+# 在 `set -e` + `pipefail` 下整个 localize **无声退 1**（输出里一行都不会多出来）。
+python3 - "${STAGE}/manifest.json" <<'PY'
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write("{\n")
+    handle.write(",\n".join(f'  "version": "9.9.{i}"' for i in range(1, 5001)))
+    handle.write("\n}\n")
+PY
+tar -czf "${TMP}/site/packages/${PKG_NAME}" -C "${TMP}/stage" wist-knowledge-9.9.9-test
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge" KNOWLEDGE_PATH="v9.9.9/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+chk "多处 version 时 exit 0（不因 SIGPIPE 无声退出）" "0" "${rc}"
+has "包版本：9.9.1" "${out}" "取的是第一处 version"
+
 echo
 if [[ "${fail}" == "0" ]]; then echo "全部通过"; else echo "存在失败项"; exit 1; fi

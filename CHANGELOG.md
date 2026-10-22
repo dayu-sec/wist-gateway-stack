@@ -21,7 +21,16 @@
   分工：**栈检查器管文件与约定**（模板渲染、挂载、包配对），**组件管自己的键语义**
   （`deny_unknown_fields` + `diagnose`）—— 只有组件知道键是什么意思。
 
+- **体检接入**：`flow diagnose` 现在跑两段——wparse 漂移（重建结果文件）+ 栈级检查（**追加** `checks[]`）。
+  结果文件已有合法 Flow Result 时追加而不是覆盖，所以一个 flow 里多个诊断动作不会互相吞掉。
+  注：栈级检查必须排在重建者之后。
+
 ### 修复
+
+- **`public_base_url` 是派生值但只在新建时写**（`scripts/init-gateway.sh`）：
+  `value.json` 已存在时只同步 `victoria_metrics_url`，域名之后怎么改都不再落进去。
+  典型症状：脚本拿着 `https://gw.example.com` 去 POST——**占位值不会报错，只会连到不存在的域名**
+  （知识库导入就踩过）。现在显式给了 `WEB_DOMAIN` 就同步对齐。
 
 - **`push-agent-package` 计划必然失败（「未配置 agent_package_drop_dir」）**：
   `agent_package_drop_dir` / `agent_package_container_dir` 被渲染在 `[[upgrade.component]]` **之后**，
@@ -35,6 +44,11 @@
   多交付几轮就会把 `wist-knowledge-*.tar.gz` 及其 `.sig` 当旧的删掉。
   现在宿主落 `<PACKAGE_DIR>/agents`、容器路径为 `<GWLINKD_AGENT_PACKAGE_CONTAINER_DIR>/agents`
   （同一个 compose 挂载，不需要新增 volume）。
+
+- **发布包内含栈检查器**：CI 为 `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl` /
+  `aarch64-apple-darwin` 三个平台编译 `wist-stackcheck`，`tar -rf` 追加到**同一个**部署包里
+  （`bin/<triple>/`）。制品仍是平台无关的单包、同一个下载地址，升级协议不用改；
+  体积 +约 1.4 MB。其他架构运行时会明确报错（不静默跳过）。
 
 ### 升级注意
 

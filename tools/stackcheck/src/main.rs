@@ -23,6 +23,7 @@ wist-stackcheck — 栈级配置检查
   --root <dir>     栈根（含 sys/ configs/ packages/ identity/），缺省 = 当前目录
   --format <fmt>   text（缺省，人读）| json（Flow Result v1）
   --result <file>  另写一份 JSON 结果；也认环境变量 GOPS_DIAGNOSE_RESULT
+                   （**追加**到已有 `checks[]`：同一份体检里可以多个流程段各自报）
   -h, --help       本帮助
 
 退出码：
@@ -55,11 +56,44 @@ fn main() -> ExitCode {
     let Some(path) = &args.result else {
         return ExitCode::from(verdict.exit_code());
     };
-    if let Err(err) = std::fs::write(path, format!("{}\n", to_json(&findings))) {
+    if let Err(err) = write_result(path, &to_json(&findings)) {
         eprintln!("写结果文件失败 {}：{err}", path.display());
         return ExitCode::from(2);
     }
     ExitCode::SUCCESS
+}
+
+/// 写 Flow Result v1；文件已存在时**追加** `checks[]`。
+///
+/// `gops run diagnose` 只读**一个**结果文件，而一个 flow 里可以有多个诊断动作
+/// （wparse 漂移、栈级配置…）。谁都不该默默覆盖前面那份，所以这里做追加：
+/// 先读旧 `checks`，再接上自己的。旧文件不是合法 JSON 时告警后重写（不静默丢数据）。
+fn write_result(path: &std::path::Path, mine: &serde_json::Value) -> std::io::Result<()> {
+    let mut checks: Vec<serde_json::Value> = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(path)
+        && !text.trim().is_empty()
+    {
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(existing) => {
+                if let Some(items) = existing.get("checks").and_then(|value| value.as_array()) {
+                    checks.extend(items.iter().cloned());
+                }
+            }
+            Err(err) => eprintln!(
+                "提示：{} 不是合法的 Flow Result（{err}），将覆盖",
+                path.display()
+            ),
+        }
+    }
+    if let Some(items) = mine.get("checks").and_then(|value| value.as_array()) {
+        checks.extend(items.iter().cloned());
+    }
+    let merged = serde_json::json!({
+        "schema_version": "1",
+        "source": "diagnose",
+        "checks": checks,
+    });
+    std::fs::write(path, format!("{merged}\n"))
 }
 
 struct Args {
@@ -193,5 +227,36 @@ mod tests {
     #[test]
     fn rejects_unknown_flag() {
         assert!(parse(&["--nope"]).is_err());
+    }
+
+    #[test]
+    fn appends_findings_to_an_existing_result_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "wist-stackcheck-merge-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("result.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":"1","source":"diagnose","checks":[{"code":"wparse.work_drift","status":"ok","title":"t","detail":"","hint":""}]}"#,
+        )
+        .unwrap();
+
+        let mine = serde_json::json!({
+            "checks": [{"code": "package.drop_dir", "status": "fail", "title": "t", "detail": "", "hint": ""}]
+        });
+        write_result(&path, &mine).unwrap();
+
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let codes: Vec<&str> = merged["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|check| check["code"].as_str().unwrap())
+            .collect();
+        assert_eq!(codes, vec!["wparse.work_drift", "package.drop_dir"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

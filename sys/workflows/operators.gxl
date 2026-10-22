@@ -119,7 +119,11 @@ mod operators {
   // 把 `checks[]` 写到 `GOPS_DIAGNOSE_RESULT`。**只读**：不改 /data、不 chmod、不重启。
   // 注意：GXL 里读 gops 注入的环境变量要用 $(printenv X)（`${X}` 取的是流程变量空间）。
   flow diagnose {
+    // 1) wparse：工作目录 vs 远端克隆的逐文件比对。**必须第一个跑**：它 `>` 重建结果文件。
     gx.cmd ( "./scripts/diagnose-wparse-drift.sh" );
+    // 2) 栈级配置：目录/挂载自洽、渲染新鲜度、占位值、密钥权限、知识库包签名。
+    //    它是**追加**式（读旧 checks 再接上自己的），所以必须排在重建者之后。
+    gx.cmd ( "./scripts/check-stack.sh" );
   }
 
 }

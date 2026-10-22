@@ -192,8 +192,9 @@ PY
 chmod 600 "$SEC_FILE"
 
 # ④ 渲染值文件（public_base_url / victoria_metrics_url / 验签公钥）——**不含 admin token**。
-#    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变，**每轮都对齐到当前值**，
-#    免得「复用已有 value.json」把错值一直带进渲染结果（症状：网关跑在宿主时「数据采集」页 502）。
+#    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变、public_base_url
+#    随 WEB_DOMAIN 而变，两项都**每轮对齐到当前值**，免得「复用已有 value.json」把错值一直
+#    带进渲染结果（症状：数据采集页 502；或脚本拿占位域名去 POST）。
 if [[ ! -f "$VALUE_JSON" ]]; then
   if [[ -z "$domain" ]]; then
     echo "需要域名才能新建 ${VALUE_JSON}（public_base_url）：设 WEB_DOMAIN=<域名> 再跑，或用 \`gops sys localize\`" >&2
@@ -212,10 +213,10 @@ else
     echo "需要 python3 才能更新 ${VALUE_JSON}" >&2
     exit 1
   }
-  python3 - "$VALUE_JSON" "$VM_URL" <<'PY'
+  python3 - "$VALUE_JSON" "$VM_URL" "$domain" <<'PY'
 import json, os, sys, tempfile
 
-path, vm_url = sys.argv[1], sys.argv[2]
+path, vm_url, domain = sys.argv[1], sys.argv[2], sys.argv[3].strip()
 with open(path) as handle:
     value = json.load(handle)
 # admin token 已迁到密钥文件（`.wist/sec-value.yml`）：就地从 value.json 里清掉。
@@ -224,6 +225,14 @@ value.pop("admin_api_token", None)
 if value.get("victoria_metrics_url", "") != vm_url:
     value["victoria_metrics_url"] = vm_url
     changed = True
+# public_base_url 同样是**派生值**（host = WEB_DOMAIN）：显式给了 WEB_DOMAIN 就对齐。
+# 以前只在新建时写，域名一改就永远停在旧值 —— 典型症状是脚本拿着 `gw.example.com`
+# 去 POST（占位值不会报错，只会连到不存在的域名）。
+if domain:
+    want = f"https://{domain}"
+    if value.get("public_base_url") != want:
+        value["public_base_url"] = want
+        changed = True
 if not changed:
     print(f"  值文件已是最新（victoria_metrics_url={vm_url!r}），跳过")
     sys.exit(0)

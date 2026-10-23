@@ -3,6 +3,44 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.9-alpha] - 2026-10-23
+
+### 修复
+
+- **`wparse` 因「信任锚被 docker 建成目录」而无限重启**（现场 `restarting` 52 次，日志
+  `sink error → build victoriametric client failed`；`exit_code=1`）。
+  链路：`identity/gwlinkd/control-center.pem` 缺失时，compose 里那条**单文件** bind 会被 docker
+  **静默建成一个同名空目录**（不报错）；`SSL_CERT_FILE` 指到它之后，引擎构造 HTTP 客户端
+  （reqwest）失败 ⇒ **每个** sink 都建不起来 ⇒ 进程退出、容器重启循环。症状看着像「连不上
+  VictoriaMetrics」，而 VictoriaMetrics 一直是健康的。
+
+  **断根方式（结构契约，不只是打补丁）** —— 中心信任锚是**可选**的（公网 CA 的中心用不到、
+  中心还没接入时也不存在），两个状态都必须能跑：
+
+  1. **容器不再挂单文件**：只挂目录 `identity/gwlinkd/trust/`（可能为空），docker 就没有把
+     文件建成目录的机会；
+  2. **真身与投影分开**：真身仍是 `identity/gwlinkd/control-center.pem`（gwlinkd 页面接入时
+     写的就是它，不动）；`scripts/init-gwlinkd-pub.sh` 每次 localize 建目录并投影：
+     有可读 PEM 就拷过去，没有就**删掉投影**（不留陈旧 CA）；
+  3. **入口脚本兜底**：投影不是可读 PEM 时 `unset SSL_CERT_FILE` / `GIT_SSL_CAINFO`
+     （回落系统根）并打一行 info —— 文件再缺也不会拖死容器。
+
+### 工程
+
+- **`identity.trust_anchor`（新）**：信任锚路径是**目录**（docker 建的）或不是 `BEGIN CERTIFICATE`
+  ⇒ **阻断 FAIL**，并给出 `rmdir` 的修法；文件缺失仍按「回落系统根」放行。
+- **`identity.trust_projection`（新）**：真身与容器投影必须同步（缺失/陈旧 → WARN，
+  提示跑 `gops sys localize`）；两头都没有 = 合法现场，报 OK。
+- **`layout.bind_source_type`（新）**：compose 里**文件类** bind 源（容器目标末段含 `.`，如
+  `*.pem` / `*.toml` / `*.conf`）在宿主上必须是文件；「源是目录、目标像文件」直接 FAIL。
+  变量源（`${PACKAGE_DIR}`）与缺失源不在此判。
+- **`identity.gwlinkd_paths` 的相对路径解析**：`GWLINKD_TRUST_BUNDLE=./identity/...` 原先
+  按进程 CWD 判存在，`--root` 指到别处时会把正常部署报成悬空；改为相对**栈根**解析。
+- `scripts/init-gwlinkd-pub.sh` 额外清掉信任锚位置上的**空目录**（只删空目录）：那是 docker
+  留下的残骸，会把「CA 写回原位」永久堵死。
+- 新增脚本回归 `dev/tests/init-gwlinkd-pub.test.sh`：空目录清理 / 非空目录不碰 / 真 PEM 幂等 /
+  死键清理 / 投影同步与撤销 / 投影位被占时明确报错。
+
 ## [0.2.8-alpha] - 2026-10-23
 
 ### 组件

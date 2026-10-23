@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.10-alpha] - 2026-10-23
+
+### 修复
+
+- **`data-plane-run/work` 里的嵌套挂载点被 Docker 以 root 创建，导致 `gops sys perms --apply`
+  整片失败**（`d data-plane-run/work/.run 2755 0:999 → 2770 1000:999 [failed]`，属主 `0`）。
+  父挂载 `${WPARSE_RUN_WORK}:/data` 生效后，`/data/data`、`/data/.run`、`/data/identity/*`
+  这些子挂载点只能落在**宿主**工作目录里；缺失时由 Docker 守护进程以 root 建（空目录/空文件），
+  部署账号既不能 `chown` 也不能 `chmod`。
+  `scripts/init-wparse-admin.sh` 现在在 `localize` 阶段（早于 `perms --apply`）**以部署账号预建**
+  `work/{data,.run,identity,identity/trust}` 与 `identity/admin-tls.*.pem`；Docker 看到已存在
+  就不再创建。老现场会打印一行带 `sudo chown -R "$(id -u)":999 data-plane-run/work` 的提示。
+- compose 注释同步修正：之前写「挂载点都建在容器层里、宿主目录保持干净」是不对的。
+
 ## [0.2.9-alpha] - 2026-10-23
 
 ### 修复

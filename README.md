@@ -248,6 +248,7 @@ compose 还挂这些路径：
 | gateway 无限重启 | `failed to load secrets /secrets/sec-value.yml: system error`（`-> Info: read file`） | `.wist/sec-value.yml` 被 `init-gateway.sh` 以 `600` 生成，uid 999 读不到 |
 | gateway 不重启但日志写入 500 | `log_ingest_append_failed … Permission denied`；启动时 `打开日志文件 … 失败` | `configs/gateway/logs/*.log`、`state/logs/*.ndjson*` 是 `root:999 644`（备份恢复 / 曾被 root 跑过），uid 999 只能读 |
 | 安装包无法更新 / 历史清理失败 | 上传同名 `state/install-package/current/<triple>` 报错 | 恢复来的 `state/install-package/**` 属 `root:999 644`，容器能建新文件但不能覆盖旧文件 |
+| 权限对齐整片报 `Operation not permitted` | `d data-plane-run/work/.run 2755 0:999 → 2770 1000:999 [failed]` | `work/` 下的**嵌套挂载点**（`data` / `.run` / `identity/*`）是 Docker 守护进程以 **root** 建的；新版本由 `init-wparse-admin.sh` 预建，老现场需管理员 `sudo chown -R` 一次 |
 
 （web 跟着起不来、报 `host not found in upstream "gateway"` 只是被网关拖累。web 的 nginx 已改成
 `resolver` + 变量式 `proxy_pass` **运行时**解析 upstream：网关短暂不在时 `/api` 回 502，web 本身不再重启。）
@@ -287,8 +288,19 @@ gops sys perms --apply    # 幂等修复
 >
 > **现在有两道闸门会提前拦住它**（不用等到逐项 `EPERM`）：`localize` 第一步的
 > `scripts/check-stack.sh --gate --only prereq` 里有 `prereq.container_gid`（从 compose 的
-> `user:` 派生 gid、与进程组比对，退出码非 0 就中止）；`gops sys perms` 也在动手前判定一次，
-> 把 N 项失败收成一条带 `usermod` 命令的 `[FAIL]`。
+> `user:` 派生 gid、与进程组比对，退出码非 0 就中止）；`gops sys perms`（≥ 2.10.3）也在动手前
+> 判定一次，把 N 项失败收成一条带 `usermod` 命令的 `[FAIL]`；属主不可改（root / 别的账号）
+> 则收成一条带 `sudo chown -R` 的 `[FAIL]`（gops ≥ 2.10.4）。
+
+> **第二类宿主预置：属主不是部署账号**（现场常见 `0:999`）。`chown` 需要提权，gops 不做；
+> 常见来源是 Docker 为**嵌套挂载点**在父 bind（`data-plane-run/work`）里建的空目录/空文件。
+> 新现场由 `scripts/init-wparse-admin.sh` 先以部署账号预建（`localize` 阶段，早于 `perms --apply`）；
+> 老现场一次性修：
+>
+> ```bash
+> sudo chown -R "$(id -u)":999 data-plane-run/work
+> gops sys perms --apply        # 再收模式（0660/2770）
+> ```
 
 生命周期：`gops sys localize` 末尾做一次**只告警**的自检；`gops run start` preflight（未对齐即停）；`gops prj restore` / `prj upgrade` 自动 `--apply`。`localize` 的阶段流程也会在最后跑一次 `gops sys perms --apply`，保证「localize 完就能 start」。
 

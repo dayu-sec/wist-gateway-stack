@@ -44,6 +44,49 @@ warn() { echo "  ⚠ $*" >&2; }
 
 mkdir -p "${RUN_DIR}/work" "${RUN_DIR}/.run" "${RUN_DIR}/data"
 
+# 预建 `work/` 里的**嵌套挂载点**：`/data/data`（bind）、`/data/.run`（命名卷）、
+# `/data/identity/{admin-tls.*.pem,trust}`（文件与目录挂载）。
+#
+# 为什么必须在这里建：父挂载 `${WPARSE_RUN_WORK}:/data` 生效后，子挂载点只能落在
+# **宿主**这份工作目录里；缺失时由 Docker 守护进程以 **root** 创建（空目录/空文件）。
+# 一旦如此，部署账号既 chown 不动也 chmod 不动 → `gops sys perms --apply` 只会得到
+# 整片 `Operation not permitted`（属主 0:999），只能管理员 `sudo chown -R` 收拾。
+# 本脚本以部署账号跑，提前建好，Docker 看到已存在就不会再创建。
+NESTED_MOUNTS=(
+  "${RUN_DIR}/work/data"
+  "${RUN_DIR}/work/.run"
+  "${RUN_DIR}/work/identity"
+  "${RUN_DIR}/work/identity/trust"
+)
+mkdir -p "${NESTED_MOUNTS[@]}"
+NESTED_FILES=(
+  "${RUN_DIR}/work/identity/admin-tls.crt.pem"
+  "${RUN_DIR}/work/identity/admin-tls.key.pem"
+)
+for path in "${NESTED_FILES[@]}"; do
+  # 旧现场可能因「源缺失」被 Docker 把挂载点建成同名**目录**（与 0.2.9 信任锚同一个坑）：
+  # 空的直接清掉（只删空目录），非空的不碰，交给人确认。
+  if [[ -d "${path}" ]]; then
+    if rmdir "${path}" 2>/dev/null; then
+      warn "清掉 Docker 留下的空目录挂载点：${path}"
+    else
+      warn "${path} 是目录且非空（Docker 残留？），请手工确认后删除，再重跑 localize"
+      continue
+    fi
+  fi
+  : >>"${path}"
+done
+
+# 老现场（本脚本这一步之前建成的）可能已被 root 占有：非 root 改不动，只能请管理员一次性修。
+for path in "${NESTED_MOUNTS[@]}" "${NESTED_FILES[@]}"; do
+  if [[ -e "${path}" && ! -O "${path}" ]]; then
+    warn "${path} 的属主不是当前部署账号（多由 Docker 以 root 创建）"
+    warn "  一次性修复（管理员）：sudo chown -R $(id -u):999 ${RUN_DIR}/work"
+    warn "  之后 'gops sys perms --apply' 会把模式收成 0660/2770"
+    break
+  fi
+done
+
 if [[ -f "${TOKEN_HOST}" && -s "${TOKEN_HOST}" ]]; then
   note "admin API token 已存在，跳过：${TOKEN_HOST}"
 else

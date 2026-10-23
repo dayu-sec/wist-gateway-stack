@@ -72,9 +72,12 @@ services:
   #   - 配置从 sys/data-plane/（只读种子）复制到 data-plane-run/work（可写运行根）：
   #     `[project_remote]` 会把 Git 内容写进工作根，所以不能直接只读挂载当工作根。
   #   - 运行态直接挂到 /data 下的两个子路径：/data/data（输出）与 /data/.run（引擎状态）。
-  # 关键：**不挂 /data 这一整根**。把运行目录挂成 /data（父挂载）、配置再嵌进去，会让 Docker
-  # 在宿主运行目录里建出一堆空白挂载点目录；改成直接挂 /data/data 与 /data/.run 后，所有
-  # 挂载点都建在容器层里，宿主运行目录保持干净。
+  # 关键：**不把输出/运行态挂成 /data 这一整根**（否则宿主的数据目录就是容器根，配置还要嵌进去）。
+  # 但要注意：`${WPARSE_RUN_WORK}:/data` 本身就是父 bind，**子挂载点（/data/data、/data/.run、
+  # /data/identity/{admin-tls.*.pem,trust}）只能落在宿主这份工作目录里**，缺失时由 Docker 守护
+  # 进程以 **root** 建（空目录 / 空文件）。那样部署账号既 chown 不动也 chmod 不动 → `gops sys
+  # perms --apply` 会整片「属主 0:999」失败。所以 `scripts/init-wparse-admin.sh`（localize 阶段，
+  # 先于 perms apply）以部署账号预建这些嵌套挂载点；Docker 看到已存在就不会再创建。
   # 运行态用**宿主目录 bind 挂载**（不是命名卷）：属主/权限由 `gops sys perms` 对齐
   # （属主=部署账号、属组=999、2770 setgid）——不靠「目录是谁创建的」。
   #

@@ -48,11 +48,12 @@
 >
 > **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：`sys/data-plane/` 是**只读种子**，
 > 启动时把 `conf/connectors/models/topology` 与项目根的 `wparse.local.toml` 复制到可写运行根 `${WPARSE_RUN_WORK} → /data`
-> （`cp -an`，只补缺失，`[project_remote]` 会更新前四个目录，但**不会碰** `wparse.local.toml`）；输出 `${WPARSE_RUN_DATA} → /data/data`；
+> （`cp --update=none`，只补缺失，`[project_remote]` 会更新前四个目录，但**不会碰** `wparse.local.toml`）；输出 `${WPARSE_RUN_DATA} → /data/data`；
 > 运行态 `${WPARSE_RUN_STATE}` 只作为**一次性种子**复制进命名卷 `wist-gateway-stack-wparse-run`
 > （`/data/.run`）—— 因为 admin token 必须是 0600，而 `gops sys perms` 会把 bind 文件改成 0660。
 > **Linux 部署要保证 `data-plane-run/work` 与 `data-plane-run/data` 对 uid 999 可写**
-> （`gops sys perms --apply` 会从 compose 派生并对齐；也可手工 `chown -R 999:999`）。
+> （`gops sys perms --apply` 会从 compose 派生并对齐；也可手工 `sudo chown -R 999:999 data-plane-run/work`）。
+> ⚠ 手工 chown 时**不要**改成部署账号（0.2.12 之前的入口用 `cp -a` 补种子，要求 `conf/connectors/models/topology` 属主是容器用户）。
 >
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
@@ -248,7 +249,8 @@ compose 还挂这些路径：
 | gateway 无限重启 | `failed to load secrets /secrets/sec-value.yml: system error`（`-> Info: read file`） | `.wist/sec-value.yml` 被 `init-gateway.sh` 以 `600` 生成，uid 999 读不到 |
 | gateway 不重启但日志写入 500 | `log_ingest_append_failed … Permission denied`；启动时 `打开日志文件 … 失败` | `configs/gateway/logs/*.log`、`state/logs/*.ndjson*` 是 `root:999 644`（备份恢复 / 曾被 root 跑过），uid 999 只能读 |
 | 安装包无法更新 / 历史清理失败 | 上传同名 `state/install-package/current/<triple>` 报错 | 恢复来的 `state/install-package/**` 属 `root:999 644`，容器能建新文件但不能覆盖旧文件 |
-| 权限对齐整片报 `Operation not permitted` | `d data-plane-run/work/.run 2755 0:999 → 2770 1000:999 [failed]` | `work/` 下的**嵌套挂载点**（`data` / `.run` / `identity/*`）是 Docker 守护进程以 **root** 建的；新版本由 `init-wparse-admin.sh` 预建，老现场需管理员 `sudo chown -R` 一次 |
+| 权限对齐整片报 `Operation not permitted` | `d data-plane-run/work/.run 2755 0:999 → 2770 1000:999 [failed]` | `work/` 下的**嵌套挂载点**（`data` / `.run` / `identity/*`）是 Docker 守护进程以 **root** 建的；新版本由 `init-wparse-admin.sh` 预建，老现场只需对**这些路径**执行 `sudo chown` |
+| wparse 无限重启（exit 1） | `cp: preserving times for '/data/conf/.': Operation not permitted` | 种子副本（`conf/connectors/models/topology`）被改成了部署账号属主，而 **0.2.12 之前**的入口用 `cp -a` 补种子（隐含 `-p`，要对目录 utime）→ `EPERM` → `set -e` → 重启循环。修：`sudo chown -R 999:999` 这几棵树；或升到 0.2.12（入口已改成 `cp -R --update=none`，不再依赖属主） |
 
 （web 跟着起不来、报 `host not found in upstream "gateway"` 只是被网关拖累。web 的 nginx 已改成
 `resolver` + 变量式 `proxy_pass` **运行时**解析 upstream：网关短暂不在时 `/api` 回 502，web 本身不再重启。）
@@ -295,12 +297,16 @@ gops sys perms --apply    # 幂等修复
 > **第二类宿主预置：属主不是部署账号**（现场常见 `0:999`）。`chown` 需要提权，gops 不做；
 > 常见来源是 Docker 为**嵌套挂载点**在父 bind（`data-plane-run/work`）里建的空目录/空文件。
 > 新现场由 `scripts/init-wparse-admin.sh` 先以部署账号预建（`localize` 阶段，早于 `perms --apply`）；
-> 老现场一次性修：
+> 老现场一次性修，**只对这些挂载点**：
 >
 > ```bash
-> sudo chown -R "$(id -u)":999 data-plane-run/work
+> sudo chown -R "$(id -u)":999 data-plane-run/work/{data,.run,identity}
 > gops sys perms --apply        # 再收模式（0660/2770）
 > ```
+>
+> ⚠ **不要 chown 整棵 `work/`**：`conf/connectors/models/topology` 是容器自己复制/维护的种子副本。
+> 0.2.12 之前的入口用 `cp -a`（隐含 `-p`）补种子，需要这些目录的**属主是容器用户**；
+> 改成部署账号会让 `cp` 在 `utime` 上 `EPERM`、容器退 1 并无限重启（0.2.12 起已不再依赖属主）。
 
 生命周期：`gops sys localize` 末尾做一次**只告警**的自检；`gops run start` preflight（未对齐即停）；`gops prj restore` / `prj upgrade` 自动 `--apply`。`localize` 的阶段流程也会在最后跑一次 `gops sys perms --apply`，保证「localize 完就能 start」。
 

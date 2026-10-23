@@ -133,13 +133,18 @@ services:
         set -e
         mkdir -p /data/data /data/.run
         # 只读种子 → 可写工作根：只补缺失，不覆盖现场（项目远端会更新工作根）。
+        # ⚠ **不要用 `cp -a`**：`-a` 隐含 `-p`，会对目标**目录**写回时间戳；而工作根的属主是
+        # 部署账号（`gops sys perms` 对齐），容器（999）不是属主 →
+        # `preserving times for '/data/conf/.': Operation not permitted` → cp 退 1 →
+        # `set -e` 放大成「容器退出 1、无限重启」。`--update=none` 行为等价于 `-n`，
+        # 但不保留时间/属主，也不打 coreutils 的 -n 弃用警告（需 coreutils ≥ 9.1，本镜像 9.4）。
         for d in conf connectors models topology; do
           mkdir -p "/data/$$d"
-          cp -an "/seed/$$d/." "/data/$$d/"
+          cp -R --update=none "/seed/$$d/." "/data/$$d/"
         done
         # 站点本地覆盖层（[admin_api]）：位于 conf/ 之外，project_remote 不会替换；缺失才补。
         if [ -f /seed/wparse.local.toml ]; then
-          cp -an /seed/wparse.local.toml /data/wparse.local.toml
+          cp --update=none /seed/wparse.local.toml /data/wparse.local.toml
         fi
         # 信任锚**可选**（公网 CA 的中心不需要；中心还没接入时也没有）。
         # 为什么不能直接挂文件：docker 对**缺失的 bind 文件源**不报错，而是建一个同名**目录**顶上；

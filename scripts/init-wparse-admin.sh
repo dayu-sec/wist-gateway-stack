@@ -78,14 +78,25 @@ for path in "${NESTED_FILES[@]}"; do
 done
 
 # 老现场（本脚本这一步之前建成的）可能已被 root 占有：非 root 改不动，只能请管理员一次性修。
+# ⚠ 只能 chown **这些路径**：工作根里 conf/connectors/models/topology 是容器自己的，
+#    0.2.12 之前的入口用 `cp -a` 补种子（需要目录属主是容器用户），整棵 chown 会把它弄挂。
+foreign=()
 for path in "${NESTED_MOUNTS[@]}" "${NESTED_FILES[@]}"; do
   if [[ -e "${path}" && ! -O "${path}" ]]; then
-    warn "${path} 的属主不是当前部署账号（多由 Docker 以 root 创建）"
-    warn "  一次性修复（管理员）：sudo chown -R $(id -u):999 ${RUN_DIR}/work"
-    warn "  之后 'gops sys perms --apply' 会把模式收成 0660/2770"
-    break
+    foreign+=("${path}")
   fi
 done
+if (( ${#foreign[@]} > 0 )); then
+  warn "这些挂载点/文件的属主不是当前部署账号（多由 Docker 以 root 创建）："
+  for path in "${foreign[@]}"; do
+    warn "  ${path}"
+  done
+  warn "  一次性修复（管理员，只对这些路径）："
+  for path in "${foreign[@]}"; do
+    warn "    sudo chown -R $(id -u):999 ${path}"
+  done
+  warn "  再跑一次 'gops sys perms --apply' 把模式收成 0660/2770"
+fi
 
 if [[ -f "${TOKEN_HOST}" && -s "${TOKEN_HOST}" ]]; then
   note "admin API token 已存在，跳过：${TOKEN_HOST}"

@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.12-alpha] - 2026-10-23
+
+### 修复
+
+- **`wparse` 因 `cp -a` 保留时间戳失败而无限重启**：现场日志
+  `cp: preserving times for '/data/conf/.': Operation not permitted`，容器 `exit 1`、重启 12 次。
+  `-a` 隐含 `-p`，会对目标**目录**写回时间戳；而工作根属主是部署账号（`gops sys perms` 对齐），
+  容器（999）不是属主 → `EPERM` → `cp` 退 1 → `set -e` 放大成重启循环。
+  入口补种子改为 `cp -R --update=none`（单文件同）：只补缺失，不保留时间/属主；
+  不再依赖 `conf/connectors/models/topology` 的属主是谁。
+- `init-wparse-admin.sh` 与 README 的“老现场一次性 chown”从**整棵 work/** 收窄到检测到的
+  **挂载点**，并说明：0.2.12 之前不要把 `conf/connectors/models/topology` 改成部署账号属主
+  （旧入口的 `cp -a` 需要它属于容器用户）。
+
 ## [0.2.11-alpha] - 2026-10-23
 
 ### 工程

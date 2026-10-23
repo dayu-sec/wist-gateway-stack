@@ -22,6 +22,7 @@ pub fn run_with(stack: &Stack, options: &Options) -> Vec<Finding> {
     // 前置条件放最前：它是「后面这些能不能成立」的前提。
     if options.wants("prereq") {
         out.extend(checks::prereq_toolchain());
+        out.extend(checks::prereq_container_gid(stack));
         out.extend(checks::prereq_tls_san(stack));
     }
     if options.wants("package") {

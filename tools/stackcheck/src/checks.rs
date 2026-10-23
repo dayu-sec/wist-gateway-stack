@@ -3,6 +3,7 @@
 //! 判据全部来自**栈自己生成的东西**：`sys/merged_vars.yml`（变量）、`configs/*`（渲染产物）、
 //! `sys/docker-compose.yml`（挂载）、`packages/`（投放区）、`identity/`（密钥）。
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -195,6 +196,314 @@ fn probe_san(stack: &Stack, cert: Option<&Path>, path: Option<&OsStr>) -> SanPro
         });
     }
     SanProbe::Read(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// `prereq.container_gid`：部署账号是否已在 compose 里**有 bind 挂载的非 root 服务**的 gid 组里。
+///
+/// 为什么算前置：`gops sys perms --apply` 以部署账号身份只做 `chmod`/`chgrp`，而内核判定
+/// `chgrp` 用的是「进程凭据里有没有这个 gid」（按**数字**比对，与 `/etc/group` 里有没有名字无关）。
+/// 缺这一步时 localize 最后一步会整片 `Operation not permitted`（`0 项待修 / N 项失败`），
+/// 而修复要 root（`usermod -aG`）、gops 明确不提权 —— 所以只能在这里一次性拦下。
+///
+/// 判据只看**有 bind 挂载**的服务：只用 named volume 的服务不需要宿主属组对齐。
+pub fn prereq_container_gid(stack: &Stack) -> Vec<Finding> {
+    const CODE: &str = "prereq.container_gid";
+
+    if !cfg!(target_os = "linux") {
+        return vec![Finding::ok(
+            CODE,
+            "非 Linux，跳过容器组检查",
+            "`gops sys perms` 只在 Linux 生效（macOS 上 bind 挂载不参与对齐）",
+        )];
+    }
+    let Some(compose_path) = compose_file(stack) else {
+        return Vec::new(); // 缺 compose 已由 layout.mounts 判
+    };
+    let Ok(compose) = fs::read_to_string(&compose_path) else {
+        return vec![Finding::warn(
+            CODE,
+            "读不到 compose，跳过容器组检查",
+            compose_path.display().to_string(),
+        )];
+    };
+    let (required, unnamed) = compose_container_gids(&compose);
+    if required.is_empty() && unnamed.is_empty() {
+        return vec![Finding::ok(CODE, "没有需要宿主属组对齐的非 root 服务", "")];
+    }
+    let Some(identity) = process_identity() else {
+        return vec![
+            Finding::warn(
+                CODE,
+                "读不到进程身份，跳过容器组检查",
+                "/proc/self/status 不可读",
+            )
+            .with_hint("手工确认：`id -G` 输出里应包含 compose 里服务 `user:` 的 gid"),
+        ];
+    };
+    container_gid_findings(CODE, &required, &unnamed, &identity)
+}
+
+/// 纯函数：给定「需要哪些 gid」与「当前进程的组」，产出判据（单测直接喂结果）。
+fn container_gid_findings(
+    code: &str,
+    required: &BTreeMap<u32, Vec<String>>,
+    unnamed: &[String],
+    identity: &ProcessIdentity,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+
+    // root 能 chgrp 到任意 gid，不存在「成员缺失」。
+    if identity.uid == 0 {
+        out.push(Finding::ok(
+            code,
+            "以 root 运行，跳过容器组检查",
+            "root 可 chgrp 到任意 gid（但 gops 的常规姿态是部署账号零 sudo）",
+        ));
+    } else {
+        let missing: Vec<(u32, &Vec<String>)> = required
+            .iter()
+            .filter(|(gid, _)| !identity.groups.contains(gid))
+            .map(|(gid, services)| (*gid, services))
+            .collect();
+        let groups = identity
+            .groups
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join("、");
+        if missing.is_empty() {
+            let have = required
+                .iter()
+                .map(|(gid, services)| format!("{gid}（{}）", services.join("、")))
+                .collect::<Vec<_>>()
+                .join("；");
+            out.push(Finding::ok(
+                code,
+                "部署账号已在容器 gid 组里",
+                format!("{have}；当前进程的组：{groups}"),
+            ));
+        } else {
+            let detail = missing
+                .iter()
+                .map(|(gid, services)| format!("{gid}（{}）", services.join("、")))
+                .collect::<Vec<_>>()
+                .join("；");
+            let gids = missing
+                .iter()
+                .map(|(gid, _)| gid.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            out.push(
+                Finding::fail(
+                    code,
+                    "部署账号不在容器 gid 组里，`gops sys perms --apply` 会整片失败",
+                    format!("缺：{detail}；当前进程的组：{groups}"),
+                )
+                .with_hint(format!(
+                    "管理员执行 `sudo groupadd -g <gid> <组名>`（该 gid 尚无组时）与 \
+                     `sudo usermod -aG {gids} <部署账号>`；**重新登录**（systemd 服务需重启单元）\
+                     后才生效，然后再跑 `gops sys localize`"
+                )),
+            );
+        }
+    }
+
+    // `user:` 是用户名时无法推导 gid：不阻断，但要说清楚为什么没法判。
+    if !unnamed.is_empty() {
+        out.push(
+            Finding::warn(
+                code,
+                "有服务用非数字 `user:`，无法推导宿主属组",
+                unnamed.join("；"),
+            )
+            .with_hint(
+                "写成 `user: \"<uid>:<gid>\"`，或在 `sys-prj.yml: perms.services.<name>` \
+                 声明 uid/gid（gops 会按它对齐）",
+            ),
+        );
+    }
+    out
+}
+
+/// 当前进程的身份（euid + 全部组）。直接读 `/proc/self/status`：
+/// 不 spawn 子进程、也不受 `id` 的参数语义影响。
+#[derive(Debug)]
+struct ProcessIdentity {
+    uid: u32,
+    groups: Vec<u32>,
+}
+
+fn process_identity() -> Option<ProcessIdentity> {
+    parse_process_identity(&fs::read_to_string("/proc/self/status").ok()?)
+}
+
+fn parse_process_identity(status: &str) -> Option<ProcessIdentity> {
+    let mut uid = None;
+    let mut egid = None;
+    let mut groups = Vec::new();
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Uid:") {
+            uid = rest.split_whitespace().nth(1)?.parse().ok();
+        } else if let Some(rest) = line.strip_prefix("Gid:") {
+            egid = rest.split_whitespace().nth(1)?.parse().ok();
+        } else if let Some(rest) = line.strip_prefix("Groups:") {
+            groups = rest
+                .split_whitespace()
+                .filter_map(|g| g.parse().ok())
+                .collect();
+        }
+    }
+    let uid = uid?;
+    // `Groups:` 只有补充组，主组要单独加（linux 的 getgroups 也不含 egid）。
+    if let Some(gid) = egid {
+        groups.push(gid);
+    }
+    groups.sort_unstable();
+    groups.dedup();
+    Some(ProcessIdentity { uid, groups })
+}
+
+/// 从 compose 文本里取「有 bind 挂载的非 root 服务」的 gid。
+/// 返回（gid → 服务名，无法推导 gid 的服务描述）。
+fn compose_container_gids(compose: &str) -> (BTreeMap<u32, Vec<String>>, Vec<String>) {
+    let mut required: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    let mut unnamed = Vec::new();
+
+    for (service, body) in compose_services(compose) {
+        if !body_has_bind(&body) {
+            continue;
+        }
+        let Some(user) = body_user(&body) else {
+            continue; // 没有 `user:` = root（Docker 语义），root 跳过
+        };
+        match parse_user_gid(&user) {
+            Some(0) => {}
+            Some(gid) => required.entry(gid).or_default().push(service),
+            None => unnamed.push(format!("{service}（user: {user}）")),
+        }
+    }
+    (required, unnamed)
+}
+
+/// 切出 `services:` 下每个服务名及其块内行。
+fn compose_services<'a>(compose: &'a str) -> Vec<(String, Vec<&'a str>)> {
+    let mut out: Vec<(String, Vec<&'a str>)> = Vec::new();
+    let mut in_services = false;
+    let mut services_indent = 0usize;
+    let mut service_indent: Option<usize> = None;
+
+    for line in compose.lines() {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if !in_services {
+            if trimmed == "services:" {
+                in_services = true;
+                services_indent = indent;
+            }
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if indent <= services_indent {
+            break; // 离开 services 块
+        }
+        match service_indent {
+            None => {
+                if trimmed.ends_with(':') {
+                    service_indent = Some(indent);
+                    out.push((trimmed.trim_end_matches(':').to_string(), Vec::new()));
+                }
+            }
+            Some(base) if indent == base => {
+                if trimmed.ends_with(':') {
+                    out.push((trimmed.trim_end_matches(':').to_string(), Vec::new()));
+                }
+            }
+            Some(base) if indent > base => {
+                if let Some(last) = out.last_mut() {
+                    last.1.push(line);
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    out
+}
+
+/// 服务块里的 `user:`（去引号；空值视为未声明）。
+fn body_user(lines: &[&str]) -> Option<String> {
+    lines.iter().find_map(|line| {
+        let rest = line.trim().strip_prefix("user:")?;
+        let value = rest.trim().trim_matches('"').trim_matches('\'').trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+/// `user: "<uid>:<gid>"` → `Some(gid)`；名字、只有 uid、值非法 → `None`。
+fn parse_user_gid(user: &str) -> Option<u32> {
+    let (uid, gid) = user.split_once(':')?;
+    uid.trim().parse::<u32>().ok()?;
+    gid.trim().parse::<u32>().ok()
+}
+
+/// 服务块里是否有 bind 挂载（命名卷不算：它不参与宿主属主对齐）。
+fn body_has_bind(lines: &[&str]) -> bool {
+    let mut in_volumes = false;
+    let mut volumes_indent = 0usize;
+    for line in lines {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if let Some(rest) = trimmed.strip_prefix("volumes:") {
+            let rest = rest.trim();
+            if rest.starts_with('[') {
+                if inline_volumes_have_bind(rest) {
+                    return true;
+                }
+                in_volumes = false;
+            } else {
+                in_volumes = true;
+                volumes_indent = indent;
+            }
+            continue;
+        }
+        if !in_volumes {
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if indent <= volumes_indent {
+            in_volumes = false;
+            continue;
+        }
+        if volume_entry_is_bind(trimmed) {
+            return true;
+        }
+    }
+    false
+}
+
+fn inline_volumes_have_bind(rest: &str) -> bool {
+    rest.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .any(|entry| volume_entry_is_bind(entry.trim().trim_matches('"').trim_matches('\'')))
+}
+
+fn volume_entry_is_bind(entry: &str) -> bool {
+    let entry = entry.trim().trim_start_matches('-').trim();
+    // 长语法：`type: bind`
+    if let Some(rest) = entry.strip_prefix("type:") {
+        return rest.trim().trim_matches('"').trim_matches('\'') == "bind";
+    }
+    let entry = entry.trim_matches('"').trim_matches('\'');
+    let source = entry.split(':').next().unwrap_or_default();
+    // bind 的 source 是路径（相对 / 绝对 / 家目录 / 以变量给出）；命名卷是裸名字。
+    source.starts_with('.')
+        || source.starts_with('/')
+        || source.starts_with('~')
+        || source.contains('$')
 }
 
 /// `prereq.tls_san_reader`：证书脚本在这台机器上读得出 SAN 吗。
@@ -2114,5 +2423,161 @@ jx0fk6s=\n\
             "helper 缺失不该建议换 openssl：{}",
             no_helper.hint
         );
+    }
+
+    // ── prereq.container_gid ────────────────────────────────────────────────
+
+    const GID_COMPOSE: &str = r#"
+services:
+  gateway:
+    image: gw:1
+    user: "999:999"
+    volumes:
+      - ${CFG}/wist-gateway.toml:/config/wist-gateway.toml:ro
+      - ./.wist:/secrets:ro
+  wparse:
+    image: wp:1
+    user: 999:999
+    volumes:
+      - ${RUN_WORK}:/data
+      - wparse-run:/data/.run
+  web:
+    image: web:1
+    volumes:
+      - ./identity/web:/certs:ro
+  metrics:
+    image: vm:1
+    volumes:
+      - ./data:/storage
+"#;
+
+    #[test]
+    fn container_gids_come_from_non_root_services_with_bind_mounts() {
+        let (required, unnamed) = compose_container_gids(GID_COMPOSE);
+
+        // web / metrics 没写 `user:` = root；wparse 只有命名卷也要算出（它还有 ${RUN_WORK}）。
+        let services = required.get(&999).expect("999 是容器 gid");
+        assert!(services.contains(&"gateway".to_string()), "{services:?}");
+        assert!(services.contains(&"wparse".to_string()), "{services:?}");
+        assert!(
+            !services.contains(&"web".to_string()),
+            "root 服务不参与：{services:?}"
+        );
+        assert!(unnamed.is_empty(), "{unnamed:?}");
+    }
+
+    #[test]
+    fn named_volume_only_service_needs_no_host_group() {
+        let compose = r#"
+services:
+  db:
+    user: "999:999"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+"#;
+        let (required, unnamed) = compose_container_gids(compose);
+        assert!(required.is_empty(), "命名卷不需要宿主属组：{required:?}");
+        assert!(unnamed.is_empty());
+    }
+
+    #[test]
+    fn long_syntax_bind_mount_is_recognized() {
+        let compose = r#"
+services:
+  gw:
+    user: "999:999"
+    volumes:
+      - type: bind
+        source: ./configs
+        target: /config
+"#;
+        let (required, _) = compose_container_gids(compose);
+        assert_eq!(
+            required.get(&999).map(Vec::as_slice),
+            Some(&["gw".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn non_numeric_user_is_reported_not_guessed() {
+        let compose = r#"
+services:
+  gw:
+    user: wist
+    volumes:
+      - ./configs:/config:ro
+"#;
+        let (required, unnamed) = compose_container_gids(compose);
+        assert!(required.is_empty(), "名字推不出 gid：{required:?}");
+        assert_eq!(unnamed.len(), 1);
+        assert!(unnamed[0].contains("gw"), "{unnamed:?}");
+    }
+
+    #[test]
+    fn process_identity_includes_primary_group() {
+        let status = "Name:\tstackcheck\nUid:\t1000\t1000\t1000\t1000\nGid:\t1001\t1001\t1001\t1001\nGroups:\t27 1001 999\n";
+        let identity = parse_process_identity(status).expect("parse");
+        assert_eq!(identity.uid, 1000);
+        assert_eq!(identity.groups, vec![27, 999, 1001]);
+    }
+
+    #[test]
+    fn missing_gid_is_one_blocking_finding_with_the_exact_command() {
+        let mut required = BTreeMap::new();
+        required.insert(999, vec!["gateway".to_string(), "wparse".to_string()]);
+        let identity = ProcessIdentity {
+            uid: 1000,
+            groups: vec![27, 1001],
+        };
+        let findings = container_gid_findings("prereq.container_gid", &required, &[], &identity);
+        assert_eq!(findings.len(), 1);
+        let finding = &findings[0];
+        assert_eq!(finding.status, Status::Fail);
+        assert!(finding.blocking);
+        assert!(finding.title.contains("容器 gid"), "{}", finding.title);
+        assert!(finding.detail.contains("999"), "{}", finding.detail);
+        assert!(finding.detail.contains("gateway"), "{}", finding.detail);
+        assert!(
+            finding.hint.contains("usermod -aG 999"),
+            "提示要给出可直接执行的命令：{}",
+            finding.hint
+        );
+    }
+
+    #[test]
+    fn present_gid_and_root_and_named_user_are_ok_or_warn() {
+        let mut required = BTreeMap::new();
+        required.insert(999, vec!["gateway".to_string()]);
+
+        // 已在组里 → OK
+        let identity = ProcessIdentity {
+            uid: 1000,
+            groups: vec![999, 1001],
+        };
+        let ok = container_gid_findings("prereq.container_gid", &required, &[], &identity);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].status, Status::Ok);
+
+        // root → OK（不需要补组）
+        let root = ProcessIdentity {
+            uid: 0,
+            groups: vec![0],
+        };
+        let root_findings = container_gid_findings("prereq.container_gid", &required, &[], &root);
+        assert_eq!(root_findings[0].status, Status::Ok);
+
+        // 名字形式的 user: → WARN（不阻断）
+        let warn = container_gid_findings(
+            "prereq.container_gid",
+            &required,
+            &["gw（user: wist）".to_string()],
+            &identity,
+        );
+        let warn = warn
+            .iter()
+            .find(|f| f.status == Status::Warn)
+            .expect("应当有一条 WARN");
+        assert!(!warn.blocking);
+        assert!(warn.hint.contains("perms.services"), "{}", warn.hint);
     }
 }

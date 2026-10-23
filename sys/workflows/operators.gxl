@@ -75,6 +75,11 @@ mod operators {
     // ⑤ 初始知识库内容包（出厂自带）：把 ARTIFACT_HOME + "/" + KNOWLEDGE_PATH 拼出的地址拉到投放目录 packages/。
     //     该目录只读挂给网关的 /packages，界面「知识库」页「本地来源」填 /packages/<文件名> 即可录入
     //     —— 录入 ≠ 生效，还要点激活。
+    //     签名旁文件（`<包>.sig`，base64 一行）**必须一起拉**：`packages/` 是现场态（不入库、
+    //     每次 localize 重拉），只拉 tarball 会让新装的栈停在「有包、没签名」——配了验签公钥时
+    //     管理面录入 422 `package_signature_invalid`（`wist-stackcheck` 也会报
+    //     `package.knowledge_signature`）。它就在包的同目录，文件名按同一个 URL 推（同名 + `.sig`），
+    //     与网关 `read_signature` 同一约定。
     //
     //     这里有两个 GXL 细节（都踩过）：
     //       · 条件里的 ${VAR} 取的是**流程变量空间**，gops 注入的环境变量不在里面（直接写
@@ -89,6 +94,9 @@ mod operators {
     gx.read_cmd ( name: "KNOWLEDGE_PATH", cmd: "printenv KNOWLEDGE_PATH || true", silence: "true" );
     if defined(${ARTIFACT_HOME}) && ${ARTIFACT_HOME} != "" && defined(${KNOWLEDGE_PATH}) && ${KNOWLEDGE_PATH} != "" {
       gx.download ( url: "${ARTIFACT_HOME}/${KNOWLEDGE_PATH}", local_file: "./packages" );
+      // 签名旁文件：与包同目录、同名 + `.sig`。两个 download 各自按 URL 判重（reuse_cache），
+      // 所以「包已在、签名缺」时也只补拉签名。
+      gx.download ( url: "${ARTIFACT_HOME}/${KNOWLEDGE_PATH}.sig", local_file: "./packages" );
     }
     // 解包这一步**始终执行**（不再包在 if 里）—— 就是为了**不静默**：
     //   · URL 空   → 脚本打印跳过并说清后果（网关将**空载**：不产用途建议、不能派活）；

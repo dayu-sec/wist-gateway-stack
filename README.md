@@ -144,7 +144,7 @@ wist-gateway-stack/
     init-web-tls.sh         # 前端站点 TLS 证书（幂等）
     init-web-conf.sh        # 前端站点配置的渲染值 configs/web/nginx.value.json（幂等；域名取 WEB_DOMAIN）
     import-package.sh       # 导入 agent 安装包到 packages/（--set 可顺手设为分发来源）
-    import-knowledge.sh     # 导入知识库内容包到 packages/（--set 录入、--activate 当场生效；不录就是**空载**）
+    import-knowledge.sh     # 导入知识库内容包到 packages/（连 `.sig` 旁文件一起；--set 录入、--activate 当场生效）
     init-knowledge-signing.sh # （可选）放置知识库验签公钥；给了就**强制验签**内容包
     backup-gateway.sh       # 备份网关**身份与配置**（两级 --level）；数据库与历史不用备（见「备份与恢复」）
     restore-gateway.sh      # 从备份恢复（新机器重建）；库/历史不需要恢复
@@ -168,6 +168,7 @@ wist-gateway-stack/
 | gops | **必须 ≥ 2.7**（权限对齐由 `gops sys perms` 提供；旧版没有该子命令） | `gops -V` |
 | gx | **≥ 0.14**（`localize` 阶段流程；缺失时 `localize` 只写 `.env`，权限 `--apply` 也不会执行） | `gx -V` |
 | 执行账号 | 普通账号 + **已加入 `docker` 组**（等价于本机高权限，按安全要求评估）；部署目录由它拥有 | `id -nG`（输出里应含 `docker`） |
+| 容器组 | 部署账号**已在容器 gid（`999`）组里** —— `gops sys perms --apply` 只 `chmod`/`chgrp`、不改属主、不提权，不在组里会整片挂载一起报 `Operation not permitted`（见「权限与运行身份」） | `id -G`（输出里应含 `999`）；或 `./scripts/check-stack.sh --only prereq`（`prereq.container_gid`） |
 | 端口 | 宿主 `443`（网关，agentd 直连）、`8443`（页面）、`9000`（数据面）、`18429`（指标） | 见 `sys/setting/vars.yml` |
 
 > 为什么必须 Compose V2：`gops run` 固定发 `docker compose …`，**没有 v1 回退**。缺插件时报的是
@@ -267,6 +268,28 @@ gops sys perms --apply    # 幂等修复
 - rootless / userns-remap：容器 uid 与宿主不等价，必须配 `sys-prj.yml: perms.container_uid/gid`（gops 会明确报错，不静默按 999 对齐）；
 - 不跟随符号链接、不碰 named volume；**仅 Linux**（macOS / OrbStack 打印 `[SKIP]`）。
 
+> **一次性宿主前置（管理员，`--apply` 修不了）**：`--apply` 以**部署账号**身份跑，`chgrp` 到容器 gid 要求它
+> **已经是该组成员**（这不是权限漂移，是宿主预置）。漏了这一步的症状是整片挂载同一个错：
+> `设置 … 为 <uid>:999 失败：Operation not permitted (os error 1)`，结论 `0 项待修 / N 项失败`。
+>
+> ```bash
+> id                                   # 确认部署账号 uid / 主组
+> getent group 999                     # 999 是否已被占用（镜像里 wist / wparse 的 gid）
+> sudo groupadd -g 999 wistcnt         # 仅当 999 还没有对应组
+> sudo usermod -aG 999 <部署账号>       # 改完必须重新登录，新会话才带上补充组
+> id -G                                # 重登后确认输出里有 999
+> gops sys perms --apply
+> ```
+>
+> 若 `999` 已被本机别的高权限组占用（例如 `docker`），先确认它与镜像/部署约定的关系；
+> 不要为了让命令通过就把部署账号加进高权限组 —— 这种情况下应改走 rootless / userns-remap 的
+> `perms.container_uid/gid` 映射。
+>
+> **现在有两道闸门会提前拦住它**（不用等到逐项 `EPERM`）：`localize` 第一步的
+> `scripts/check-stack.sh --gate --only prereq` 里有 `prereq.container_gid`（从 compose 的
+> `user:` 派生 gid、与进程组比对，退出码非 0 就中止）；`gops sys perms` 也在动手前判定一次，
+> 把 N 项失败收成一条带 `usermod` 命令的 `[FAIL]`。
+
 生命周期：`gops sys localize` 末尾做一次**只告警**的自检；`gops run start` preflight（未对齐即停）；`gops prj restore` / `prj upgrade` 自动 `--apply`。`localize` 的阶段流程也会在最后跑一次 `gops sys perms --apply`，保证「localize 完就能 start」。
 
 > **这些保证只覆盖 gops 入口**：`gops sys localize`（阶段流程 apply）、`gops run start`（preflight）、
@@ -282,6 +305,14 @@ gops sys perms --apply    # 幂等修复
 ### A. 宿主机显式初始化（推荐生产）
 
 ```bash
+# ⓪ 一次性宿主前置（管理员 / 每台机器一次）：部署账号必须已在容器 gid（999）组里。
+#    localize 最后一步 `gops sys perms --apply` 只 chgrp、不改属主也不提权；不在这个组里，
+#    整片挂载会一起报 `Operation not permitted`（结论 `0 项待修 / N 项失败`）。
+#    它与「目录是否为空」无关（组是**账号级**的），但必须早于第一次创建挂载源。
+id -G                                  # 先看有没有 999
+sudo groupadd -g 999 wistcnt           # 仅当 999 还没有对应组
+sudo usermod -aG 999 <部署账号>         # 改完必须重新登录；重登后 id -G 应含 999
+
 # 备料 + 渲染 + 生成页面证书，一步到位（就是 localize 的阶段流程）
 gops sys update && gops sys localize
 
@@ -309,6 +340,8 @@ gops run start
 # 不录就是空载：不产「系统类型」建议、不产用途建议（发现策略走 agentd 内建默认值）。
 #   知识库是**录入 ≠ 生效**：--set 只录入，--activate 才当场切（旧版工作不被追改，见网关设计稿 §8）。
 #   包从 wist-knowledge 的 Release 下载（wist-knowledge-<版本>.tar.gz），或本地 `scripts/package.sh` 打一个。
+#   发布侧的同名 `<包>.sig` 会被一起拷进 packages/ —— 漏了它（验签开启时）录入直接 422
+#   package_signature_invalid；localize 的下载也会把旁文件一起拉进投放目录。
 ./scripts/import-knowledge.sh --latest --set --activate
 
 # （可选）让网关**强制验签**内容包：给公钥，localize 会渲染出 `[knowledge]` 段

@@ -74,5 +74,20 @@ out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge
 chk "多处 version 时 exit 0（不因 SIGPIPE 无声退出）" "0" "${rc}"
 has "包版本：9.9.1" "${out}" "取的是第一处 version"
 
+echo "== 5) 包旁有发布侧 .sig → 报出签名，不再提录入 422 =="
+printf 'c2ln\n' > "${TMP}/site/packages/${PKG_NAME}.sig"
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge" KNOWLEDGE_PATH="v9.9.9/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+chk "有 .sig 时 exit 0" "0" "${rc}"
+chk ".sig 原样保留" "c2ln" "$(tr -d '\n' < "${TMP}/site/packages/${PKG_NAME}.sig")"
+has "签名：${PKG_NAME}.sig" "${out}" "输出报出了签名文件名"
+
+# 签名由 flow 的第二个 gx.download 负责；脚本只核对 —— 缺了必须告警（否则录入才 422）但不拦 localize。
+echo "== 6) 包在、签名缺 → 告警点明后果，但仍不失败 =="
+rm -f "${TMP}/site/packages/${PKG_NAME}.sig"
+out="$(cd "${TMP}/site" && ARTIFACT_HOME="https://example.invalid/wist-knowledge" KNOWLEDGE_PATH="v9.9.9/${PKG_NAME}" bash "${RUN}" 2>&1)"; rc=$?
+chk "缺签名不拦 localize（exit 0）" "0" "${rc}"
+has "gx.download" "${out}" "告警指向下载环节"
+has "package_signature_invalid" "${out}" "告警点明后果（录入 422）"
+
 echo
 if [[ "${fail}" == "0" ]]; then echo "全部通过"; else echo "存在失败项"; exit 1; fi

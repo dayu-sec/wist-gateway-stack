@@ -20,6 +20,11 @@
 #                         （但会**显式告警**并说清网关将空载，不再静默）
 #   GATEWAY_CONFIG_DIR    网关配置目录（默认 ./configs/gateway）
 #   KNOWLEDGE_SOURCE_DIR  解到哪儿（相对网关配置目录；默认 knowledge/initial，须与 tpl 一致）
+#
+# 签名旁文件：发布侧把 `<包>.sig` 放在包旁边（base64 一行），flow 里**第二个 `gx.download`**
+#             与包一起拉到投放目录。本脚本只核对它在不在 —— `packages/` 是**现场态**（不入库、
+#             每次 localize 重拉），只拉 tarball 会留下「有包、没签名」，配了验签公钥时管理面
+#             「本地来源」录入会报 422 `package_signature_invalid`。缺了**只告警不阻断**。
 set -euo pipefail
 
 # `set -e` 的静默退出是排查黑洞：脚本半途死掉、stderr 空白。
@@ -78,6 +83,19 @@ done
 if [[ -n "${missing}" ]]; then
   echo "包内缺文件：${missing}（${pkg} 的布局与预期不符？）" >&2
   exit 1
+fi
+
+# 签名旁文件（与包同名 + `.sig`，网关 `read_signature` 的同一约定）。
+# 下载由 flow 里第二个 `gx.download` 负责（与包同目录、同一个 URL + `.sig`）；这里只核对。
+# 缺了**只告警不失败** —— 与 `wist-stackcheck` 的 `package.knowledge_signature`（非阻断）同口径：
+# 启动期知识源（source_dir）不验签，缺签名不该拦下 localize。
+sig="${pkg}.sig"
+if [[ -s "${sig}" ]]; then
+  echo "  签名：$(basename "${sig}")"
+else
+  echo "[告警] 投放目录里没有 $(basename "${sig}")（flow 的第二个 gx.download 没落盘？）。" >&2
+  echo "        配了验签公钥时，管理面用「本地来源」录入会 422（package_signature_invalid）；" >&2
+  echo "        补法：把发布侧的 $(basename "${sig}")（base64 一行文本）放进 packages/。" >&2
 fi
 
 echo "初始知识库已就位：${dst} ← ${pkg}"

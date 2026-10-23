@@ -92,10 +92,22 @@ sha="$(${HASH} "$file" | awk '{print $1}')"
 
 if [[ "$DRY_RUN" == 1 ]]; then
   echo "[dry-run] cp ${file} → ${PACKAGE_DIR}/${name}"
+  if [[ -f "${file}.sig" ]]; then
+    echo "[dry-run] cp ${file}.sig → ${PACKAGE_DIR}/${name}.sig"
+  fi
 else
   mkdir -p "$PACKAGE_DIR"
   cp -f "$file" "${PACKAGE_DIR}/${name}"
   echo "已导入：${PACKAGE_DIR}/${name}"
+  # 签名旁文件（发布侧同名 + `.sig`）**一起带走**：验签公钥随栈交付，配了就只收签过的包；
+  # 只拷 tarball 会让管理面录入报 422 `package_signature_invalid`。
+  if [[ -f "${file}.sig" ]]; then
+    cp -f "${file}.sig" "${PACKAGE_DIR}/${name}.sig"
+    echo "已导入：${PACKAGE_DIR}/${name}.sig"
+  else
+    echo "[告警] 源目录没有 ${name}.sig；配了验签公钥的网关会拒收这个包（package_signature_invalid）。" >&2
+    echo "        签名由发布侧产出（wist-knowledge 的 CI），只拷 tarball 不算完整制品。" >&2
+  fi
 fi
 echo "  管理面「来源」填：${container_path}"
 echo "  sha256：${sha}"

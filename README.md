@@ -399,6 +399,7 @@ cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测（通
 > `tools/stackcheck` 现在只保留 gateway profile 与 package / knowledge / identity / prereq / TLS
 > 策略；渲染/密钥/端口/镜像/compose/x509 的通用实现在公共仓
 > [`wist-stack-tools`](https://github.com/dayu-sec/wist-stack-tools) 的 `stackcheck-core`，按 tag 固定。
+> crates.io 发布后改成 registry 版本 `wist-stackcheck-core = "0.1"`。
 
 > 为什么测试要换 PATH：升级流程由 gwlinkd 派生，它的 PATH 里没有 `/opt/homebrew/bin` ——
 > 2026-10-23 的升级事故就是「交互式跑得过、升级跑不过」（macOS 自带的 LibreSSL 不认 `x509 -ext`）。

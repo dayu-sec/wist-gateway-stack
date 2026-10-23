@@ -3,6 +3,46 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.8-alpha] - 2026-10-23
+
+### 组件
+
+- **初始知识库 `0.5.0`**（`KNOWLEDGE_PATH = v0.5.0/wist-knowledge-0.5.0.tar.gz`）：
+  `linux-kernel-system` 改为 `Exporter journalctl-kernel`（`journalctl -k -p 4 -o json`，
+  游标续读、周期 60s），并用 `match = "path_exists:/run/systemd/journal"` 在非 systemd 主机上
+  不展开（不做文件回退）；`catalog_version` 8 → 9。
+- 网关 / 前端 / 观测 / wparse 镜像不变，仍是 `v0.20.0-alpha` / `v0.14.0-alpha` /
+  `victoria-metrics v1.154.0` / `warp-parse 0.32.1-alpha`。
+
+### 升级提示
+
+- **顺序：先装/升级本栈（含 agentd 0.9），再让知识库 0.5.0 生效**：旧网关不认识
+  `journalctl-kernel`，会把整份目录判为非法（装载失败）；旧 agentd 会把该单元如实报 `unsupported`。
+  本栈的初始包指针已经是 0.5.0 —— 升级到本版本即等同于把它推下去，**别在网关 / agentd 之前
+  单独换知识库**。
+- 已跑过 `localize` 的现场会因文件名变化重新下载（`gx.download` 按 URL 判重）；
+  旧版本包留在 `packages/` 不影响，只是历史。
+
+### 修复
+
+- **初始知识库只拉包、不拉签名旁文件**：`packages/` 是现场态（不入库，`localize` 每次重下拉），
+  而 `localize` 的 `gx.download` 只拉 `wist-knowledge-<版本>.tar.gz` —— 新装的栈因此停在
+  「有包、没 `.sig`」，配了验签公钥（公钥随栈交付）的网关在管理面「本地来源」录入时报
+  **422 `package_signature_invalid`**，`wist-stackcheck` 也会报 `package.knowledge_signature`。
+  `localize` 里补上第二个 `gx.download`（`<包>.sig`，与包同目录；两个 URL 各自 `reuse_cache`，
+  「包在、签名缺」时也只补拉签名）—— 制品源缺这份旁文件会在 localize 就失败，不再装出
+  「有包没签名」的栈。`install-initial-knowledge.sh` 核对它在不在、缺了告警但不阻断
+  （启动期知识源 `source_dir` 不验签，与 stackcheck 该判据的非阻断口径一致）；
+  `import-knowledge.sh` 手工导入时也把源目录的 `.sig` 一并拷过去。
+
+### 工程
+
+- **新增 `prereq.container_gid`**：从 compose 里**有 bind 挂载的非 root 服务**的 `user:` 派生容器 gid，
+  与当前进程的组（`/proc/self/status`）比对；缺组就 FAIL 并给出 `groupadd` / `usermod -aG`。
+  `localize` 第一步的 `--gate --only prereq` 因此能在任何写盘之前拦住——它对应
+  `gops sys perms --apply` 整片 `Operation not permitted`（`0 项待修 / N 项失败`）的真正原因。
+  命名卷、root 服务、非数字 `user:` 分别不参与 / 不参与 / 只 WARN。
+
 ## [0.2.7-alpha] - 2026-10-23
 
 ### 组件

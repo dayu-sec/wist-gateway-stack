@@ -142,10 +142,10 @@ system:
   - name: ARTIFACT_HOME
     value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
   - name: KNOWLEDGE_PATH
-    value: v0.4.0/wist-knowledge-0.4.0.tar.gz
+    value: v0.5.0/wist-knowledge-0.5.0.tar.gz
   # 换源示例（**只改上一段**；COS 上必须已放好同相对路径的包）：
   #   ARTIFACT_HOME: https://github.com/dayu-sec/wist-knowledge/releases/download
-  #   KNOWLEDGE_PATH 保持 v0.4.0/wist-knowledge-0.4.0.tar.gz 不变
+  #   KNOWLEDGE_PATH 保持 v0.5.0/wist-knowledge-0.5.0.tar.gz 不变
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
   #    **分两份**（与网关的 impl/pub 同口径）：

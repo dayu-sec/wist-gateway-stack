@@ -3,7 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.2.7-alpha] - 2026-10-23
+
+### 组件
+
+- **网关 `v0.20.0-alpha`**：采集目录支持容器选源过滤器（`namespace_in` / `pod_not_in`），
+  并按 agent 自报的日志能力裁剪派活（旧 agentd 行为不变）；内核面改走 journald 后无需网关侧改动。
+- **前端 `v0.14.0-alpha`**：过滤器直接渲染成「ns in [...]」「pod not in [...]」；
+  「内核与系统」不再被误标成「未接」。
+- 观测镜像与 wparse 未动（`victoria-metrics v1.154.0` / `warp-parse 0.32.1-alpha` 已确认在 TCR）。
+
+### 升级提示
+
+- **先升级本栈，再升级 agentd**：新网关才收得下 agentd 0.9 上报的能力清单
+  （旧网关会整份拒收状态报文）。
+- 知识库 `0.5.0`（内核面改走 journald）可在本栈升级后再推给网关；
+  旧网关不认识 `journalctl-kernel`，会把整份目录判为非法。
 
 ### 工程
 
@@ -18,6 +33,10 @@
   - 只有渲染产物、找不到值文件/模板时报 WARN（不再报 OK）；
   - 端口按 compose 的 bind IP 探测，镜像探测去重。
 - 本地自检：`cargo test --manifest-path tools/stackcheck/Cargo.toml` 现在会拉取公共 core（首次需网络）。
+- **补齐「权限与运行身份」的**一次性宿主前置：`gops sys perms --apply` 以部署账号身份只做
+  `chmod`/`chgrp`，不在容器 gid（`999`）组里时整片挂载一起报 `Operation not permitted`
+  （结论 `0 项待修 / N 项失败`）；README 与「主机要求」表给出 `groupadd` / `usermod -aG`
+  与重登验证的具体步骤。
 
 ## [0.2.6-alpha] - 2026-10-23
 

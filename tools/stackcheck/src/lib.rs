@@ -3,7 +3,7 @@
 //! 通用引擎（Flow Result / CLI / 渲染/密钥/端口/镜像判据 / compose / x509）在
 //! `wist-stackcheck-core`；本 crate 只提供：
 //! - [`profile::GATEWAY`]：渲染对、占位值文件、密钥根；
-//! - gateway 专属判据：package / knowledge / identity / prereq / TLS 策略；
+//! - gateway 专属判据：layout / package / knowledge / identity / prereq / TLS 策略；
 //! - [`run_with`] 的判据编排。
 //!
 //! 输出对齐 `gops run diagnose` 的 Flow Result v1（`schema_version` + `checks[]`）。
@@ -24,6 +24,9 @@ pub fn run_with(stack: &Stack, options: &Options) -> Vec<Finding> {
         out.extend(checks::prereq_toolchain());
         out.extend(checks::prereq_container_gid(stack));
         out.extend(checks::prereq_tls_san(stack));
+    }
+    if options.wants("layout") {
+        out.extend(checks::bind_source_type(stack));
     }
     if options.wants("package") {
         out.extend(checks::package_dir_consistency(stack));

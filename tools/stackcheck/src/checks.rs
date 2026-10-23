@@ -1061,6 +1061,8 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
     let toml_path = stack.at("configs/gwlinkd/gwlinkd.toml");
     let mut missing = Vec::new();
     let mut checked = 0usize;
+    let mut anchor_problem: Option<(String, String)> = None;
+    let mut anchor_source: Option<PathBuf> = None;
 
     for (label, dir) in [
         ("state_dir", root_str_of(&toml_path, "state_dir")),
@@ -1090,12 +1092,106 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
             }
             let value = unquote(value);
             checked += 1;
-            if !Path::new(value).is_file() {
-                missing.push(format!(
-                    "GWLINKD_TRUST_BUNDLE={value}（gwlinkd 会报 UnknownIssuer）"
-                ));
+            // 现场值可能是相对路径（`./identity/gwlinkd/...`）—— 必须相对**栈根**解析，
+            // 不能用进程 CWD：`--root` 指到别处时就会把正常部署判成悬空。
+            let path = resolve(stack, value.trim());
+            anchor_source = Some(path.clone());
+            match fs::metadata(&path) {
+                Ok(meta) if meta.is_dir() => anchor_problem = Some((
+                    value.to_string(),
+                    "这个路径是**目录**，不是文件 —— 典型的「源文件缺失、docker 把 bind 建成了目录」"
+                        .to_string(),
+                )),
+                Ok(_) => {
+                    let pem = fs::read_to_string(&path)
+                        .is_ok_and(|text| text.contains("BEGIN CERTIFICATE"));
+                    if !pem {
+                        anchor_problem = Some((
+                            value.to_string(),
+                            "文件里没有 `BEGIN CERTIFICATE`，不是可用的 PEM".to_string(),
+                        ));
+                    }
+                }
+                Err(_) => missing.push(format!(
+                    "GWLINKD_TRUST_BUNDLE={value}（gwlinkd 会报 UnknownIssuer；wparse 会因此起不来）"
+                )),
             }
         }
+    }
+
+    // (c) 信任锚（Center CA）：不只是「存在」，还得**是能读的 PEM**。
+    //
+    // 反例是 2026-10-23 的现场事故：`identity/gwlinkd/control-center.pem` 缺失，compose 里
+    // `./identity/gwlinkd/control-center.pem:/data/identity/control-center.pem` 这条 bind 被
+    // docker 建成一个**目录**；wparse 容器把这个路径当 `SSL_CERT_FILE`，建 HTTP 客户端失败
+    // （`sink error / build victoriametric client failed`）——容器连重启 52 次，症状与根因隔着一个
+    // 网络层。这里把「目录 / 不是 PEM」单独拎成一条，且在 localize 闸门里就报。
+    if let Some((value, why)) = anchor_problem {
+        out.push(
+            Finding::fail(
+                "identity.trust_anchor",
+                "信任锚不是可用的 PEM 文件",
+                format!("{value}：{why}"),
+            )
+            .with_hint(
+                "若是空目录：`rmdir <路径>`，再跑 `gops sys localize` 让 gwlinkd 重新写入 CA；\
+                     中心用公有 CA 时该文件可以不存在，但**不能是目录**",
+            ),
+        );
+    } else {
+        out.push(Finding::ok(
+            "identity.trust_anchor",
+            "信任锚形态正常",
+            "缺失或可读 PEM 都放行（缺失时各组件回落系统根）",
+        ));
+    }
+
+    // (d) 容器的**信任锚投影**（`identity/gwlinkd/trust/control-center.pem`）。
+    //
+    // compose 只挂这个**目录**、不挂单文件（否则 docker 会把缺失的源建成同名目录，见
+    // `identity.trust_anchor` 的事故）。真身与投影分两处 ⇒ 必须有人保证它们同步：
+    // 投影缺失 = 容器读不到中心 CA（私有 CA 中心拉不了规则）；投影残留 = 早就不该信那张 CA 了。
+    let projection = stack.at("identity/gwlinkd/trust/control-center.pem");
+    let source_text = anchor_source
+        .as_deref()
+        .and_then(|path| fs::read(path).ok());
+    let projection_text = fs::read(&projection).ok();
+    let source_is_pem = source_text
+        .as_deref()
+        .is_some_and(|bytes| String::from_utf8_lossy(bytes).contains("BEGIN CERTIFICATE"));
+    match (&source_is_pem, &projection_text) {
+        (true, Some(projected)) if source_text.as_deref() == Some(projected.as_slice()) => {
+            out.push(Finding::ok(
+                "identity.trust_projection",
+                "容器侧信任锚投影与真身一致",
+                projection
+                    .strip_prefix(&stack.root)
+                    .unwrap_or(&projection)
+                    .display()
+                    .to_string(),
+            ));
+        }
+        (true, _) => out.push(
+            Finding::warn(
+                "identity.trust_projection",
+                "容器侧信任锚投影缺失或过期",
+                "真身有可读 PEM，但 identity/gwlinkd/trust/ 里没有同一份 —— 私有 CA 中心会拉不了规则",
+            )
+            .with_hint("跑一次 `gops sys localize`（init-gwlinkd-pub.sh 会把真身投影过去）"),
+        ),
+        (false, Some(_)) => out.push(
+            Finding::warn(
+                "identity.trust_projection",
+                "容器侧信任锚投影是陈旧的",
+                "真身已不存在或已不是 PEM，但投影里还留着一份旧 CA",
+            )
+            .with_hint("跑一次 `gops sys localize`（脚本会删掉陈旧投影）"),
+        ),
+        (false, None) => out.push(Finding::ok(
+            "identity.trust_projection",
+            "没有中心信任锚，容器回落系统根",
+            "公网 CA 的中心、或尚未接入中心 —— 这是合法现场",
+        )),
     }
 
     if missing.is_empty() {
@@ -1120,6 +1216,203 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
 
 fn root_str_of(path: &Path, key: &str) -> Option<String> {
     config_str(path, None, key)
+}
+
+// ── 7. compose 挂载源的类型 ────────────────────────────────
+
+/// bind 给容器的**文件**（`*.pem` / `*.toml` / `*.conf`）在宿主上必须是文件。
+///
+/// docker 对**缺失**的 bind 源不报错：它建一个同名**目录**顶上。于是
+/// `identity/gwlinkd/control-center.pem` 在容器里变成目录 —— 把它当 `SSL_CERT_FILE` 用的
+/// wparse 建 HTTP 客户端直接失败，容器无限重启（详见 `identity.trust_anchor` 记的那次事故）。
+///
+/// 判据只取一种形状：**源存在、是目录，而容器目标的末段长得像文件名**。不猜方向，
+/// 也不报「文件挂到目录目标」：那种错位在 docker 里直接报错，不会静默。
+pub fn bind_source_type(stack: &Stack) -> Vec<Finding> {
+    const CODE: &str = "layout.bind_source_type";
+
+    let Some(compose_path) = compose_file(stack) else {
+        return vec![
+            Finding::fail(
+                CODE,
+                "找不到 compose 文件",
+                "按 gops 的候选顺序都没找到，无法校对挂载源类型",
+            )
+            .with_hint("确认栈目录完整（`sys/docker-compose.yml` 随制品发布）"),
+        ];
+    };
+    let Ok(compose) = fs::read_to_string(&compose_path) else {
+        return vec![Finding::warn(
+            CODE,
+            "读不到 compose 文件，跳过挂载源类型检查",
+            compose_path.display().to_string(),
+        )];
+    };
+
+    let mut wrong = Vec::new();
+    let mut checked = 0usize;
+    for (service, source, target) in compose_bind_mounts(&compose) {
+        if !target_looks_like_file(&target) {
+            continue;
+        }
+        // 变量源（`${PACKAGE_DIR}`）与家目录源不在这里判：它们的落点由別处的派生值保证。
+        if source.contains('$') || source.starts_with('~') {
+            continue;
+        }
+        let source_path = resolve(stack, source.trim());
+        // 源**不存在**不归本条（gops 的 mount 检查会报），这里只抓「存在但类型错」。
+        if !source_path.exists() {
+            continue;
+        }
+        checked += 1;
+        if source_path.is_dir() {
+            wrong.push(format!("{service}: {source} → {target}（源是目录）"));
+        }
+    }
+
+    if wrong.is_empty() {
+        vec![Finding::ok(
+            CODE,
+            "文件类挂载源都是文件",
+            format!("检查 {checked} 项（变量源与缺失源不在此判）"),
+        )]
+    } else {
+        vec![
+            Finding::fail(CODE, "有文件类挂载源在宿主上是个目录", wrong.join("；")).with_hint(
+                "这是「源文件缺失 + 曾经 `up` 过」留下的空目录（docker 自己建的）：\
+                 删掉它（`rmdir <路径>`，空目录才能删），再把真正的文件补回去",
+            ),
+        ]
+    }
+}
+
+/// 容器目标末段是否长得像文件（含 `.`，且不是 `..`/隐藏目录名）。
+fn target_looks_like_file(target: &str) -> bool {
+    let name = target
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
+    name.contains('.') && name != "." && name != ".."
+}
+
+/// 从 compose 文本里取所有 bind 挂载的（服务、源、容器路径）。
+///
+/// 只认三种写法：短语法 `./a:/b[:ro]`、长语法 `type: bind` + `source`/`target`、
+/// 以及内联数组。命名卷（`metrics_data:/storage`）跳过 —— 它们的「源」不是宿主路径。
+fn compose_bind_mounts(compose: &str) -> Vec<(String, String, String)> {
+    /// 长语法正在收集的一条。
+    #[derive(Default)]
+    struct Entry {
+        kind: Option<String>,
+        source: Option<String>,
+        target: Option<String>,
+    }
+
+    /// 把一条长语法条目定型；不是 bind 或字段不齐就丢掉。
+    fn push_entry(out: &mut Vec<(String, String, String)>, service: &str, entry: Option<Entry>) {
+        let Some(entry) = entry else { return };
+        if entry.kind.as_deref().is_some_and(|kind| kind != "bind") {
+            return;
+        }
+        if let (Some(source), Some(target)) = (entry.source, entry.target) {
+            out.push((service.to_string(), source, target));
+        }
+    }
+
+    let mut out = Vec::new();
+
+    for (service, body) in compose_services(compose) {
+        let mut in_volumes = false;
+        let mut volumes_indent = 0usize;
+        let mut current: Option<Entry> = None;
+
+        for line in &body {
+            let trimmed = line.trim();
+            let indent = line.len() - line.trim_start().len();
+
+            if let Some(rest) = trimmed.strip_prefix("volumes:") {
+                let rest = rest.trim();
+                if rest.starts_with('[') {
+                    for (source, target) in short_mounts(rest) {
+                        out.push((service.clone(), source, target));
+                    }
+                    in_volumes = false;
+                } else {
+                    in_volumes = true;
+                    volumes_indent = indent;
+                }
+                continue;
+            }
+            if !in_volumes {
+                continue;
+            }
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if indent <= volumes_indent {
+                in_volumes = false;
+                continue;
+            }
+
+            if let Some(rest) = trimmed.strip_prefix('-') {
+                push_entry(&mut out, &service, current.take());
+                let rest = rest.trim();
+                if let Some(kind) = rest.strip_prefix("type:") {
+                    current = Some(Entry {
+                        kind: Some(unquote_str(kind).to_string()),
+                        ..Entry::default()
+                    });
+                } else if let Some((source, target)) = short_mount(rest) {
+                    out.push((service.clone(), source, target));
+                }
+                continue;
+            }
+
+            if let Some(entry) = current.as_mut() {
+                if let Some(value) = trimmed.strip_prefix("source:") {
+                    entry.source = Some(unquote_str(value).to_string());
+                } else if let Some(value) = trimmed.strip_prefix("target:") {
+                    entry.target = Some(unquote_str(value).to_string());
+                } else if let Some(value) = trimmed.strip_prefix("type:") {
+                    entry.kind = Some(unquote_str(value).to_string());
+                }
+            }
+        }
+
+        push_entry(&mut out, &service, current.take());
+    }
+
+    out
+}
+
+/// 内联数组 `[\"./a:/b\", \"./c:/d:ro\"]` → 短语法对。
+fn short_mounts(rest: &str) -> Vec<(String, String)> {
+    rest.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .filter_map(|entry| short_mount(entry.trim()))
+        .collect()
+}
+
+/// `./a:/b[:ro]` → `(./a, /b)`；命名卷 / 非法条目 → `None`。
+fn short_mount(entry: &str) -> Option<(String, String)> {
+    let entry = unquote_str(entry.trim());
+    // 长语法字段行不是挂载条目。
+    if entry.contains("type:") || entry.starts_with("source:") || entry.starts_with("target:") {
+        return None;
+    }
+    let mut parts = entry.split(':');
+    let source = parts.next()?.trim();
+    let target = parts.next()?.trim();
+    if !volume_entry_is_bind(entry) || source.is_empty() || target.is_empty() {
+        return None;
+    }
+    Some((source.to_string(), target.to_string()))
+}
+
+fn unquote_str(value: &str) -> &str {
+    value.trim_matches('"').trim_matches('\'').trim()
 }
 
 /// 读 `[section].key`（`section = None` 时读文档根）。两边都试一次，兼容配置搬家。
@@ -2579,5 +2872,248 @@ services:
             .expect("应当有一条 WARN");
         assert!(!warn.blocking);
         assert!(warn.hint.contains("perms.services"), "{}", warn.hint);
+    }
+
+    // ── layout.bind_source_type ────────────────────────────────────────
+    //
+    // 现场事故的形状：`identity/gwlinkd/control-center.pem` 缺失，docker 把这条 bind
+    // 建成了**目录**；wparse 把它当 SSL_CERT_FILE，容器无限重启。
+
+    const COMPOSE_FILE_MOUNTS: &str = "\
+services:
+  wparse:
+    image: wparse
+    volumes:
+      - ./identity/gwlinkd/control-center.pem:/data/identity/control-center.pem:ro
+      - ./packages:/packages:ro
+  gateway:
+    image: gateway
+    volumes:
+      - metrics_data:/storage
+";
+
+    #[test]
+    fn dir_source_onto_file_target_fails() {
+        let tree = Tree::new("bind-source-dir");
+        tree.write("sys/docker-compose.yml", COMPOSE_FILE_MOUNTS);
+        fs::create_dir_all(tree.root.join("packages")).unwrap();
+        // 缺失的源被 docker 建成了目录
+        fs::create_dir_all(tree.root.join("identity/gwlinkd/control-center.pem")).unwrap();
+
+        let findings = bind_source_type(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Fail);
+        assert!(
+            findings[0].detail.contains("control-center.pem"),
+            "{}",
+            findings[0].detail
+        );
+        // 目录 → 目录的正常挂载不能跟着报。
+        assert!(
+            !findings[0].detail.contains("/packages"),
+            "{}",
+            findings[0].detail
+        );
+        assert!(findings[0].hint.contains("rmdir"), "{}", findings[0].hint);
+    }
+
+    #[test]
+    fn file_source_onto_file_target_is_ok() {
+        let tree = Tree::new("bind-source-file");
+        tree.write("sys/docker-compose.yml", COMPOSE_FILE_MOUNTS);
+        tree.write(
+            "identity/gwlinkd/control-center.pem",
+            "-----BEGIN CERTIFICATE-----\n",
+        );
+        fs::create_dir_all(tree.root.join("packages")).unwrap();
+
+        let findings = bind_source_type(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Ok);
+    }
+
+    #[test]
+    fn missing_source_is_not_reported_here() {
+        // 源缺失由 gops 的 mount 检查报；本检查只管「存在但类型错」。
+        let tree = Tree::new("bind-source-missing");
+        tree.write("sys/docker-compose.yml", COMPOSE_FILE_MOUNTS);
+        fs::create_dir_all(tree.root.join("packages")).unwrap();
+
+        let findings = bind_source_type(&tree.stack());
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn long_syntax_bind_is_checked_too() {
+        let tree = Tree::new("bind-source-long");
+        tree.write(
+            "sys/docker-compose.yml",
+            "\
+services:
+  wparse:
+    image: wparse
+    volumes:
+      - type: bind
+        source: ./identity/gwlinkd/control-center.pem
+        target: /data/identity/control-center.pem
+        read_only: true
+      - metrics_data:/storage
+",
+        );
+        fs::create_dir_all(tree.root.join("identity/gwlinkd/control-center.pem")).unwrap();
+
+        let findings = bind_source_type(&tree.stack());
+        assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
+        assert!(findings[0].detail.contains("control-center.pem"));
+    }
+
+    #[test]
+    fn named_volumes_and_inline_arrays_are_parsed() {
+        let mounts = compose_bind_mounts(
+            "\
+services:
+  vm:
+    image: vm
+    volumes: [./identity:/config/identity, metrics_data:/storage]
+",
+        );
+        assert_eq!(
+            mounts,
+            vec![(
+                "vm".to_string(),
+                "./identity".to_string(),
+                "/config/identity".to_string()
+            )]
+        );
+    }
+
+    // ── identity.trust_anchor ──────────────────────────────────────────
+
+    fn trust_anchor_findings(tree: &Tree) -> Vec<Finding> {
+        identity_paths(&tree.stack())
+    }
+
+    #[test]
+    fn trust_anchor_directory_is_a_blocking_failure() {
+        let tree = Tree::new("trust-anchor-dir");
+        tree.write(
+            "identity/gwlinkd/.env",
+            "GWLINKD_TRUST_BUNDLE=./identity/gwlinkd/control-center.pem\n",
+        );
+        fs::create_dir_all(tree.root.join("identity/gwlinkd/control-center.pem")).unwrap();
+
+        let findings = trust_anchor_findings(&tree);
+        let anchor = findings
+            .iter()
+            .find(|finding| finding.code == "identity.trust_anchor")
+            .expect("应有信任锚检查");
+        assert_eq!(anchor.status, Status::Fail, "{anchor:#?}");
+        assert!(anchor.detail.contains("目录"), "{}", anchor.detail);
+    }
+
+    #[test]
+    fn trust_anchor_garbage_file_fails_and_valid_pem_passes() {
+        let tree = Tree::new("trust-anchor-pem");
+        tree.write(
+            "identity/gwlinkd/.env",
+            "GWLINKD_TRUST_BUNDLE=./identity/gwlinkd/control-center.pem\n",
+        );
+        tree.write("identity/gwlinkd/control-center.pem", "not a pem\n");
+        let bad = trust_anchor_findings(&tree);
+        let anchor = bad
+            .iter()
+            .find(|finding| finding.code == "identity.trust_anchor")
+            .expect("应有信任锚检查");
+        assert_eq!(anchor.status, Status::Fail, "{anchor:#?}");
+
+        tree.write(
+            "identity/gwlinkd/control-center.pem",
+            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        );
+        let good = trust_anchor_findings(&tree);
+        let anchor = good
+            .iter()
+            .find(|finding| finding.code == "identity.trust_anchor")
+            .expect("应有信任锚检查");
+        assert_eq!(anchor.status, Status::Ok, "{anchor:#?}");
+    }
+
+    #[test]
+    fn trust_anchor_missing_is_ok_but_gwlinkd_paths_warns() {
+        let tree = Tree::new("trust-anchor-missing");
+        tree.write(
+            "identity/gwlinkd/.env",
+            "GWLINKD_TRUST_BUNDLE=./identity/gwlinkd/control-center.pem\n",
+        );
+
+        let findings = trust_anchor_findings(&tree);
+        let anchor = findings
+            .iter()
+            .find(|finding| finding.code == "identity.trust_anchor")
+            .expect("应有信任锚检查");
+        assert_eq!(anchor.status, Status::Ok, "{anchor:#?}");
+
+        let paths = findings
+            .iter()
+            .find(|finding| finding.code == "identity.gwlinkd_paths")
+            .expect("应有路径检查");
+        assert_eq!(paths.status, Status::Warn, "{paths:#?}");
+        assert!(paths.detail.contains("wparse"), "{}", paths.detail);
+    }
+
+    // ── identity.trust_projection ──────────────────────────────────────
+    //
+    // compose 只挂 `identity/gwlinkd/trust/` 目录、不挂单文件，所以真身与投影必须同步：
+    // 投影缺失 = 容器读不到中心 CA；投影残留 = 还在信一张已经撤掉的 CA。
+
+    const PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
+    fn projection_status(tree: &Tree) -> Status {
+        identity_paths(&tree.stack())
+            .into_iter()
+            .find(|finding| finding.code == "identity.trust_projection")
+            .expect("应有投影检查")
+            .status
+    }
+
+    fn trust_env(tree: &Tree) {
+        tree.write(
+            "identity/gwlinkd/.env",
+            "GWLINKD_TRUST_BUNDLE=./identity/gwlinkd/control-center.pem\n",
+        );
+    }
+
+    #[test]
+    fn trust_projection_in_sync_is_ok() {
+        let tree = Tree::new("projection-ok");
+        trust_env(&tree);
+        tree.write("identity/gwlinkd/control-center.pem", PEM);
+        tree.write("identity/gwlinkd/trust/control-center.pem", PEM);
+        assert_eq!(projection_status(&tree), Status::Ok);
+    }
+
+    #[test]
+    fn trust_projection_missing_warns() {
+        let tree = Tree::new("projection-missing");
+        trust_env(&tree);
+        tree.write("identity/gwlinkd/control-center.pem", PEM);
+        assert_eq!(projection_status(&tree), Status::Warn);
+    }
+
+    #[test]
+    fn trust_projection_stale_warns() {
+        let tree = Tree::new("projection-stale");
+        trust_env(&tree);
+        // 真身没了，但容器目录里还留着一份旧 CA
+        tree.write("identity/gwlinkd/trust/control-center.pem", PEM);
+        assert_eq!(projection_status(&tree), Status::Warn);
+    }
+
+    #[test]
+    fn trust_projection_absent_everywhere_is_ok() {
+        // 公网 CA 的中心 / 尚未接入中心：两头都没有，是合法现场，不是缺陷。
+        let tree = Tree::new("projection-none");
+        trust_env(&tree);
+        assert_eq!(projection_status(&tree), Status::Ok);
     }
 }

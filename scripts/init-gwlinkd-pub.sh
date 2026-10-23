@@ -6,13 +6,15 @@
 # （`sys/configs/gwlinkd/gwlinkd-pub.toml.tpl` → `identity/gwlinkd/gwlinkd-pub.toml`），
 # 与其它交付物同一套渲染；重渲动不到现场（值不在这里）。
 #
-# 本脚本做三件事：
+# 本脚本做四件事：
 #   1) 把 `GWLINKD_CENTER_ENDPOINT` / `GWLINKD_GATEWAY_ID` / `GWLINKD_TRUST_BUNDLE` 按缺
 #      （**键不存在或值为空**）写进 `.env`，**非空一律保留**（现场改过 / 页面接入时写过 / 迁移搬来的）。
 #      **唯一例外是「路径型键的搬家自愈」**：非空值指向的文件已不存在、而期望位置
 #      （`<现场态目录>/control-center.pem`）确实有 —— 那就改写成期望位置。
 #      只在这一种形状下改写：指向真在的自定义路径一律保留，期望位置也没有就只告警（不猜）。
 #   2) **清掉死键**：`.env` 里存在、但同目录 `gwlinkd-pub.toml` **没有引用**的键。
+#   3) **清掉信任锚位置的 docker 空目录**：源文件缺失时 docker 会把 bind 建成同名目录，
+#      文件永远写不进去，挂进 wparse 还会让它起不来（详见下面 PATH_KEYS 处的注释）。
 #
 # 为什么需要自愈：`.env` 是**现场值**（永不重写），而站点目录会被 `mv` / 拷贝到新位置。
 #   搬家后 `.env` 里的**绝对路径**（如信任锚）就指向旧位置 —— 指针还“有值”，于是
@@ -75,6 +77,18 @@ DESIRED = [
 STATE_DIR = os.path.dirname(os.path.abspath(target))
 # 路径型键 → 期望落点。目前只有信任锚（gwlinkd 接入时就把 CA 写在这里）。
 PATH_KEYS = {"GWLINKD_TRUST_BUNDLE": os.path.join(STATE_DIR, "control-center.pem")}
+
+# 信任锚位置如果是**空目录**，那一定是 docker 建的（源文件缺失时 bind 会被建成同名目录）：
+# 这个路径上再也写不进文件，而它挂进 wparse 容器后会被当成 SSL_CERT_FILE ——
+# 引擎建 HTTP 客户端失败（`build victoriametric client failed`）、容器无限重启。
+# 空目录只可能是这个来历，直接删；非空的不碰（可能是现场自己放的目录）。
+for expected in PATH_KEYS.values():
+    if os.path.isdir(expected) and not os.listdir(expected):
+        try:
+            os.rmdir(expected)
+            print(f"  已删除 docker 建出的空目录：{expected}（源文件缺失时 bind 会被建成目录）")
+        except OSError as err:
+            print(f"  [WARN] 删不掉空目录 {expected}：{err}", file=sys.stderr)
 
 
 def set_line(lines, key, value):
@@ -198,3 +212,52 @@ os.chmod(tmp, 0o644)
 os.replace(tmp, target)
 print(message)
 PY
+
+# ── 中心信任锚的**容器投影**（结构契约，不要改回单文件挂载）───────────────────
+#
+# 事故事实（2026-10-23，现场 wparse 容器 restarting 52 次）：
+#   中心信任锚缺失时，compose 里“把文件挂进容器”那条 bind 会被 docker **静默建成一个同名空目录**；
+#   wparse 把这个路径当 `SSL_CERT_FILE`，构造 HTTP 客户端失败（`build victoriametric client failed`），
+#   进程退出、容器无限重启 —— 而采集面和 VictoriaMetrics 都是好的。
+#
+# 于是定下三条契约（A/B 两种中心都有、并且「中心还没接入」也成立）：
+#   1. 信任锚是**可选**的：公网 CA 的中心用不到；还没接入中心时也不存在。两个状态都必须能跑。
+#   2. 容器**不挂单文件**，只挂**目录** `identity/gwlinkd/trust/`（本脚本保证它存在）——
+#      docker 就再也没有「把文件建成目录」的机会。
+#   3. 真身仍是 `identity/gwlinkd/control-center.pem`（gwlinkd 页面接入时写的就是它，不改），
+#      这里做的是**投影**：有可读 PEM 就拷过去，没有就把投影删掉（不留陈旧 CA）。
+#
+# 代价（写在这里免得以后又当 bug）：页面接入后新写入的 CA 要等下一次 localize /
+#   升级才会投进容器。而在那之前 project_remote 本来也 clone 不动（还没接中心）。
+TRUST_SRC="${DIR}/control-center.pem"
+TRUST_DIR="${DIR}/trust"
+TRUST_DST="${TRUST_DIR}/control-center.pem"
+
+mkdir -p "${TRUST_DIR}"
+if [[ ! -w "${TRUST_DIR}" ]]; then
+  echo "  [FAIL] ${TRUST_DIR} 不可写（常见于先跑过 docker compose up，被建成 root:root）" >&2
+  echo "         修法：sudo chown -R \$(id -u):\$(id -g) '${TRUST_DIR}'" >&2
+  exit 1
+fi
+# 目录里只会有**公开**证书（CA 的公钥部分），所以 755 就够：也给得出集装箱（uid 999）
+# 一个在 macOS/OrbStack 上也能进的门（那里没有 `gops sys perms` 可跑）。
+chmod 755 "${TRUST_DIR}" 2>/dev/null || true
+
+# 投影位置如果是个目录（只会是人为/旧版本留给我们的意外），先清掉空的。
+if [[ -d "${TRUST_DST}" ]] && ! rmdir "${TRUST_DST}" 2>/dev/null; then
+  echo "  [FAIL] ${TRUST_DST} 是目录且非空，无法投影" >&2
+  exit 1
+fi
+
+if [[ -f "${TRUST_SRC}" ]] && grep -q 'BEGIN CERTIFICATE' "${TRUST_SRC}"; then
+  if [[ -f "${TRUST_DST}" ]] && cmp -s "${TRUST_SRC}" "${TRUST_DST}"; then
+    echo "  信任锚投影已是最新：${TRUST_DST}"
+  else
+    cp -f "${TRUST_SRC}" "${TRUST_DST}"
+    chmod 644 "${TRUST_DST}"
+    echo "  已投影中心信任锚到容器目录：${TRUST_DST}"
+  fi
+else
+  rm -f "${TRUST_DST}"
+  echo "  无中心信任锚（公网 CA 或尚未接入中心）：容器侧回落系统根（合法现场）"
+fi

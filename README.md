@@ -471,6 +471,12 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 - 开发态：`svc.sh` 起 wparse 时默认 `http://127.0.0.1:18429`。
 - 发布态：compose 注入 `http://victoria-metrics:8428`。
 
+**中心信任锚是可选的**（`identity/gwlinkd/control-center.pem`）：公网 CA 的中心不需要它，中心还没接入时也不存在。
+compose **不挂单文件**，只挂投影目录 `identity/gwlinkd/trust/`（`init-gwlinkd-pub.sh` 建目录并投影；没有 CA 就留空），
+入口脚本看到的不是可读 PEM 时会 `unset SSL_CERT_FILE` 回落系统根。这么设计是因为
+docker 会把**缺失的 bind 文件源**静默建成同名空目录，而 wparse 拿它当 `SSL_CERT_FILE` 会直接起不来
+（`build victoriametric client failed`）。
+
 ## 已知坑
 
 1. **网关启动的硬要求**（缺失即拒绝启动，`wist-gateway` 的 `AdminConfig::validate`）：`wist-gateway.toml` 本身、TLS 证书与私钥；`public_base_url` 必须是 `https://`；`admin_api_token` 要满足长度与熵要求。这就是"为什么必须先初始化"。**安装包不是配置项**：`agent.package_file` 已删（gateway 0.1.8 起），安装包只有「管理面录入」一个来源（用 `scripts/import-package.sh --set` 或界面「安装包」页）；**没录入也不阻断启动**，只让安装包分发不可用（相关端点被调用时才明确报错）。
@@ -481,6 +487,7 @@ wparse 里指向 VictoriaMetrics 的端点用 `${WPARSE_VM_ENDPOINT}` 占位，�
 6. **容器读不到宿主路径**（设置安装包来源时最常见）。网关对**以 `/` 开头的来源**是在**它自己的**文件系统里 `fs::read`；compose 下只有被挂进来的目录可见。所以「本地来源」只能是 `/packages/<文件名>`（投放目录，见 `scripts/import-package.sh`）；`/config` 现在只挂配置/状态/日志/知识库，**不再接受任意投放文件**。否则报 `failed to read package from <宿主路径>: No such file or directory`（界面表现为 502）。拉取成功后网关会把包缓存到 `configs/gateway/state/install-package/`（在挂载卷里，可备份）。
    > 提醒：**别删 `packages/` 目录本身**（容器正挂载它）——删了会让挂载失效、容器内 `/packages` 直接消失；重建容器才恢复（`docker compose --project-directory . -f sys/docker-compose.yml up -d --force-recreate gateway`）。
 7. **宿主属主/权限没对齐 → 容器无限重启**（Linux 上最常见的部署事故）。症状与处置见「权限与运行身份」：先跑 `gops sys perms --apply`，恢复备份后 `restore-gateway.sh` 会自动重跑对齐。**别用 `docker compose up` 顺手建目录** —— 它建出来的是 `root:root`。
+8. **`identity/` 里任何「可能不存在」的文件，都不要直接 bind 成容器里的单文件**。docker 对缺失的 bind 源不报错，而是建一个同名**目录**顶上；读它的进程只会在自己的报错里死掉（`wparse` 的 `build victoriametric client failed` 就是这么来的）。做法是挂**目录**、让文件可选，并由组件自己判断「有就用、没有就回落」。目前中心信任锚按这个契约走（见「环境接线」）。
 
 ## 备份与恢复
 

@@ -138,6 +138,20 @@ services:
         if [ -f /seed/wparse.local.toml ]; then
           cp -an /seed/wparse.local.toml /data/wparse.local.toml
         fi
+        # 信任锚**可选**（公网 CA 的中心不需要；中心还没接入时也没有）。
+        # 为什么不能直接挂文件：docker 对**缺失的 bind 文件源**不报错，而是建一个同名**目录**顶上；
+        # SSL_CERT_FILE 指到目录/空文件时，引擎构造 HTTP 客户端直接失败
+        # （`sink error / build victoriametric client failed`），进程退出、容器无限重启 ——
+        # 症状完全指不到根因（2026-10-23 现场 52 次重启即此）。
+        # 断根：只挂一个**我们自己的目录**（一定存在，里面可有可无），docker 没有任何机会把文件建成目录。
+        # 目录内容由 `scripts/init-gwlinkd-pub.sh` 从真身（identity/gwlinkd/control-center.pem）投影。
+        trust=/data/identity/trust/control-center.pem
+        if [ -f "$$trust" ] && /usr/bin/grep -q 'BEGIN CERTIFICATE' "$$trust"; then
+          :
+        else
+          echo "info: 没有可用的中心信任锚（$$trust）—— 公网 CA 的中心或尚未接入中心时是正常态；本容器回落系统根" >&2
+          unset SSL_CERT_FILE GIT_SSL_CAINFO
+        fi
         exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
           /usr/local/bin/wparse daemon --work-root /data
     environment:
@@ -149,8 +163,11 @@ services:
       WPARSE_PROJECT_MODELS_REPO: ${WPARSE_PROJECT_MODELS_REPO}
       WPARSE_PROJECT_INFRA_REPO: ${WPARSE_PROJECT_INFRA_REPO}
       # 信任 Center CA（Git Proxy 的 TLS 证书由中心 CA 签发）。
-      GIT_SSL_CAINFO: /data/identity/control-center.pem
-      SSL_CERT_FILE: /data/identity/control-center.pem
+      # ⚠ 这两项**可选**：入口脚本判到投影不是可读 PEM 时会 `unset`，回落到系统根
+      #   （公网 CA 的中心、或尚未接入中心时）。路径指到「目录 + 可选文件」，不是单文件挂载，
+      #   所以文件不存在时 docker 不会建出怪目录 —— 详见 entrypoint 里的说明。
+      GIT_SSL_CAINFO: /data/identity/trust/control-center.pem
+      SSL_CERT_FILE: /data/identity/trust/control-center.pem
     volumes:
       # 配置种子（唯一源，只读）
       - ${WPARSE_WORK_DIR}:/seed:ro
@@ -163,7 +180,9 @@ services:
       # 管理面 TLS（复用网关 admin-tls）与 Center CA
       - ./identity/gateway/public/admin-tls.crt.pem:/data/identity/admin-tls.crt.pem:ro
       - ./identity/gateway/private/admin-tls.key.pem:/data/identity/admin-tls.key.pem:ro
-      - ./identity/gwlinkd/control-center.pem:/data/identity/control-center.pem:ro
+      # 信任锚：挂**目录**（可能为空），不挂单文件 —— 真身在 identity/gwlinkd/control-center.pem，
+      # 由 init-gwlinkd-pub.sh 投影到这里；没有中心 CA 时目录空着也是合法现场。
+      - ./identity/gwlinkd/trust:/data/identity/trust:ro
     ports:
       # agent 数据面入口（wparse source tcp_1）。明文，需对 agent 可达；
       # 管控面 agent 上送地址由网关下发（/api/v1/admin/agent/uplink），要与这里一致。

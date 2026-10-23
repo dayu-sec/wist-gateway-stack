@@ -67,10 +67,8 @@ mod tests {
 
     #[test]
     fn only_prefix_runs_one_group_only() {
-        let root = std::env::temp_dir().join(format!(
-            "wist-stackcheck-only-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("wist-stackcheck-only-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let stack = Stack::new(&root);
 

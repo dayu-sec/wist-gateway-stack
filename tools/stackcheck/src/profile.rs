@@ -3,7 +3,7 @@
 //! 通用判据从 `wist-stackcheck-core` 取；这里只声明本栈的渲染对、占位值文件与密钥根。
 //! package / knowledge / identity / prereq 等专属判据仍在 `checks.rs`。
 
-use wist_stackcheck_core::profile::{IdentityFile, Missing, MountSpec, Profile, RenderPair, SecretFile};
+use wist_stackcheck_core::profile::{Missing, Profile, RenderPair, SecretFile};
 
 pub const GATEWAY: Profile = Profile {
     project_fallback: "wist-gateway-stack",
@@ -50,10 +50,10 @@ pub const GATEWAY: Profile = Profile {
     private_key_roots: &["identity"],
 
     // gateway 的身份材料由 `identity_paths` 单独判（签名公钥 / gwlinkd 路径）。
-    identity_files: &[] as &[IdentityFile],
+    identity_files: &[],
 
     // 投放目录的 compose 挂载由 `package_dir_consistency` 判（target 是变量派生值）。
-    mounts: &[] as &[MountSpec],
+    mounts: &[],
 
     schema_file: None,
     public_url: None,

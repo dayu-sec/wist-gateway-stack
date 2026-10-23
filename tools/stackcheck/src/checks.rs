@@ -347,8 +347,9 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
         Ok(pair) => pair,
         Err(err) => {
             out.push(
-                Finding::fail("package.vars", "读不到合并后的系统变量", err)
-                    .with_hint("先跑一次 `gops sys localize`（生成 .env / sys/merged_vars.yml）再检查"),
+                Finding::fail("package.vars", "读不到合并后的系统变量", err).with_hint(
+                    "先跑一次 `gops sys localize`（生成 .env / sys/merged_vars.yml）再检查",
+                ),
             );
             return out;
         }
@@ -446,7 +447,9 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
                             format!("{what}不是绝对路径"),
                             format!("实际 `{actual}`"),
                         )
-                        .with_hint("init-gwlinkd.sh 会把相对 PACKAGE_DIR 绝对化；别手工改回相对路径"),
+                        .with_hint(
+                            "init-gwlinkd.sh 会把相对 PACKAGE_DIR 绝对化；别手工改回相对路径",
+                        ),
                     );
                     continue;
                 }
@@ -482,9 +485,7 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
                 Finding::fail(
                     code,
                     format!("{what}落在了错误的 TOML 段"),
-                    format!(
-                        "`{key}` 在 `{section}` 里，不在文档根 —— gwlinkd 在根读到的是 None"
-                    ),
+                    format!("`{key}` 在 `{section}` 里，不在文档根 —— gwlinkd 在根读到的是 None"),
                 )
                 .with_hint("把它渲染到任何段头（[table] / [[array]]）之前"),
             ),
@@ -511,14 +512,14 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
         }
     };
     match fs::read_to_string(&compose_path) {
-        Ok(compose) => match package_mount_target(&compose) {
-            Some(target) if trim_slash(&target) == trim_slash(container_base) => out.push(
-                Finding::ok(
+        Ok(compose) => match compose_mount_target(&compose, "${PACKAGE_DIR}") {
+            Some(target) if trim_slash(&target) == trim_slash(container_base) => {
+                out.push(Finding::ok(
                     "package.compose_mount",
                     "compose 已把投放目录挂到容器",
                     format!("${{PACKAGE_DIR}}:{target}"),
-                ),
-            ),
+                ))
+            }
             Some(target) => out.push(
                 Finding::fail(
                     "package.compose_mount",
@@ -550,46 +551,6 @@ pub fn package_dir_consistency(stack: &Stack) -> Vec<Finding> {
     }
 
     out
-}
-
-/// compose 文件的发现顺序（与 gops 的 `compose_invocation` 同口径）。
-/// 从 compose 文本里取 `${PACKAGE_DIR}:<target>[:ro]` 的 target（短语法），
-/// 兼容长语法（`source: ${PACKAGE_DIR}` 附近的 `target:`）。
-fn package_mount_target(compose: &str) -> Option<String> {
-    let lines: Vec<&str> = compose.lines().collect();
-
-    // 短语法：`- ${PACKAGE_DIR}:/packages:ro`
-    for line in &lines {
-        let Some(rest) = line.trim().strip_prefix("- ") else {
-            continue;
-        };
-        let Some((src, dst)) = rest.split_once(':') else {
-            continue;
-        };
-        if !src.contains("PACKAGE_DIR") {
-            continue;
-        }
-        return Some(dst.split(':').next().unwrap_or(dst).trim().to_string());
-    }
-
-    // 长语法：
-    //   - type: bind
-    //     source: ${PACKAGE_DIR}
-    //     target: /packages
-    // 在源行前后各看两行（`target` 可能在 `source` 之前）。
-    for (index, line) in lines.iter().enumerate() {
-        if !line.contains("PACKAGE_DIR") || !line.contains("source") {
-            continue;
-        }
-        let start = index.saturating_sub(2);
-        let end = (index + 3).min(lines.len());
-        for candidate in &lines[start..end] {
-            if let Some((_, target)) = candidate.split_once("target:") {
-                return Some(target.trim().trim_matches('"').to_string());
-            }
-        }
-    }
-    None
 }
 
 // ── 渲染 / 占位值 / 密钥：通用实现来自 wist-stackcheck-core ────────────────
@@ -661,7 +622,10 @@ pub fn package_pairing(stack: &Stack) -> Vec<Finding> {
             Finding::fail(
                 "package.knowledge_signature",
                 "最新知识库包缺签名",
-                format!("{} 旁边没有 .sig（导入会 422 package_signature_invalid）", newest_name),
+                format!(
+                    "{} 旁边没有 .sig（导入会 422 package_signature_invalid）",
+                    newest_name
+                ),
             )
             .with_hint("把发布侧的 *.tar.gz.sig 一起放进 packages/；签名是 base64 文本")
             // 不阻断：它会让「以后导入」失败，但当前跑着的栈是好的 —— 不该因此拦下升级。
@@ -790,14 +754,8 @@ pub fn identity_paths(stack: &Stack) -> Vec<Finding> {
     let mut checked = 0usize;
 
     for (label, dir) in [
-        (
-            "state_dir",
-            root_str_of(&toml_path, "state_dir"),
-        ),
-        (
-            "identity_dir",
-            root_str_of(&toml_path, "identity_dir"),
-        ),
+        ("state_dir", root_str_of(&toml_path, "state_dir")),
+        ("identity_dir", root_str_of(&toml_path, "identity_dir")),
     ] {
         let Some(dir) = dir.filter(|value| !value.trim().is_empty()) else {
             continue;
@@ -941,12 +899,14 @@ pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
     };
 
     let Some(found) = candidates.iter().find(|path| path.is_file()) else {
-        return vec![Finding::fail(
-            CODE,
-            "网关叶证书不存在",
-            format!("`{raw}` 在 {} 个候选位置都没找到", candidates.len()),
-        )
-        .with_hint("跑一次 `gops sys localize`（init-gateway.sh 会签发）")];
+        return vec![
+            Finding::fail(
+                CODE,
+                "网关叶证书不存在",
+                format!("`{raw}` 在 {} 个候选位置都没找到", candidates.len()),
+            )
+            .with_hint("跑一次 `gops sys localize`（init-gateway.sh 会签发）"),
+        ];
     };
 
     let Ok(bytes) = fs::read(found) else {
@@ -968,15 +928,16 @@ pub fn tls_certificate(stack: &Stack) -> Vec<Finding> {
     };
 
     if !leaf.valid {
-        return vec![Finding::fail(
-            CODE,
-            "网关叶证书不在有效期内",
-            format!(
-                "notBefore={} notAfter={}",
-                leaf.not_before, leaf.not_after
+        return vec![
+            Finding::fail(
+                CODE,
+                "网关叶证书不在有效期内",
+                format!("notBefore={} notAfter={}", leaf.not_before, leaf.not_after),
+            )
+            .with_hint(
+                "重新签发：删掉 identity/gateway/{public,private}/admin-tls.* 后跑 localize",
             ),
-        )
-        .with_hint("重新签发：删掉 identity/gateway/{public,private}/admin-tls.* 后跑 localize")];
+        ];
     }
 
     let Some(domain) = effective_vars(stack)
@@ -1024,12 +985,14 @@ pub fn initial_knowledge_layout(stack: &Stack) -> Vec<Finding> {
 
     let dir = stack.at("configs/gateway/knowledge/initial");
     if !dir.is_dir() {
-        return vec![Finding::warn(
-            "knowledge.initial_layout",
-            "没有初始知识库目录",
-            dir.display().to_string(),
-        )
-        .with_hint("ARTIFACT_HOME / KNOWLEDGE_PATH 为空时这是正常的；否则跑一次 localize")];
+        return vec![
+            Finding::warn(
+                "knowledge.initial_layout",
+                "没有初始知识库目录",
+                dir.display().to_string(),
+            )
+            .with_hint("ARTIFACT_HOME / KNOWLEDGE_PATH 为空时这是正常的；否则跑一次 localize"),
+        ];
     }
 
     let missing: Vec<&str> = FILES
@@ -1076,9 +1039,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use std::collections::BTreeMap;
     use crate::Status;
     use crate::profile;
+    use std::collections::BTreeMap;
 
     /// 临时栈根；`Drop` 时清理。
     struct Tree {
@@ -1196,7 +1159,10 @@ name = \"galaxy-flow\"
     fn flags_a_render_older_than_its_value_file() {
         let tree = Tree::new("stale-render");
         let rendered = tree.write("configs/gwlinkd/gwlinkd.toml", "state_dir = \"/tmp\"\n");
-        tree.write("configs/gwlinkd/gwlinkd.value.json", "{\"state_dir\":\"/tmp\"}\n");
+        tree.write(
+            "configs/gwlinkd/gwlinkd.value.json",
+            "{\"state_dir\":\"/tmp\"}\n",
+        );
 
         // 把渲染产物拨回一分钟前（值文件保持「现在」）。
         let file = File::options().write(true).open(&rendered).unwrap();
@@ -1257,8 +1223,14 @@ name = \"galaxy-flow\"
     fn merged_vars_with_an_unknown_shape_fails_loudly() {
         let tree = Tree::new("vars-shape");
         // 文件在，但不是 gops 的 `- name:/value:` 形状（改名 / 截断 / 换了 YAML 风格）。
-        tree.write("sys/merged_vars.yml", "variables:\n  PACKAGE_DIR: ./packages\n");
-        tree.write("configs/gwlinkd/gwlinkd.toml", "agent_package_drop_dir = \"/tmp/a\"\n");
+        tree.write(
+            "sys/merged_vars.yml",
+            "variables:\n  PACKAGE_DIR: ./packages\n",
+        );
+        tree.write(
+            "configs/gwlinkd/gwlinkd.toml",
+            "agent_package_drop_dir = \"/tmp/a\"\n",
+        );
 
         let findings = package_dir_consistency(&tree.stack());
         let finding = findings
@@ -1462,7 +1434,10 @@ name = \"galaxy-flow\"
             .find(|finding| finding.code == "identity.gwlinkd_paths")
             .expect("应有 gwlinkd 路径检查");
         assert_eq!(finding.status, Status::Warn, "{finding:#?}");
-        assert!(finding.detail.contains("GWLINKD_TRUST_BUNDLE"), "{finding:#?}");
+        assert!(
+            finding.detail.contains("GWLINKD_TRUST_BUNDLE"),
+            "{finding:#?}"
+        );
     }
 
     #[test]
@@ -1478,7 +1453,10 @@ name = \"galaxy-flow\"
         tree.write("configs/gateway/knowledge/initial/packs.toml", "");
         let findings = initial_knowledge_layout(&tree.stack());
         assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
-        assert!(findings[0].detail.contains("templates.toml"), "{findings:#?}");
+        assert!(
+            findings[0].detail.contains("templates.toml"),
+            "{findings:#?}"
+        );
 
         // 补齐后 OK，并带出版本号。
         for name in [
@@ -1713,7 +1691,10 @@ jx0fk6s=\n\
     fn tls_domain_comes_from_the_effective_values_too() {
         let tree = tls_tree("tls-env", GOOD_CERT);
         // 现场覆盖：默认值里没有 / 不是这个域名，`.env` 里才是真的。
-        tree.write("sys/merged_vars.yml", "- name: WEB_DOMAIN\n  value: default.example.test\n");
+        tree.write(
+            "sys/merged_vars.yml",
+            "- name: WEB_DOMAIN\n  value: default.example.test\n",
+        );
         tree.write(".env", "WEB_DOMAIN=gw.example.test\n");
 
         let findings = tls_certificate(&tree.stack());
@@ -1866,7 +1847,8 @@ jx0fk6s=\n\
         let mut vars = BTreeMap::new();
         vars.insert("WIST_SPC".to_string(), "ghcr.io/dayu-sec".to_string());
         vars.insert("GATEWAY_TAG".to_string(), "v0.19.0-alpha".to_string());
-        let compose = "# image: ignored/comment:1\n    image: ${WIST_SPC}/wist-gateway:${GATEWAY_TAG}\n";
+        let compose =
+            "# image: ignored/comment:1\n    image: ${WIST_SPC}/wist-gateway:${GATEWAY_TAG}\n";
 
         assert_eq!(
             compose_images(compose, &vars),
@@ -1940,9 +1922,7 @@ jx0fk6s=\n\
     #[test]
     fn image_check_reports_a_missing_tag() {
         let images = vec!["repo/app:v9".to_string()];
-        let findings = image_reachable_with(&images, &|_| {
-            Err("manifest unknown".to_string())
-        });
+        let findings = image_reachable_with(&images, &|_| Err("manifest unknown".to_string()));
         assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
         assert!(findings[0].title.contains("取不到"), "{findings:#?}");
         assert!(!findings[0].blocking);
@@ -1958,7 +1938,12 @@ jx0fk6s=\n\
     #[test]
     fn image_check_is_skipped_when_offline_is_requested() {
         let tree = Tree::new("images-skip");
-        let findings = image_reachable(&tree.stack(), &Vars::load(&tree.stack()), &profile::GATEWAY, true);
+        let findings = image_reachable(
+            &tree.stack(),
+            &Vars::load(&tree.stack()),
+            &profile::GATEWAY,
+            true,
+        );
         assert_eq!(findings[0].status, Status::Ok);
         assert!(findings[0].title.contains("--offline"), "{findings:#?}");
     }
@@ -2061,7 +2046,12 @@ jx0fk6s=\n\
         let boom = SanProbe::Failed("helper 退出码 1".to_string());
 
         // 还没有证书：跳过（首次部署），不报错
-        let none = san_finding("prereq.tls_san_reader", None, &SanProbe::NoCert, &SanProbe::NoCert);
+        let none = san_finding(
+            "prereq.tls_san_reader",
+            None,
+            &SanProbe::NoCert,
+            &SanProbe::NoCert,
+        );
         assert_eq!(none.status, Status::Ok);
         assert!(none.title.contains("还没有"), "{}", none.title);
 

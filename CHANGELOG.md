@@ -3,6 +3,14 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.11-alpha] - 2026-10-23
+
+### 工程
+
+- **`wist-stackcheck` 汇总行不再打印为 0 的段**（`wist-stackcheck-core` 0.1.4）：
+  `23 项检查：20 ok / 3 warn（结论：warn）`，不再出现 `0 fail` —— 日志查看器 / CI 的
+  关键词高亮会把 `fail` 涂红，读起来像“有失败”。总数仍在句首，信息不丢；全好时就是 `N 项检查：N ok`。
+
 ## [0.2.10-alpha] - 2026-10-23
 
 ### 修复

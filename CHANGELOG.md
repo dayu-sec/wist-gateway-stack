@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.13-alpha] - 2026-10-24
+
+### 变更
+
+- **组件跟版**：网关 `v0.20.1-alpha`、前端 `v0.14.1-alpha`。带来日志采集侧的
+  「能力轴补全」与两种记录边界读法（`postgres_csv` / `mysql_slow`）、噪音行丢弃
+  （`drop_if_contains`，**不占 `seq`**），以及事实摘要 `fact-v3`。同面仍为 `draft` 的单元
+  不再随面一起派下去。
+- **出厂知识库包 `v0.5.1`**：新增容器 stdout 单元（13 / 15 / 16），数据库面（csvlog / slow log）
+  翻 `active`，`auth.log` / `secure` 配噪音行；`catalog_version` 10。
+
+### 升级注意
+
+- **滚动顺序**：先本 stack（网关、前端，含 contracts 能力轴）→ 机队 agentd `0.9.1` → 再推目录。
+  旧网关会整份拒收新 agentd 的能力上报；机队没到 agentd ≥ 0.9.1 前，新读法会被当成
+  「一行一条」读，csvlog / slow log 记录会被切碎。
+- **知识库包到 `packages/` ≠ 生效**：升级后需在「知识库」页用本地来源录入再点激活。
+- **`fact-v3` 升级后会全网重新上报一次事实**（摘要前缀变了），属预期，不是故障。
+
 ## [0.2.12-alpha] - 2026-10-23
 
 ### 修复

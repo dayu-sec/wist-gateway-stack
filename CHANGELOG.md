@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.16-alpha] - 2026-10-24
+
+### 变更
+
+- **网关跟版 `v0.20.3-alpha`**：`match` 支持否定条件 `not_path_exists:<绝对路径>`（三态求值、
+  路径进探测白名单、装载期校验）；`filters.name_in` / `name_not_in` 的装载校验按维度分开
+  （name 维度放宽到含 `containers/` 的来源，namespace/pod 仍限 `/var/log/containers`）。
+- **出厂知识库包 `v0.5.3`**（`catalog_version` 12）：`linux-docker-container-stdout` 的 `match`
+  加 `not_path_exists:/var/log/containers` —— `k8s + cri-dockerd` 的主机上不再与
+  `linux-container-stdout` 重复采集同一份日志。前端版本不变（`v0.14.1-alpha`）。
+
+### 升级注意
+
+- **组件升级顺序**：网关 → 主机上的 agentd（≥ 0.9.5 才有容器名过滤能力）→ 知识库包。
+  旧网关不认识 `not_path_exists` 时该单元整条不展开（保守，不会重采）。
+- ⚠ **已激活过知识包的站点只升 stack 不会换目录**：需要在「知识库」页把 0.5.3 的包**录入并激活**
+  （热加载），再**重新授权 `ComputeWorkload`**，并等一轮策略拉取（≤5 分钟）让
+  `/var/log/containers` 进入探测白名单。
+- 容器名过滤（`filters.name_in` / `name_not_in`）是**可选量控**，出厂目录里没启用。
+
 ## [0.2.15-alpha] - 2026-10-24
 
 ### 变更

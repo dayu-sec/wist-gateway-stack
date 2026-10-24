@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.15-alpha] - 2026-10-24
+
+### 变更
+
+- **出厂知识库包 `v0.5.2`**：新增 `linux-docker-container-stdout` —— 纯 Docker 主机的容器
+  stdout（`/var/lib/docker/containers/*/*-json.log*`）。正文原样上送，docker 的 JSON 信封
+  由数据面解（与 CRI 头同层），因此**采集端零代码**、也不影响旧版本 agentd。
+  网关与前端版本不变（`v0.20.2-alpha` / `v0.14.1-alpha`）。
+
+### 升级注意
+
+- 授权后**正文暂时是原始 JSON 行**（`{"log":…,"stream":…,"time":…}`）—— 解码规则在数据面
+  （下一步）。这次先把字节拿回来，偏移/续读/轮转都是正常的。
+- ⚠ **k8s + cri-dockerd 的主机会重复采集**（kubelet 的 pod 日志指向 docker 的 json 文件），
+  否定条件落地前别把这类机器纳入 `linux-workload` 包。纯 Docker 主机不受影响。
+- 日志量取决于容器数量与活跃度；单轮读取量受 `max_read_bytes_per_tick` 限制，
+  首次授权从 `tail` 开始。
+
 ## [0.2.14-alpha] - 2026-10-24
 
 ### 变更

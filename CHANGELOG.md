@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.17-alpha] - 2026-10-24
+
+### 变更
+
+- **网关跟版 `v0.20.4-alpha`**：
+  - `match` 装载期 fail-closed：漏 `:` / 漏 `;` / 拼错 kind 不再静默
+    （漏冒号会让否定条件消失 → 双采；漏分号会让单元永不展开）；
+  - 容器过滤器的**减法维度**（`pod_not_in` / `name_not_in`）在旧 agent 上**去掉维度继续采**，
+    不再整条裁源 —— 单来源容器单元不会因缺一维能力变成“面不可授权”；
+  - 容器日志来源判据改用契约共享实现，接受目录形态（`…/containers`）。
+- **出厂知识库包 `v0.5.4`**（`purpose_version = 3`）：新增 `dockerd` / `containerd` →
+  `LinuxCompute` 的用途判据 —— **只跑业务容器的纯 Docker 主机**现在也能拿到容器 stdout 面
+  （以前落 `LinuxHost`，模板不带 `linux-workload`，单元根本派不到）。
+- 前端版本不变（`v0.14.1-alpha`）。
+
+### 升级注意
+
+- ⚠ `not_path_exists` 是**整机级开关**：`k8s(containerd) + 独立 dockerd` 的混跑主机、
+  以及 `/var/log/containers` 残留目录的主机会少采 / 不采 docker 容器 stdout。
+  逃生口：授权时显式点名 `spec=linux-docker-container-stdout`（不再保证去重）。
+- 已激活过知识包的站点：录入并激活 0.5.4 → **重新授权**（用途建议与模板展开用新规则）。
+  spec 在授权那一刻固化：先确认 agent 已上报 `/var/log/containers`（`probed_paths`），
+  否则 docker 单元会落 `fact_not_collected`，需要再授权一次。
+
 ## [0.2.16-alpha] - 2026-10-24
 
 ### 变更

@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.14-alpha] - 2026-10-24
+
+### 变更
+
+- **网关跟版 `v0.20.2-alpha`**：
+  - 派活被拒的文案带上卡住的那条条件（`linux-db-service=fact_not_collected(path_exists:/var/log/postgresql)`）；
+  - 管理面「发现策略」页的 `probe_paths` 改为网关**实际下发**的那一份（与 agent 收到的同源）。
+  前端 `v0.14.1-alpha`、出厂知识库包 `v0.5.1` 不变。
+
+### 升级注意
+
+- **机队要升到 agentd `0.9.2` 及以上**：0.9.1 及以前会丢掉网关下发的探测白名单，
+  于是 `path_exists:` 判定的面（auth / sudo / audit / kernel / 数据库 / 容器 stdout）
+  在真机上**永远授不了权**（`work_conflict: … fact_not_collected`）。
+  0.9.3 进一步把这处转换收成契约里的唯一实现（`DiscoveryAspectPolicySet::from`）。
+
 ## [0.2.13-alpha] - 2026-10-24
 
 ### 变更

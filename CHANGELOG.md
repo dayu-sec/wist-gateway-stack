@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.19-alpha] - 2026-10-25
+
+### 变更
+
+- **网关跟版 `v0.20.5-alpha`**：面词表新增 `ContainerWorkload`（旧包回落 + 闭集校验）。
+- **出厂知识库包 `v0.5.5`**（`catalog_version` 13 / `purpose_version` 4）：
+  - 容器 stdout 独立成 **`ContainerWorkload`**，两个容器单元迁入并挂到 **`linux-base`** ——
+    所有 Linux 模板（含 `LinuxHost`）都带上容器面，不再依赖机器用途分类；
+  - `ComputeWorkload` 回归「作业与加速卡」（slurm + GPU Xid，仍 `draft`）；
+  - 撤回 0.5.4 的 `dockerd` / `containerd` → `LinuxCompute` 判据（面拆分后不需要）。
+
+### 升级注意
+
+- ⚠ **激活新包后，原来授权过 `ComputeWorkload` 的机器不会自动采容器** —— 单元已属于新面，
+  需要**重新授权 `ContainerWorkload`**（或整机重新授权）。这是本次唯一的操作步骤。
+- 容器面这次进的是**基线包**：以后新增的 Linux 机器（包括只跑业务容器的）不用改分类 就能采容器日志。
+
 ## [0.2.18-alpha] - 2026-10-25
 
 ### 变更

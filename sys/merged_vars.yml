@@ -6,7 +6,7 @@ system:
 - name: VM_SPC
   value: quay.io/victoriametrics
 - name: GATEWAY_TAG
-  value: v0.20.4-alpha
+  value: v0.20.5-alpha
 - name: WEB_TAG
   value: v0.14.2-alpha
 - name: VM_TAG
@@ -56,7 +56,7 @@ system:
 - name: ARTIFACT_HOME
   value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
 - name: KNOWLEDGE_PATH
-  value: v0.5.4/wist-knowledge-0.5.4.tar.gz
+  value: v0.5.5/wist-knowledge-0.5.5.tar.gz
 - name: GWLINKD_CENTER_ENDPOINT
   value: ''
 - name: GWLINKD_GATEWAY_ID

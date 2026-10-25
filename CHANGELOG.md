@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.18-alpha] - 2026-10-25
+
+### 变更
+
+- **前端跟版 `v0.14.2-alpha`**：
+  - 容器名过滤在页面可见：`filters.name_in` / `name_not_in` 渲染成 `container in [...]` /
+    `container not in [...]`（旧网关不下发这两个键时不报错）；
+  - Gateway 信息页按用途重组：三段改成「看 / 改 / 状态」——`当前配置` 合并成三列表、
+    `修改上送设置` 只留表单、`接入上级` 补上 gwlinkd 心跳与中心地址。
+- 网关 / 知识库版本不变（`v0.20.4-alpha` / `0.5.4`）。
+
+### 升级注意
+
+- 这次只换前端镜像，采集行为不变。
+- 若站点用的是 agentd `0.9.7-alpha`，自观测里会多一行
+  `telemetry selection filtered … magnitude=excluded=N identity_unknown=M`（无过滤配置时不出现）。
+
 ## [0.2.17-alpha] - 2026-10-24
 
 ### 变更

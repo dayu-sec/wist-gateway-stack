@@ -80,4 +80,21 @@ package agent_uplink {
       chars:body\0
     )
   }
+
+  // 原文发现快照帧：信封 + ` DSNAP:` 标记 + `ReportDiscoverySnapshot` JSON。
+  // 与事实帧**分开标记**：body 是完整快照（一台几百 KB），消费者是 wist-atlas，
+  // 不是网关（网关只接摘要）。同样只拆信封，正文原样透传。
+  #[tag(log_desc: "Agent 发现快照", log_type: "agent.discovery")]
+  rule discovery_frame {
+    (
+      json(
+        chars@schema,
+        chars@agent,
+        chars@ts,
+        digit@seq,
+      ),
+      symbol(DSNAP:),
+      chars:body\0
+    )
+  }
 }

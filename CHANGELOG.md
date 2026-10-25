@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.22-alpha] - 2026-10-25
+
+### 新增
+
+- **数据面带业务身份**：数据面输出可带上承接客户（`tenant_id`）—— 中心绑定客户后，
+  网关会把身份写给数据面，同一台网关的数据不再“分不清是哪个客户”。未绑定时输出
+  `unbound`，不影响现有链路。
+- **gwlinkd 能自动应用身份**：发布态配置（`configs/gwlinkd/gwlinkd.toml`）默认带生效命令，
+  写完后重启整栈让数据面重新读取。
+
+### 变更
+
+- **WarpParse 升到 `0.34.0-alpha`**（新版移除了管理面 `[admin_api.auth].mode`，旧配置会让它起不来 ——
+  本版的 `wparse.local.toml` 与 dev 脚本已同步清理）。
+
+### 升级注意
+
+- **需要 `wist-gwlinkd ≥ 0.17.0-alpha`**：旧 gwlinkd 没有生效命令键，不会自动重启数据面。
+- 升级后请先 `gops sys localize` 让 `gwlinkd.toml` 拿到新的生效命令（模板现在渲染
+  `wparse_apply_command`）。
+- 若站点从 `wp-infra` 同步 `topology/`，需确认那边的 `topology/sinks/defaults.toml` 也带
+  `tenant_id:${WIST_TENANT_ID:unbound}`（否则数据面不会输出该字段，其余功能不受影响）。
+- `0.34.0-alpha` 镜像已确认可拉取（ghcr.io/wp-labs）；TCR 环境请确认已同步该 tag。
+
 ## [0.2.21-alpha] - 2026-10-25
 
 ### 变更

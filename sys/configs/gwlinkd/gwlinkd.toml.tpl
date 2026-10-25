@@ -45,6 +45,15 @@ upgrader_program = "{{upgrader_program}}"
 {{#if upgrade_project_dir}}
 upgrade_project_dir = "{{upgrade_project_dir}}"
 {{/if}}
+# 业务身份（tenant_id）生效：写 wparse 工作根 `.env` 后执行（cwd = 系统根）。
+# 发布态重启整栈（已确认可接受）；开发态在 dev 配置里改成 `./dev/svc.sh restart wparse --no-build`。
+# `wparse_work_dir` 不渲染：缺省由 gwlinkd 在系统根下解析 `data-plane-run/work`（开发态 `dev`）。
+{{#if upgrader_program}}
+wparse_apply_command = "{{upgrader_program}} run stop && {{upgrader_program}} run start"
+{{else}}
+wparse_apply_command = "gops run stop && gops run start"
+{{/if}}
+wparse_apply_timeout_seconds = 120
 # 发布 ②「Agent 包交付」：gwlinkd 取到中心包后，落到宿主投放目录（agent_package_drop_dir），
 # 再把**容器内路径**（agent_package_container_dir/<文件名>）交给网关托管。
 # 两项都指 `packages/agents`（宿主写法 vs 容器写法）—— 独占子目录：gwlinkd 交付后按 mtime

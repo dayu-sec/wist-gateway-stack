@@ -1,5 +1,5 @@
 [defaults]
-tags = ["env:dev"]
+tags = ["env:dev", "tenant_id:${WIST_TENANT_ID:unbound}"]
 
 [defaults.expect]
 basis = "total_input"

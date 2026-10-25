@@ -22,6 +22,6 @@ cert_file = "/data/identity/admin-tls.crt.pem"
 key_file = "/data/identity/admin-tls.key.pem"
 
 [admin_api.auth]
-mode = "bearer_token"
+# 0.34.0 起不再接受 mode（Bearer Token 是唯一鉴权方式）。
 # 相对工作根 /data；由 scripts/init-wparse-admin.sh 生成（600/gops perms 对齐）。
 token_file = ".run/admin_api.token"

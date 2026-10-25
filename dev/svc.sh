@@ -280,7 +280,7 @@ cert_file = ""
 key_file = ""
 
 [admin_api.auth]
-mode = "bearer_token"
+# 0.34.0 起不再接受 mode（Bearer Token 是唯一鉴权方式）。
 # 相对开发工作根；下面缺则生成（0600）。
 token_file = ".run/admin_api.token"
 EOF

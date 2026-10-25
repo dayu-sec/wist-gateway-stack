@@ -33,6 +33,11 @@
 #   WIST_GWLINKD_DEV_CONFIG=<path>   主配置（默认取服务现有定义里的，退回 <栈根>/configs/gwlinkd/gwlinkd.toml）
 #   WIST_GWLINKD_DEV_PUB_CONFIG=<path> 现场态配置（同上口径）
 #   SKIP_BUILD=1                      等价 --no-build
+#   CARGO_EXTRA_ARGS='<args>'         透传给 cargo build（空格分隔）。典型用途：本地 wist-* 契约联调时
+#                                     加 `--config 'patch.crates-io.wist-control.path=<abs path>'` ——
+#                                     否则 cargo 会去 crates.io 取已发布版（没有本地新字段）。
+#                                     注意：patch 会让 Cargo.lock 记成 path 依赖，构建后请
+#                                     `git -C <crate> checkout -- Cargo.lock` 再提交。
 #   WIST_GWLINKD_DEV_DRY_RUN=1        等价 --dry-run
 #   WIST_GWLINKD_DEV_READY_WAIT_SECS  重启后就绪等待上限（默认 30s）
 #
@@ -182,6 +187,10 @@ DEST_DIR="$(dirname -- "${DEST_BIN}")"
 # 系统级服务要 root：脚本自己提权（而不是要求外层 sudo —— 那会把 cargo build 也变成 root）。
 # 落点目录若已归运行用户（中心布局），就**不提权**：写出来的文件才仍是运行用户的。
 if [[ -w "${DEST_DIR}" ]]; then SUDO=""; else SUDO="sudo"; fi
+# **服务定义**的落点与 bin 目录是否可写无关（/Library/LaunchDaemons、/etc/systemd/system
+# 通常只有 root 能写）。不单独判的话会出现：bin 已换上、定义重写失败、服务没重启 ——
+# 脚本在中途报错，跑的还是旧二进制。
+if [[ -w "$(dirname -- "${DEFINITION}")" ]]; then SERVICE_SUDO=""; else SERVICE_SUDO="sudo"; fi
 # 服务的运行身份：以**部署用户**跑，别用 root（gwlinkd 会回写配置 / 落身份 / 驱动 gops 升级，
 # 那些都该是部署用户的属主）。这与中心安装脚本的 `--run-as <部署用户>` 同口径。
 RUN_AS_ARGS=(--run-as "$(id -un)")
@@ -241,10 +250,24 @@ build() {
     note "SKIP_BUILD=1 / --no-build：跳过 cargo build"
   else
     require_cmd cargo
+    # 透传的参数（如本地契约 patch）用数组展开，避免空格被拆错。
+    # bash 3.2（macOS 自带）+ `set -u` 下展开**空数组**会报 unbound，故分支写全。
+    local -a extra_args=()
+    if [[ -n "${CARGO_EXTRA_ARGS:-}" ]]; then
+      read -r -a extra_args <<< "${CARGO_EXTRA_ARGS}"
+    fi
     if [[ "${PROFILE}" == "release" ]]; then
-      run cargo build --release --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      if [[ ${#extra_args[@]} -eq 0 ]]; then
+        run cargo build --release --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      else
+        run cargo build --release "${extra_args[@]}" --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      fi
     else
-      run cargo build --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      if [[ ${#extra_args[@]} -eq 0 ]]; then
+        run cargo build --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      else
+        run cargo build "${extra_args[@]}" --manifest-path "${GWLINKD_CRATE}/Cargo.toml"
+      fi
     fi
   fi
 
@@ -349,7 +372,7 @@ install_service() {
     "${SRC_BIN}" service print --system "${RUN_AS_ARGS[@]}" \
       --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}" 2>&1 | sed 's/^/    /' || true
   fi
-  run ${SUDO} "${SERVICE_BIN}" service install --force --system "${RUN_AS_ARGS[@]}" \
+  run ${SERVICE_SUDO} "${SERVICE_BIN}" service install --force --system "${RUN_AS_ARGS[@]}" \
     --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}"
 }
 

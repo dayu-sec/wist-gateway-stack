@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.21-alpha] - 2026-10-25
+
+### 变更
+
+- **数据面新增原文发现快照通道（`DSNAP:` 帧）**：agentd 的完整发现快照不再只能留在边缘，
+  可以周期上送到网关侧落地，供中心资产目录（`wist-atlas`）消费。
+  - 与事实帧（`OBSFACT:`）**分开标记、分开 sink 分组**：摘要（10~30 KB）继续走网关，
+    原文快照（一台数百 KB）进 `agent-discovery` 分组，互不挤占。
+  - 新 sink 落 `agent-discovery.jsonl`，每帧一行（信封拆开、`body` 原样透传契约对象），
+    排障时可直接回放到 `wist-atlas` 的适配器。
+  - 不需要升 WarpParse：规则用的是现有的 `json(...)` + `symbol(...)` + `chars:\0` 原语，
+    已在本版固定的 `0.32.1-alpha` 上验证通过（`source: ok` / `data: ok` / 0 bytes residue）。
+- 网关 / 前端 / VM / WarpParse 版本不变。
+
+### 升级注意
+
+- **需要 agentd ≥ 0.9.8 且显式开启**：`[discovery] snapshot_uplink_enabled = true`，
+  并且 `[telemetry.logs.output] kind = "tcp"`。只开开关不改输出类型时 agentd 不会发任何快照，
+  它会在启动后打一行 `DiscoverySnapshotUplinkInactive` 说明原因。
+- **`agent-discovery.jsonl` 没有内置轮转**：一台机每次约 0.9 MB，默认 5 分钟一次。
+  站点若开启了这个通道，需要自己给 `data/out_dat/` 配轮转或定期清理 ——
+  下一版会改成直接投给 atlas 的 ingest，不再落文件。
+- 未开启的站点零变化：不产生该帧，也不创建该文件。
+
 ## [0.2.20-alpha] - 2026-10-25
 
 ### 变更

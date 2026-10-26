@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2-alpha] - 2026-10-26
+
+### 新增
+
+- **体检新增 `wparse.conf_legacy_admin_api`**（`gx run diagnose` 与 `gops sys localize` 的
+  `--gate` 都会跑）：发现工作根的 `conf/wparse.toml` 还是改版前的模板（里面带 `[admin_api]`）时
+  给出 WARN 和现成的修复命令。以前这个故障只能靠人看容器日志才看得出来。
+
+### 升级注意（旧站点必读）
+
+- **旧站点升级后 wparse 可能起不来**：容器无限重启，日志只有一句
+  `load /data/conf/wparse.toml failed`（`exit 300`）。原因是工作根里那份 `conf/wparse.toml`
+  是容器启动时 `cp --update=none` 留下的旧模板，里面带 `[admin_api.auth] mode = "bearer_token"`，
+  而 wparse 0.34 起不再接受 `mode`。
+- 处置：先备份，再用种子覆盖 ——
+  `cp sys/data-plane/conf/wparse.toml data-plane-run/work/conf/wparse.toml`。
+  管理面配置（19090 / TLS / token 路径）只在工作根的 `wparse.local.toml` 里维护。
+
 ## [0.3.1-alpha] - 2026-10-26
 
 ### 修复

@@ -64,6 +64,7 @@ x-topology/wist/                  <- $WIST
 | 让**系统服务**跑我刚编的 gwlinkd（发布态已装服务时） | `./dev/install-gwlinkd-dev.sh`（先 `--dry-run` 看计划；详见「把本机编译的 gwlinkd 发布到系统服务」一节） |
 | 跑一次 gwlinkd 的子命令（`diagnose` / `version` / `service status`…） | `wist-gwlinkd diagnose` 单独就够（`--conf` 缺省时回落已装服务定义）；要**本地构建**或看落点用 `./dev/gwlinkd.sh --paths` |
 | 把 compose 里非 wist\* 的上游镜像（VM / wparse）同步到 TCR | `./dev/push-images.sh`（先 `--dry-run` 看计划；详见「上游镜像同步到 TCR」一节） |
+| 只把一个 tag 同步到 TCR（多架构、digest 校验） | `./dev/sync-to-tcr.sh <src> [<dest>]`（详见同一节） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
@@ -340,7 +341,25 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 
 > 日志：macOS `sudo tail -f /var/log/wist-gwlinkd/gwlinkd.err`；Linux `journalctl -u wist-gwlinkd -f`。
 
-## 上游镜像同步到 TCR（`push-images.sh`）
+## 上游镜像同步到 TCR（`push-images.sh` / `sync-to-tcr.sh`）
+
+两个脚本分工不同，别混用：
+
+| 脚本 | 适合 | 多架构 |
+|---|---|---|
+| `push-images.sh` | 按 compose 清单批量同步（VM + wparse） | buildx 路径保留 index；`--method pull` **只推当前宿主架构** |
+| `sync-to-tcr.sh` | 单个镜像精确同步 / 手动补一个 tag | 用 skopeo 做 manifest 级复制，**恒定保留多架构**，digest 与源一致并回读校验 |
+
+> 只想补一个 tag（如 `warp-parse:0.34.0-alpha`）时用 `sync-to-tcr.sh`；
+> 在 Apple Silicon 上跑 `push-images.sh --method pull` 会推出 arm64-only 镜像，
+> amd64 现场拉到后 `docker run` 直接 `exec format error`。
+
+```bash
+./dev/sync-to-tcr.sh ghcr.io/wp-labs/warp-parse:0.34.0-alpha           # 单个镜像
+./dev/sync-to-tcr.sh <src> <dest>                                      # 指定目标
+./dev/sync-to-tcr.sh -n <src>                                          # 只检查，不推送
+./dev/sync-to-tcr.sh -f images.txt                                     # 每行 "<src> [<dest>]"
+```
 
 `sys/docker-compose.yml` 里的镜像分两类：**wist\*** 由发布流水线双推（`ghcr.io/dayu-sec/*` 与
 `dy-sec.tencentcloudcr.com/cloud/*`），TCR 里本来就有；**victoria-metrics / wparse 是上游镜像**

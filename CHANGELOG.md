@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3-alpha] - 2026-10-26
+
+### 新增
+
+- **`dev/sync-to-tcr.sh`**：只同步单个镜像到 TCR（`<src> [<dest>]` / `-n` 只查 / `-f 清单`）。
+  走 skopeo 的 manifest 级复制：**恒定保留多架构**，digest 与源一致并回读校验。
+  与 `push-images.sh` 的分工写进 `dev/README.md`：批量用前者，补单个 tag 用后者。
+
+### 修复
+
+- **`sync-to-tcr.sh` 三类现场问题**：
+  - skopeo 老版本没有 `--retry-delay`（会直接 `unknown flag` 退出）—— 改为按 `skopeo copy --help` 实际
+    支持情况拼参数；
+  - 带端口的目标主机（`host:5000/repo`）被误当成 tag 切掉 —— 先切 `@digest`、再只把**末段**里的 `:`
+    当 tag；
+  - 源不可读时 `sha256sum` 会把空输入算成一个“合法”哈希，使「源不可读 / 目标不存在」的判定全部
+    变成「已一致、跳过」—— 改为读不到即非零返回。
+- **`gwlinkd.toml.tpl` 注释**：`wparse_apply_command` 留空 = 用 gwlinkd 缺省（≥ 0.18）；是否生效由
+  指令规则决定（`bind-tenant` 一定生效），这条只决定「怎么做」。
+
 ## [0.3.2-alpha] - 2026-10-26
 
 ### 新增

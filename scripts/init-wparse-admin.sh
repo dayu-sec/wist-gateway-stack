@@ -98,6 +98,57 @@ if (( ${#foreign[@]} > 0 )); then
   warn "  再跑一次 'gops sys perms --apply' 把模式收成 0660/2770"
 fi
 
+# ── WarpParse 0.34+ 迁移：工作根里的旧模板带 `[admin_api.auth] mode`，而 0.34 起
+#    这个字段从 schema 里删了 —— 引擎当成 unknown field，配置加载失败（exit 300；
+#    容器退出码被截成 8 位 = 44），表现是“wparse 无限重启、日志只有一句 load conf failed”。
+#
+#    为什么升级不会自动好：容器入口是 `cp --update=none`，工作根里**已存在**的旧文件永远不覆盖。
+#    两处都要处理，且不能粗暴覆盖（站点可能改过端口 / TLS）：
+#      · `wparse.local.toml`：只摘掉 `[admin_api.auth]` 段里的 `mode` 行；
+#      · `conf/wparse.toml`：旧模板整段带 `[admin_api]` → 用种子覆盖（先备份）。
+migrate_wparse_admin_conf() {
+  local root="$1"
+  [[ -d "${root}" ]] || return 0
+
+  local local_conf="${root}/wparse.local.toml"
+  if [[ -f "${local_conf}" ]]; then
+    python3 - "${local_conf}" <<'PY'
+import os, re, sys, pathlib
+
+path = pathlib.Path(sys.argv[1])
+mode = path.stat().st_mode & 0o7777
+out, section, removed = [], None, 0
+for line in path.read_text(encoding="utf-8").splitlines():
+    stripped = line.strip()
+    if stripped.startswith("["):
+        section = stripped
+    elif section == "[admin_api.auth]" and re.match(r"^[ \t]*mode[ \t]*=", line):
+        removed += 1
+        continue
+    out.append(line)
+if removed:
+    target = path.with_name(path.name + ".tmp")
+    target.write_text("\n".join(out) + "\n", encoding="utf-8")
+    os.chmod(target, mode)
+    target.replace(path)
+    print(f"  已从 {path} 摘掉 {removed} 行 [admin_api.auth].mode（wparse 0.34 起不再接受）")
+PY
+  fi
+
+  local conf="${root}/conf/wparse.toml"
+  local seed="${STACK_ROOT}/sys/data-plane/conf/wparse.toml"
+  if [[ -f "${conf}" && -f "${seed}" ]] && grep -q '^\[admin_api' "${conf}"; then
+    local backup="${conf}.legacy-admin-api.bak"
+    cp -f "${conf}" "${backup}"
+    cp -f "${seed}" "${conf}"
+    note "工作根 conf/wparse.toml 是旧模板（含 [admin_api]），已用种子覆盖（备份：${backup}）"
+  fi
+}
+
+migrate_wparse_admin_conf "${RUN_DIR}/work"
+# 开发态（如果这台机器上还有）：同一份种子，同样的迁移。
+migrate_wparse_admin_conf "${RUN_DIR}/dev"
+
 if [[ -f "${TOKEN_HOST}" && -s "${TOKEN_HOST}" ]]; then
   note "admin API token 已存在，跳过：${TOKEN_HOST}"
 else

@@ -1299,54 +1299,89 @@ pub fn bind_source_type(stack: &Stack) -> Vec<Finding> {
 pub fn wparse_conf_legacy_admin_api(stack: &Stack) -> Vec<Finding> {
     const CODE: &str = "wparse.conf_legacy_admin_api";
 
-    let rel = "data-plane-run/work/conf/wparse.toml";
-    let path = resolve(stack, rel);
-    // 还没跑过容器：首次启动会从种子补齐，不在此判。
-    if !path.exists() {
+    // 两处都要看：
+    // - `conf/wparse.toml`：旧种子留下的整段 `[admin_api]`；
+    // - `wparse.local.toml`：站点可改的本地覆盖层，可能还带 `[admin_api.auth].mode`。
+    // 入口用 `cp --update=none` 补种子，所以**已存在的旧文件永远不会被覆盖**。
+    let conf = resolve(stack, "data-plane-run/work/conf/wparse.toml");
+    let local = resolve(stack, "data-plane-run/work/wparse.local.toml");
+    let conf_legacy = file_has_admin_api_section(&conf);
+    let local_mode = file_has_admin_auth_mode(&local);
+
+    if !conf_legacy && !local_mode {
         return vec![Finding::ok(
             CODE,
-            "工作根尚无 conf/wparse.toml",
-            format!("{}（容器首次启动时由种子补齐）", path.display()),
+            "工作根配置是新模板（无 [admin_api] / 无 auth.mode）",
+            format!("{}；{}", conf.display(), local.display()),
         )];
     }
-    let Ok(text) = fs::read_to_string(&path) else {
-        return vec![
+
+    let mut findings = Vec::new();
+    if conf_legacy {
+        findings.push(
             Finding::warn(
                 CODE,
-                "读不到工作根配置，跳过检查",
-                path.display().to_string(),
+                "工作根的 conf/wparse.toml 还是旧模板（含 [admin_api]）",
+                format!(
+                    "{}；wparse 0.34 起不再接受 [admin_api.auth].mode，引擎会以 exit 300 启动失败",
+                    conf.display()
+                ),
             )
-            .with_hint("用部署账号或 sudo 重跑（该文件在容器工作根里）"),
-        ];
-    };
-
-    let legacy = text.lines().any(|line| {
-        let line = line.trim_start();
-        line.starts_with("[admin_api]") || line.starts_with("[admin_api.")
-    });
-    if !legacy {
-        return vec![Finding::ok(
-            CODE,
-            "工作根配置是新模板（无 [admin_api]）",
-            path.display().to_string(),
-        )];
-    }
-
-    vec![
-        Finding::warn(
-            CODE,
-            "工作根的 conf/wparse.toml 还是旧模板（含 [admin_api]）",
-            format!(
-                "{}；wparse 0.34 起不再接受 [admin_api.auth].mode，引擎会以 exit 300 启动失败",
-                path.display()
+            .with_hint(
+                "先备份，再用种子覆盖：\
+                 `cp sys/data-plane/conf/wparse.toml <工作根>/conf/wparse.toml`；\
+                 管理面配置只在工作根的 `wparse.local.toml` 里维护",
             ),
-        )
-        .with_hint(
-            "先备份，再用种子覆盖：\
-             `cp sys/data-plane/conf/wparse.toml <工作根>/conf/wparse.toml`；\
-             管理面配置只在工作根的 `wparse.local.toml` 里维护",
-        ),
-    ]
+        );
+    }
+    if local_mode {
+        findings.push(
+            Finding::warn(
+                CODE,
+                "工作根的 wparse.local.toml 还带 [admin_api.auth].mode",
+                format!(
+                    "{}；wparse 0.34 起该字段已从 schema 删除（unknown field → exit 300 / 容器退 44）",
+                    local.display()
+                ),
+            )
+            .with_hint(
+                "跑一次 `gops sys localize`（0.3.5+ 会自动摘掉这一行）；\
+                 急用可手工删掉 `[admin_api.auth]` 里的 `mode = ...` 后重启 wparse",
+            ),
+        );
+    }
+    findings
+}
+
+/// 文件里是否有独立的 `[admin_api]` / `[admin_api.*]` 段（旧模板把管理面写在 conf 里）。
+fn file_has_admin_api_section(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|text| {
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("[admin_api]") || line.starts_with("[admin_api.")
+        })
+    })
+}
+
+/// `[admin_api.auth]` 段里是否还有 `mode = ...`（0.34 起已从 schema 删除）。
+fn file_has_admin_auth_mode(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|text| {
+        let mut in_auth = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') {
+                in_auth = trimmed == "[admin_api.auth]";
+                continue;
+            }
+            if in_auth
+                && let Some((key, _)) = trimmed.split_once('=')
+                && key.trim() == "mode"
+            {
+                return true;
+            }
+        }
+        false
+    })
 }
 
 /// 容器目标末段是否长得像文件（含 `.`，且不是 `..`/隐藏目录名）。
@@ -3064,6 +3099,51 @@ services:
 
         let findings = wparse_conf_legacy_admin_api(&tree.stack());
         assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn legacy_wparse_local_with_auth_mode_is_warned() {
+        // 0.34 前种子还把 `mode` 写进 wparse.local.toml；工作根那份 `cp --update=none` 不会覆盖。
+        let tree = Tree::new("wparse-legacy-local");
+        tree.write(
+            "data-plane-run/work/wparse.local.toml",
+            "[admin_api]\nenabled = true\n\n[admin_api.auth]\nmode = \"bearer_token\"\ntoken_file = \".run/admin_api.token\"\n",
+        );
+
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+        assert!(
+            findings[0].title.contains("wparse.local.toml"),
+            "{findings:#?}"
+        );
+        assert!(findings[0].detail.contains("44"), "{findings:#?}");
+    }
+
+    #[test]
+    fn wparse_local_without_auth_mode_is_ok() {
+        let tree = Tree::new("wparse-new-local");
+        tree.write(
+            "data-plane-run/work/wparse.local.toml",
+            "[admin_api]\nenabled = true\n\n[admin_api.auth]\ntoken_file = \".run/admin_api.token\"\n",
+        );
+
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    /// `mode` 只在 `[admin_api.auth]` 里算：其它段里的同名键不能误报。
+    #[test]
+    fn auth_mode_in_another_section_is_not_reported() {
+        let tree = Tree::new("wparse-local-other-mode");
+        tree.write(
+            "data-plane-run/work/wparse.local.toml",
+            "[some_section]\nmode = \"x\"\n",
+        );
+
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
         assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
     }
 

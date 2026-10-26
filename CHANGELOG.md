@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.5-alpha] - 2026-10-26
+
+### 修复
+
+- **旧站点升级后 wparse 仍可能起不来（admin mode 的另一半）**：0.3.2 只让你覆盖工作根的
+  `conf/wparse.toml`，但 `mode = "bearer_token"` 还可能留在工作根的 **`wparse.local.toml`** ——
+  容器入口是 `cp --update=none`，工作根里已存在的旧文件**永远不会被覆盖**。wparse 0.34 起
+  该字段已从 schema 删除，于是配置加载失败（日志 `exit code: 300`，容器退出码被截成
+  **44**），表现是「wparse 无限重启、诊断只看到 `exit_code=44`」。
+  - `gops sys localize` 现在会**自动迁移**：`wparse.local.toml` 只摘掉 `[admin_api.auth]` 里的
+    `mode` 行（保留站点改过的端口 / TLS）；`conf/wparse.toml` 若仍是旧模板则用种子覆盖（先备份）。
+  - 体检 `wparse.conf_legacy_admin_api` 也会检查 `wparse.local.toml`，不再只盯 `conf/`。
+
+### 变更（组件版本：采集预检）
+
+- **网关 `GATEWAY_TAG` → `v0.22.0-alpha`**、**前端 `WEB_TAG` → `v0.17.0-alpha`**。
+- 采集授权页多了一个「预检」：选好采集面后点一下，几秒内每台机器自己探一次并回传，
+  行上直接显示「可授权 / 本机没有 / 还没探 / 探不了 / 策展未就绪」和一句原因
+  （如「这台机器没有 `/var/log/containers`」）。**不需要再登录客户主机去 `ls`**。
+- 授权被 409 拒的机器会自动开始探测，原因自动出现在行上 —— 从「授权失败」到「知道为什么」
+  不用再点第二次。
+- 需要配套的 **agentd ≥ 0.9.13** 才能拿到「探不了（权限）」这一层证据；旧 agentd 会用整轮重采
+  退化成「事实摘要」结论，依然能用（只是分不清「没权限」与「确实没有」）。
+
 ## [0.3.4-alpha] - 2026-10-26
 
 ### 修复

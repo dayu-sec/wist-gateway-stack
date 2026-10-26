@@ -46,7 +46,9 @@ upgrader_program = "{{upgrader_program}}"
 upgrade_project_dir = "{{upgrade_project_dir}}"
 {{/if}}
 # 业务身份（tenant_id）生效：写 wparse 工作根 `.env` 后执行（cwd = 系统根）。
-# 发布态重启整栈（已确认可接受）；开发态在 dev 配置里改成 `./dev/svc.sh restart wparse --no-build`。
+# 不写也能用（gwlinkd ≥ 0.18 有缺省）：开发态 `./dev/svc.sh restart wparse --no-build`、
+# 发布态整栈重启。这里显式渲染，是让运维一眼看到发布态会做什么；想只重启 wparse 就在这里改。
+# 这条只决定“怎么做”：是否生效由指令规则定（`bind-tenant` 一定生效），留空 = 用缺省。
 # `wparse_work_dir` 不渲染：缺省由 gwlinkd 在系统根下解析 `data-plane-run/work`（开发态 `dev`）。
 {{#if upgrader_program}}
 wparse_apply_command = "{{upgrader_program}} run stop && {{upgrader_program}} run start"

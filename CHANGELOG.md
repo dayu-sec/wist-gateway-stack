@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.23-alpha] - 2026-10-26
+
+### 变更
+
+- **前端跟版 `v0.15.0-alpha`**：与中心控制台统一视觉（深色底改用深海军蓝 `#0a1220`、
+  主色从靛蓝换为紫罗兰 `#8b5cf6`，favicon / 品牌渐变 / `theme-color` 同步）；
+  「活跃 / 静默」分段控件不再被列头挤成竖排（放不下时整行换行）。
+- **绑定客户后真正生效，靠的是 gwlinkd 的生效命令**：本栈的 `configs/gwlinkd/gwlinkd.toml`
+  一直带 `wparse_apply_command`（`gops run stop && gops run start`），但 gwlinkd **只在启动时读配置** ——
+  `gops sys localize` 重渲配置后必须在同一维护窗口内重启 gwlinkd（或由安装脚本重启），
+  否则会“绑定成功、数据面一直是 `unbound`”。需要 **`wist-gwlinkd ≥ 0.17.1-alpha`**：
+  旧版在这种情形下回执只说「待重启」，不回原因；新版会明确报 `apply: not_configured` 并说明原因，
+  且修了 macOS system 域下「重启 gwlinkd」静默失效的问题。
+
 ## [0.2.22-alpha] - 2026-10-25
 
 ### 新增

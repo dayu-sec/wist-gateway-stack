@@ -27,6 +27,7 @@ pub fn run_with(stack: &Stack, options: &Options) -> Vec<Finding> {
     }
     if options.wants("layout") {
         out.extend(checks::bind_source_type(stack));
+        out.extend(checks::wparse_conf_legacy_admin_api(stack));
     }
     if options.wants("package") {
         out.extend(checks::package_dir_consistency(stack));

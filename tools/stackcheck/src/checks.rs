@@ -1286,6 +1286,69 @@ pub fn bind_source_type(stack: &Stack) -> Vec<Finding> {
     }
 }
 
+/// 工作根的 `conf/wparse.toml` 是否还是改版前的模板（里面还带 `[admin_api]`）。
+///
+/// 为什么需要这一条：容器启动时用的是 `cp --update=none`（只补缺失、不覆盖），
+/// 所以改版前起的站点会一直留着旧模板；而 wparse 0.34 起不再接受
+/// `[admin_api.auth].mode`，引擎启动即 `exit 300`。现场表现是容器无限重启、
+/// 日志只有一句 `load /data/conf/wparse.toml failed`，看上去像配置写坏了，
+/// 实际是「模板过时」。
+///
+/// 判据刻意宽松：只看有没有 `[admin_api]` 段，不解析每一行 —— 旧模板的几种历史
+/// 写法（含 `auth.mode`、含 TLS 段）都会命中，而新模板把整个段挪到了 `wparse.local.toml`。
+pub fn wparse_conf_legacy_admin_api(stack: &Stack) -> Vec<Finding> {
+    const CODE: &str = "wparse.conf_legacy_admin_api";
+
+    let rel = "data-plane-run/work/conf/wparse.toml";
+    let path = resolve(stack, rel);
+    // 还没跑过容器：首次启动会从种子补齐，不在此判。
+    if !path.exists() {
+        return vec![Finding::ok(
+            CODE,
+            "工作根尚无 conf/wparse.toml",
+            format!("{}（容器首次启动时由种子补齐）", path.display()),
+        )];
+    }
+    let Ok(text) = fs::read_to_string(&path) else {
+        return vec![
+            Finding::warn(
+                CODE,
+                "读不到工作根配置，跳过检查",
+                path.display().to_string(),
+            )
+            .with_hint("用部署账号或 sudo 重跑（该文件在容器工作根里）"),
+        ];
+    };
+
+    let legacy = text.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("[admin_api]") || line.starts_with("[admin_api.")
+    });
+    if !legacy {
+        return vec![Finding::ok(
+            CODE,
+            "工作根配置是新模板（无 [admin_api]）",
+            path.display().to_string(),
+        )];
+    }
+
+    vec![
+        Finding::warn(
+            CODE,
+            "工作根的 conf/wparse.toml 还是旧模板（含 [admin_api]）",
+            format!(
+                "{}；wparse 0.34 起不再接受 [admin_api.auth].mode，引擎会以 exit 300 启动失败",
+                path.display()
+            ),
+        )
+        .with_hint(
+            "先备份，再用种子覆盖：\
+             `cp sys/data-plane/conf/wparse.toml <工作根>/conf/wparse.toml`；\
+             管理面配置只在工作根的 `wparse.local.toml` 里维护",
+        ),
+    ]
+}
+
 /// 容器目标末段是否长得像文件（含 `.`，且不是 `..`/隐藏目录名）。
 fn target_looks_like_file(target: &str) -> bool {
     let name = target
@@ -2965,6 +3028,52 @@ services:
         let findings = bind_source_type(&tree.stack());
         assert_eq!(findings[0].status, Status::Fail, "{findings:#?}");
         assert!(findings[0].detail.contains("control-center.pem"));
+    }
+
+    #[test]
+    fn legacy_wparse_conf_with_admin_api_is_warned() {
+        // 0.34 前的模板把管理面写在 conf 里；引擎升级后会以 exit 300 启动失败。
+        let tree = Tree::new("wparse-legacy-conf");
+        tree.write(
+            "data-plane-run/work/conf/wparse.toml",
+            "version = \"1.0\"\n\n[admin_api]\nenabled = true\n\n[admin_api.auth]\nmode = \"bearer_token\"\ntoken_file = \".run/admin_api.token\"\n",
+        );
+
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Warn, "{findings:#?}");
+        assert!(
+            findings[0].detail.contains("exit 300"),
+            "{}",
+            findings[0].detail
+        );
+        assert!(
+            findings[0].hint.contains("wparse.local.toml"),
+            "{}",
+            findings[0].hint
+        );
+    }
+
+    #[test]
+    fn new_wparse_conf_without_admin_api_is_ok() {
+        let tree = Tree::new("wparse-new-conf");
+        tree.write(
+            "data-plane-run/work/conf/wparse.toml",
+            "version = \"1.0\"\n\n[project_remote]\nenabled = true\n",
+        );
+
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
+    }
+
+    #[test]
+    fn missing_work_root_conf_is_not_reported() {
+        // 还没起过容器：首次启动由种子补齐，不应该报。
+        let tree = Tree::new("wparse-no-conf");
+        let findings = wparse_conf_legacy_admin_api(&tree.stack());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].status, Status::Ok, "{findings:#?}");
     }
 
     #[test]

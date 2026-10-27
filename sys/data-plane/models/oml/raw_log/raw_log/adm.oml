@@ -1,0 +1,11 @@
+name : raw_log
+rule : raw_log/raw_log
+---
+event_id = read(wp_event_id);
+tenant_id = chars(2092453428448002048);
+log_type = chars(raw_log);
+__now = Now::time();
+occur_time = pipe @__now | Time::to_ts_ms;
+raw_msg = read(raw);
+raw_msg_digest = read(wp_event_md5);
+digest_algo = chars(md5);

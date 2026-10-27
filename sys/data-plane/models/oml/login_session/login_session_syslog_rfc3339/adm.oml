@@ -1,0 +1,23 @@
+name : login_session
+rule : login_session/login_session_syslog_rfc3339
+---
+// 按 family 拆分后的 syslog 平铺映射。
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+family = read(family);
+unit = read(unit);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+body_timestamp = read(body_timestamp);
+body_host = read(body_host);
+body_program = read(body_program);
+raw = read(raw);

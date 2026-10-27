@@ -1,0 +1,340 @@
+// Host 主机审计日志。
+#[tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package host {
+    #[tag(log_desc: "主机内核日志", log_type: "host_kernel"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_kernel {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@_TRANSPORT:transport,
+                chars@MESSAGE:kernel_message,
+                chars@PRIORITY:log_priority,
+                chars@SYSLOG_IDENTIFIER:syslog_identifier,
+                chars@_HOSTNAME:source_host
+            ) | f_chars_has(transport, kernel) | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+        )
+    }
+
+    #[tag(log_desc: "主机审计系统调用", log_type: "host_audit_syscall"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_syscall {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @arch,
+                @syscall,
+                @success,
+                @exit,
+                @a0,
+                @a1,
+                @a2,
+                @a3,
+                @items,
+                @ppid,
+                @pid,
+                @auid,
+                @uid,
+                @gid,
+                @euid,
+                @suid,
+                @fsuid,
+                @egid,
+                @sgid,
+                @fsgid,
+                @tty,
+                @ses,
+                @comm,
+                @exe,
+                @subj,
+                @key
+            )\s | f_chars_has(type, SYSCALL) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计 curl 执行", log_type: "host_audit_execve_curl"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_execve_curl {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @argc,
+                @a0,
+                @a1,
+                @a2,
+                @a3,
+                @a4,
+                @a5,
+                @a6,
+                @a7,
+                @a8,
+                @a9,
+                @a10,
+                @a11,
+                @a12,
+                @a13,
+                @a14,
+                @a15
+            )\s | f_chars_has(type, EXECVE) | f_chars_has(a0, curl) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计进程执行", log_type: "host_audit_execve"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_execve {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @argc,
+                @a0,
+                @a1,
+                @a2,
+                @a3,
+                @a4,
+                @a5,
+                @a6,
+                @a7,
+                @a8,
+                @a9,
+                @a10,
+                @a11,
+                @a12,
+                @a13,
+                @a14,
+                @a15
+            )\s | f_chars_has(type, EXECVE) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计文件路径", log_type: "host_audit_path"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_path {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @item,
+                @name,
+                @inode,
+                @dev,
+                @mode,
+                @ouid,
+                @ogid,
+                @rdev,
+                @nametype,
+                @cap_fp,
+                @cap_fi,
+                @cap_fe,
+                @cap_fver,
+                @cap_frootid
+            )\s | f_chars_has(type, PATH) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计工作目录", log_type: "host_audit_cwd"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_cwd {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @cwd
+            )\s | f_chars_has(type, CWD) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计进程标题", log_type: "host_audit_proctitle"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_proctitle {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @proctitle
+            )\s | f_chars_has(type, PROCTITLE) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计登录切换", log_type: "host_audit_login"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_login {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @pid,
+                @uid,
+                @subj,
+                @old-auid:old_auid,
+                @auid,
+                @tty,
+                @old-ses:old_ses,
+                @ses,
+                @res
+            )\s | f_chars_has(type, LOGIN) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计 PAM 会话", log_type: "host_audit_pam"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_pam {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("msg=audit", "id=audit") | (
+                kvarr(
+                    @type,
+                    @id:audit_id,
+                    @pid,
+                    @uid,
+                    @auid,
+                    @ses,
+                    @subj,
+                    @msg:detail
+                )\s
+            ) | take(detail) | (
+                kvarr(
+                    @op,
+                    @grantors,
+                    @acct,
+                    @exe,
+                    @hostname,
+                    @addr,
+                    @terminal,
+                    @res
+                )\s
+            ) | f_chars_in(type, [CRED_ACQ, CRED_DISP, CRED_REFR, USER_ACCT, USER_START, USER_END, USER_LOGIN]) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+    #[tag(log_desc: "主机审计服务启停", log_type: "host_audit_service"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule host_audit_service {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("msg=audit", "id=audit") | (
+                kvarr(
+                    @type,
+                    @id:audit_id,
+                    @pid,
+                    @uid,
+                    @auid,
+                    @ses,
+                    @subj,
+                    @msg:detail
+                )\s
+            ) | take(detail) | (
+                kvarr(
+                    @unit:source_unit,
+                    @comm,
+                    @exe,
+                    @hostname,
+                    @addr,
+                    @terminal,
+                    @res
+                )\s
+            ) | f_chars_in(type, [SERVICE_START, SERVICE_STOP]) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+
+
+
+
+    #[late]
+    rule ignore {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:)
+        ),
+        not(peek_symbol(type=)),
+        (
+            chars:raw\0 | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-auditd-exec)
+        )
+    }
+}

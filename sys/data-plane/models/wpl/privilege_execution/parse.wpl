@@ -1,0 +1,35 @@
+// PrivilegeExecution 提权执行。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package privilege_execution {
+    #[tag(log_desc: "提权执行日志", log_type: "privilege_execution_auditd_record")]
+    rule privilege_execution_auditd_record {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr()\s | f_chars_in(type, [SYSCALL, EXECVE, PATH, CWD, PROCTITLE]) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-privilege-exec)
+        )
+    }
+
+    #[late, tag(log_desc: "提权执行日志", log_type: "privilege_execution_auditd_raw")]
+    rule privilege_execution_auditd_raw {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:raw\0 | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-privilege-exec)
+        )
+    }
+}

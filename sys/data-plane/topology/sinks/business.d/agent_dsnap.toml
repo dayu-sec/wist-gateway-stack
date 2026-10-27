@@ -1,0 +1,28 @@
+# Agent 原文发现快照（wist-agentd ` DSNAP:` 帧）独立 sink 分组。
+#
+# 与 agent-facts（事实摘要）分开：
+#   - 摘要 10~30 KB，进网关控制面；
+#   - 原文快照一台几百 KB，消费者是 wist-atlas，不进网关库。
+#
+# 必须绑 DSNAP 的 OML（`agent_obs_dsnap`，来自 wp-rules：rule `agent_uplink/obs_dsnap`）。
+# 绑错/漏绑的后果：DSNAP 记录没有精确分组可命中，会落进兜底 sink `gateway-logs`
+# （parsed.toml，oml=["*"]），被网关日志接入点按
+# `not a data-plane log record: missing field raw` 400 拒掉 —— 现场表现就是「agentd 说发了、
+# 数据面一帧都看不到」。
+#
+# 当前只落文件用于联调与回放；接上 atlas 的内部 ingest 后，再在同一分组加一个
+# http_sink（不要把快照投到 gateway_facts_sink / gateway_logs_sink）。
+[sink_group]
+name = "agent-dsnap"
+oml = ["agent_uplink_obs_dsnap"]
+tags = ["biz:agent-dsnap"]
+batch_size = 1
+batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+file = "agent-dsnap.jsonl"

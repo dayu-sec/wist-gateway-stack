@@ -1,0 +1,151 @@
+// ContainerWorkload 容器日志。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "容器日志", dev_name: "Wist Agent")]
+package container_workload {
+    #[tag(log_desc: "Wist Center Web 容器日志", log_type: "container_workload_wist_center_web")]
+    rule container_workload_wist_center_web {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout) | f_chars_has(container_name, wist-center-stack-web)
+        )
+    }
+    #[tag(log_desc: "Wist Gateway Web 容器日志", log_type: "container_workload_wist_gateway_web")]
+    rule container_workload_wist_gateway_web {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout) | f_chars_has(container_name, wist-gateway-stack-web)
+        )
+    }
+    #[tag(log_desc: "PostgreSQL 容器日志", log_type: "container_workload_wist_center_postgres")]
+    rule container_workload_wist_center_postgres {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout) | f_chars_has(container_name, wist-center-stack-postgres)
+        )
+    }
+    #[tag(log_desc: "WarpParse 容器日志", log_type: "container_workload_wist_gateway_wparse")]
+    rule container_workload_wist_gateway_wparse {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout) | f_chars_has(container_name, wist-gateway-stack-wparse)
+        )
+    }
+    #[tag(log_desc: "Warp Station 容器日志", log_type: "container_workload_wist_center_station")]
+    rule container_workload_wist_center_station {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout) | f_chars_has(container_name, wist-center-stack-warp-station)
+        )
+    }
+    #[tag(log_desc: "容器服务日志", log_type: "container_workload_service_log")]
+    rule container_workload_service_log {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:log\0 | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-container-stdout)
+        )
+    }
+    #[late, tag(log_desc: "容器日志", log_type: "container_workload_container_other")]
+    rule container_workload_container_other {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit,
+                chars@container/name:container_name,
+                chars@container/image:container_image,
+                chars@container/id:container_id
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@log,
+                chars@stream,
+                chars@time
+            ) | f_chars_has(family, ContainerWorkload) | f_chars_has(unit, linux-docker-container-stdout)
+        )
+    }
+}

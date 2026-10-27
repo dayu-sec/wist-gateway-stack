@@ -1,0 +1,21 @@
+[sink_group]
+name = "gateway-raw-logs"
+oml = ["raw_log"]
+
+[[sink_group.sinks]]
+name = "raw_sink"
+connect = "file_json_sink"
+tags = []
+
+[sink_group.sinks.params]
+base = "./data/out_dat/"
+file = "raw.json"
+
+# [[sink_group.sinks]]
+# name = "wp-center-raw"
+# connect = "tcp_sink"
+# tags = []
+# [sink_group.sinks.params]
+# port = 30010
+# addr = "10.168.1.145"
+# fmt = "json"

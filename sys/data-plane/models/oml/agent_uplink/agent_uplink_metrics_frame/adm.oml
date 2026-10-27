@@ -1,0 +1,42 @@
+name : agent_uplink_metrics_frame
+rule : agent_uplink/agent_uplink_metrics_frame
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+metric_name = read(metric_name);
+metric_agent = read(metric_agent);
+metric_kind = read(metric_kind);
+metric_target_ref = read(metric_target_ref);
+metric_resource_ref = read(metric_resource_ref);
+metric_unit = read(metric_unit);
+metric_mount = read(metric_mount);
+metric_fstype = read(metric_fstype);
+metric_values = read(metric_values);
+metric_timestamps = read(metric_timestamps);
+// VictoriaMetrics 的 `/api/v1/import`（jsonline）**只认** `metric` / `values` / `timestamps`，
+// 其余顶层字段被**静默忽略**（实测：只给扁平 `metric_*` 会回 204，但一条序列都建不出来）。
+// 所以这里**同时**产出 VM 形状：文件/中心消费方继续用扁平字段，VM 走下面这三行。
+// 两套字段同源（都来自同一帧），没有额外解析成本。
+metric = object {
+    __name__ = read(metric_name);
+    agent = read(metric_agent);
+    kind = read(metric_kind);
+    target_ref = read(metric_target_ref);
+    resource_ref = read(metric_resource_ref);
+    unit = read(metric_unit);
+    mount = read(metric_mount);
+    fstype = read(metric_fstype);
+};
+values = read(metric_values);
+timestamps = read(metric_timestamps);

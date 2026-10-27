@@ -1,0 +1,76 @@
+// KernelSystem 内核与系统日志。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package kernel_system {
+    #[tag(log_desc: "内核与系统日志", log_type: "kernel_system_journald")]
+    rule kernel_system_journald {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@PRIORITY:priority,
+                chars@__CURSOR:journal_cursor,
+                chars@__SEQNUM_ID:journal_seqnum_id,
+                chars@SYSLOG_PID:syslog_pid,
+                chars@_TRANSPORT:transport,
+                chars@SYSLOG_FACILITY:syslog_facility,
+                chars@_RUNTIME_SCOPE:runtime_scope,
+                chars@_MACHINE_ID:machine_id,
+                chars@_HOSTNAME:body_host,
+                chars@_BOOT_ID:boot_id,
+                chars@__REALTIME_TIMESTAMP:realtime_timestamp,
+                chars@__SEQNUM:journal_seqnum,
+                chars@_SOURCE_MONOTONIC_TIMESTAMP:source_monotonic_timestamp,
+                chars@MESSAGE:raw,
+                chars@SYSLOG_IDENTIFIER:body_program,
+                chars@__MONOTONIC_TIMESTAMP:monotonic_timestamp
+            ) | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+        )
+    }
+
+    #[tag(log_desc: "内核与系统日志", log_type: "kernel_system_syslog_rfc3339")]
+    rule kernel_system_syslog_rfc3339 {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            time_3339:body_timestamp,
+            chars:body_host,
+            chars:body_program\:,
+            chars:raw\0 | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+        )
+    }
+
+    #[tag(log_desc: "内核与系统日志", log_type: "kernel_system_syslog_rfc3164")]
+    rule kernel_system_syslog_rfc3164 {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:body_month,
+            digit:body_day,
+            chars:body_clock,
+            chars:body_host,
+            chars:body_program\:,
+            chars:raw\0 | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+        )
+    }
+}

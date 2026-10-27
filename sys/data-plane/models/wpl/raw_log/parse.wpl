@@ -1,0 +1,7 @@
+// 通用原文旁路，不属于业务总类。
+package raw_log {
+    #[no_match]
+    rule raw_log {
+        (chars:raw\0)
+    }
+}

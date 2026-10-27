@@ -1,0 +1,34 @@
+name : kernel_system_journald
+rule : kernel_system/kernel_system_journald
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+family = read(family);
+unit = read(unit);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+priority = read(priority);
+journal_cursor = read(journal_cursor);
+journal_seqnum_id = read(journal_seqnum_id);
+syslog_pid = read(syslog_pid);
+transport = read(transport);
+syslog_facility = read(syslog_facility);
+runtime_scope = read(runtime_scope);
+machine_id = read(machine_id);
+body_host = read(body_host);
+boot_id = read(boot_id);
+realtime_timestamp = read(realtime_timestamp);
+journal_seqnum = read(journal_seqnum);
+source_monotonic_timestamp = read(source_monotonic_timestamp);
+raw = read(raw);
+body_program = read(body_program);
+monotonic_timestamp = read(monotonic_timestamp);

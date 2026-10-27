@@ -1,0 +1,78 @@
+// ServiceLifecycle 服务生命周期。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package service_lifecycle {
+    #[tag(log_desc: "服务生命周期日志", log_type: "service_lifecycle_journald")]
+    rule service_lifecycle_journald {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@_UID:uid,
+                chars@_GID:gid,
+                chars@_SELINUX_CONTEXT:selinux_context,
+                chars@_MACHINE_ID:machine_id,
+                chars@_HOSTNAME:body_host,
+                chars@_SYSTEMD_CGROUP:systemd_cgroup,
+                chars@_CAP_EFFECTIVE:cap_effective,
+                chars@__MONOTONIC_TIMESTAMP:monotonic_timestamp,
+                chars@_SYSTEMD_UNIT:systemd_unit,
+                chars@__SEQNUM_ID:journal_seqnum_id,
+                chars@_EXE:process_executable,
+                chars@__CURSOR:journal_cursor,
+                chars@_COMM:process_name,
+                chars@PRIORITY:priority,
+                chars@_TRANSPORT:transport,
+                chars@_SYSTEMD_SLICE:systemd_slice,
+                chars@SYSLOG_FACILITY:syslog_facility,
+                chars@_BOOT_ID:boot_id,
+                chars@__REALTIME_TIMESTAMP:realtime_timestamp,
+                chars@MESSAGE:raw,
+                chars@SYSLOG_IDENTIFIER:body_program,
+                chars@_RUNTIME_SCOPE:runtime_scope,
+                chars@__SEQNUM:journal_seqnum,
+                chars@_PID:process_pid,
+                chars@_CMDLINE:process_cmdline,
+                chars@_SYSTEMD_INVOCATION_ID:systemd_invocation_id,
+                chars@_STREAM_ID:stream_id,
+                chars@_SOURCE_REALTIME_TIMESTAMP:source_realtime_timestamp,
+                chars@SYSLOG_PID:syslog_pid,
+                chars@_AUDIT_SESSION:audit_session,
+                chars@_AUDIT_LOGINUID:audit_loginuid,
+                chars@SYSLOG_TIMESTAMP:syslog_timestamp,
+                chars@CODE_FILE:code_file,
+                chars@CODE_FUNC:code_function,
+                chars@CODE_LINE:code_line,
+                chars@INVOCATION_ID:invocation_id,
+                chars@JOB_ID:job_id,
+                chars@JOB_RESULT:job_result,
+                chars@JOB_TYPE:job_type,
+                chars@MESSAGE_ID:message_id,
+                chars@TID:thread_id,
+                chars@UNIT:service_unit
+            ) | f_chars_has(family, ServiceLifecycle) | f_chars_has(unit, linux-service-lifecycle)
+        )
+    }
+
+    #[late, tag(log_desc: "服务生命周期日志", log_type: "service_lifecycle_service_lifecycle_raw")]
+    rule service_lifecycle_service_lifecycle_raw {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:raw\0 | f_chars_has(family, ServiceLifecycle) | f_chars_has(unit, linux-service-lifecycle)
+        )
+    }
+}

@@ -1,0 +1,2 @@
+{"schema":"v1","agent":"agent-host-b4da621bf3ce","ts":"2026-10-20T01:51:09.844780782Z","seq":2098152,"family":"PrivilegeExecution","unit":"linux-privilege-exec"} LOGRAW: ----
+{"schema":"v1","agent":"agent-host-b4da621bf3ce","ts":"2026-10-20T01:51:09.844780782Z","seq":2098156,"family":"PrivilegeExecution","unit":"linux-privilege-exec"} LOGRAW: type=CWD msg=audit(1792460471.228:1089144): cwd="/opt/example"

@@ -1,0 +1,43 @@
+// LoginSession 登录会话。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package login_session {
+    #[tag(log_desc: "登录会话日志", log_type: "login_session_syslog_rfc3164")]
+    rule login_session_syslog_rfc3164 {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:body_month,
+            digit:body_day,
+            chars:body_clock,
+            chars:body_host,
+            chars:body_program\:,
+            chars:raw\0 | f_chars_has(family, LoginSession) | f_chars_has(unit, linux-auth-session)
+        )
+    }
+
+    #[tag(log_desc: "登录会话日志", log_type: "login_session_syslog_rfc3339")]
+    rule login_session_syslog_rfc3339 {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            time_3339:body_timestamp,
+            chars:body_host,
+            chars:body_program\:,
+            chars:raw\0 | f_chars_has(family, LoginSession) | f_chars_has(unit, linux-auth-session)
+        )
+    }
+}

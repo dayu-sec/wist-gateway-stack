@@ -1,0 +1,1 @@
+{"schema":"v1","agent":"agent-host-5d6b92ea00d4","ts":"2026-10-20T01:50:34.91205172Z","seq":2482074,"family":"NetworkFirewall","unit":"linux-network-firewall"} LOGRAW: table ip6 nat {

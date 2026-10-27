@@ -1,0 +1,29 @@
+name : host_audit_login
+rule : host/host_audit_login
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+family = read(family);
+unit = read(unit);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+type = read(type);
+msg = read(msg);
+pid = read(pid);
+uid = read(uid);
+subj = read(subj);
+old_auid = read(old_auid);
+auid = read(auid);
+tty = read(tty);
+old_ses = read(old_ses);
+ses = read(ses);
+res = read(res);

@@ -1,0 +1,37 @@
+name : host_audit_execve
+rule : host/host_audit_execve
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+family = read(family);
+unit = read(unit);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+type = read(type);
+msg = read(msg);
+argc = read(argc);
+a0 = read(a0);
+a1 = read(a1);
+a2 = read(a2);
+a3 = read(a3);
+a4 = read(a4);
+a5 = read(a5);
+a6 = read(a6);
+a7 = read(a7);
+a8 = read(a8);
+a9 = read(a9);
+a10 = read(a10);
+a11 = read(a11);
+a12 = read(a12);
+a13 = read(a13);
+a14 = read(a14);
+a15 = read(a15);

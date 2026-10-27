@@ -1,0 +1,1 @@
+{"schema":"v1","agent":"agent-host-test","ts":"2026-10-22T02:27:12.942373951Z","seq":1839280,"family":"RebootPower","unit":"linux-reboot-power"} LOGRAW: reboot   system boot  6.8.0-101-generi Wed Sep 16 18:51   still running

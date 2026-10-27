@@ -1,0 +1,28 @@
+# Agent 主机指标（wist-agentd ` METRICS:` 帧）独立 sink 分组。
+#
+# **与平台无关**：Linux / macOS 的 agentd 发的是同一种帧（规则 `agent_uplink/agent_uplink_metrics_frame`），
+# 旧名 `macos-agent-metrics` 只是「只有 macOS agent」时期的遗留。本分组只落本地 JSONL + 通用 VM sink
+# 写入 VictoriaMetrics；日志走 business.d/parsed.toml。
+[sink_group]
+name = "agent-metrics"
+oml = ["agent_uplink_metrics_frame"]
+tags = ["biz:agent-metrics"]
+batch_size = 1024
+batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+file = "agent-metrics.jsonl"
+
+# 通用 VM sink：基于 http_sink，把 OML 产出的 VM JSON line（metric+value）按 ndjson POST 到 VM 导入端点。
+[[sink_group.sinks]]
+name = "vm_metrics"
+connect = "vm_metrics_sink"
+tags = ["sink:vmetrics"]
+
+[sink_group.sinks.params]
+endpoint = "${WPARSE_VM_ENDPOINT}/api/v1/import"

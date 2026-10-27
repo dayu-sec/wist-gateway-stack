@@ -59,7 +59,7 @@ mkdir -p "${WORK}/topology/sinks/business.d"
 cat > "${WORK}/topology/sinks/business.d/test.toml" <<'EOF'
 [sink_group]
 name = "test-metrics"
-oml = ["macos_agent_metrics"]
+oml = ["agent_uplink_metrics_frame"]
 batch_size = 1024
 batch_timeout_ms = 300
 

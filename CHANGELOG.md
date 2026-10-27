@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.6-alpha] - 2026-10-28
+
+### 变更（组件版本：网关 / 前端跟版）
+
+- **`GATEWAY_TAG` → `v0.24.0-alpha`**、**`WEB_TAG` → `v0.19.0-alpha`**。两者**必须成对升**：
+  - 网关：日志接入兼容当前模型（`agent`/`ts`/`log_type` 别名 + 可选 `raw`）；
+    Agent 总览的 `recent_online_agents` 新增 `hostname` / `ip_addresses`。
+  - 前端：最近上线 Agent 卡片主标题改 hostname、第二行 IP；知识库录入独立 tab；
+    升级计划参数 3 列；主机指标机队表 / 解析规则表固定列宽。
+- 旧网关缺 overview 字段时，前端回落 `agentId`（不会白屏）。
+
+### 升级注意
+
+- 前端 / 网关必须同升（单独升前端看不到主机名，单独升网关不报错但卡片不变）。
+- 升级后跑一次 `gops sys localize` → `gops run start`；TCR 源需确认
+  `wist-gateway:v0.24.0-alpha` 与 `wist-gateway-web:v0.19.0-alpha` 已由 CI 推上去。
+- 网关升到本版后，才可以打开 `agent 日志 → 网关` 出站（wp-infra 的
+  `business.d/parsed.toml` 仍为注释，待全网网关到位后再开）。
+
 ## [0.4.5-alpha] - 2026-10-28
 
 ### 变更（组件版本：网关）

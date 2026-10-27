@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.5-alpha] - 2026-10-28
+
+### 变更（组件版本：网关）
+
+- **`GATEWAY_TAG` → `v0.23.1-alpha`**：日志接入兼容当前模型 —— `agent_id` / `observed_at` /
+  `category` 增加 `agent` / `ts` / `log_type` 别名，`raw` 改为可选（回退 `log` → 内容字段 JSON）。
+  旧网关会把新模型的每条日志按 400 拒掉并落 rescue。
+- **配合使用**：网关升到本版后，才可以打开 `agent 日志 → 网关` 出站
+  （wp-infra 的 `business.d/parsed.toml` 当前仍为注释，待全网网关到位后再开）。
+
+### 升级注意
+
+- 前端 / wparse / VM 镜像不变，只换网关镜像。
+- 升级后跑一次 `gops sys localize` → `gops run start`；TCR 源需确认
+  `dy-sec.tencentcloudcr.com/cloud/wist-gateway:v0.23.1-alpha` 已由 CI 推上去。
+
 ## [0.4.4-alpha] - 2026-10-28
 
 ### 变更（数据面种子）

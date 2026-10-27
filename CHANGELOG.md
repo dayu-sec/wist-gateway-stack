@@ -18,6 +18,12 @@
 - 前端 / wparse / VM 镜像不变，只换网关镜像。
 - 升级后跑一次 `gops sys localize` → `gops run start`；TCR 源需确认
   `dy-sec.tencentcloudcr.com/cloud/wist-gateway:v0.23.1-alpha` 已由 CI 推上去。
+- **旧种子文件不会被自动删除**（`prj upgrade`/`project_remote` 都是 overlay，只写不删）：
+  升级后手动清一次**包种子**与**工作根**两处，否则重启仍会把 `demo.toml` 补回工作根；
+  ```sh
+  rm -f sys/data-plane/topology/sinks/business.d/{demo,macos_agent,macos_agent_metrics,agent_discovery}.toml
+  rm -f data-plane-run/work/topology/sinks/business.d/{demo,macos_agent,macos_agent_metrics,agent_discovery}.toml
+  ```
 
 ## [0.4.4-alpha] - 2026-10-28
 

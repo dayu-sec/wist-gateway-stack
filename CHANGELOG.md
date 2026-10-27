@@ -3,6 +3,39 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.3-alpha] - 2026-10-27
+
+### 变更（组件版本：WarpParse）
+
+- **`WPARSE_TAG` → `0.34.2-alpha`**（上游 patch 0.34.1 → 0.34.2）。网关 / 前端 / 知识库均不变，只换数据面引擎。
+- 本次**未改** `sys/data-plane/` 的任何配置：wparse 的项目配置仍按原样挂载。
+
+### 为什么值得升（业务身份终于能落到记录里）
+
+0.34.2 带的是 `wp-motor v1.37.1`，正是
+[wp-labs/warp-parse#370](https://github.com/wp-labs/warp-parse/issues/370) 的修复：
+
+- **`sink_group.oml` 不再吞掉实例级全局 tag**：OML 用模型输出重建记录时，
+  解析阶段盖的 `WP_GLOBAL_TAGS` 会被**在变换后补盖**回来，`oml = ["..."]` 与不配 OML 的字段集一致；
+- **全局 tag 优先级最高**：与模型里写死的同名字段或 sink `tags` 同名时，最终**只保留一份**且用
+  `WP_GLOBAL_TAGS` 的值（不再出现重复键）；
+- OML 转换失败进 error sink 的记录也会带上全局 tag。
+
+对网关的意义：中心绑定客户后，`<work>/.env` 里的
+`WP_GLOBAL_TAGS=tenant_id=<客户ID>,wist-gw_id=<实例ID>`（gwlinkd ≥ 0.18.4 写入）
+现在会真的出现在**所有**输出记录上 —— 不需要在 `topology/sinks/defaults.toml` 里配 `${VAR}` 占位
+（那份会被 `project_remote` 从 wp-infra 整体覆盖），也不占 4 个 tag 的预算。
+
+### 升级注意
+
+- 只换数据面镜像：`gops sys localize`（把 `WPARSE_TAG` 落进站点 `.env`）→ `gops run start`。
+- **TCR 镜像源还没同步**：本机 `docker push` 因凭据没有 `cloud/warp-parse` 的 push 权限而 401，
+  `dy-sec.tencentcloudcr.com/cloud/warp-parse:0.34.2-alpha` **尚不存在**。用 TCR 源的站点要等镜像推上去，
+  或临时把 `WARP_SPC` 指回 `ghcr.io/wp-labs`（`ghcr.io/wp-labs/warp-parse:0.34.2-alpha` 已存在）。
+- 业务身份的生效仍依赖 **gwlinkd ≥ 0.18.4**（它才写 `WP_GLOBAL_TAGS`）；
+  更旧的 gwlinkd 只写 `WIST_TENANT_ID`，那就需要 `topology/sinks/defaults.toml` 里有
+  `${WIST_TENANT_ID}` 占位（而那份来自 wp-infra，随时可能被同步掉）。
+
 ## [0.4.2-alpha] - 2026-10-27
 
 ### 修复（macOS 开发机的采集面）

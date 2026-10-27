@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.2-alpha] - 2026-10-27
+
+### 修复（macOS 开发机的采集面）
+
+- **前端 `WEB_TAG` → `v0.18.1-alpha`**：授权页不再把“我们还没做 macOS 采集”说成
+  “这台机器没有”（例如 macOS 上看 `ContainerWorkload` 会看到“还没接入”，而不是像机器缺能力）。
+- 配套（站点自选，不在本包里）：知识库 `0.7.0` + agentd `0.10.1` 之后，
+  **MacDev 开发机**已经能授权本地数据库（Homebrew 的 PG/MySQL/Redis/Mongo）与存储健康面；
+  MacDaily 个人机不受影响。
+
+### 升级注意
+
+- 只换前端镜像（`gops sys localize` 把 `WEB_TAG` 落进站点 `.env` 后 `gops run start`）。
+- 本包**不含** macOS 采集单元（在知识库里）也不含 agentd；两者分别升级后才有效。
+- 上游镜像无变化（`WPARSE_TAG` / `VM_TAG` 未动），`./dev/push-images.sh --dry-run` 确认 0 个待推。
+
 ## [0.4.1-alpha] - 2026-10-27
 
 ### 变更（组件版本：WarpParse）

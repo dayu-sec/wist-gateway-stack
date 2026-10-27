@@ -37,7 +37,7 @@ system:
   # 的 latest 与 <version> 指向同一个 digest）。
   # 0.32.x 起管理面配置在项目根 wparse.local.toml（不在被 project_remote 替换的 conf/ 里）。
   - name: WPARSE_TAG
-    value: 0.34.0-alpha
+    value: 0.34.1-alpha
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

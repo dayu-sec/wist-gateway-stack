@@ -3,6 +3,38 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.4-alpha] - 2026-10-28
+
+### 变更（数据面种子）
+
+- **种子跟版 `wp-rules v1.0.22`**：`models/wpl` + `models/oml` 全量对齐（Linux 主机 / 审计 / 内核 /
+  登录会话 / 提权 / 服务 / 重启 / 软件变更等规则包，新增 `raw_log` 兜底）；删掉 macOS 时代的
+  `mac-drafts/` 与 nginx 示例。
+- **种子 sink 对齐 `wp-infra v1.1.x`**：`agent-metrics`（原 `macos-agent-metrics`，平台无关）、
+  `agent-dsnap`、`parsed`、`raw`、`ignore`；`18-tcp_sink` 支持 `fmt = "json"`。
+- **种子出站默认**：事实→网关、指标→VictoriaMetrics、数据面自监控→VictoriaMetrics 开启；
+  日志→网关**暂关闭**（网关侧字段名 `agent_id`/`observed_at`/`category` 与当前模型的
+  `agent`/`ts`/`log_type` 不兼容，开了会整批 400 并落 rescue）；中心 tcp 不内置。
+- 回归脚本 `dev/tests/agent-uplink-metric-labels.test.sh` 同步新 OML 名，4/4 通过。
+
+### 修复
+
+- **删掉种子里的 `demo.toml` / `macos_agent.toml` / `macos_agent_metrics.toml` /
+  `agent_discovery.toml`**：它们原先每次重启都会被 `cp --update=none` 补回工作根，
+  `demo.toml` 的 `oml=["*"]` 会**抢走兑底分组**（`gateway.json` 停写、`demo.json` 无限增长），
+  其余几个引用的 OML 在 wp-rules 里已不存在（死组）。
+
+### 升级注意
+
+- **已部署站点升级后仍需手动清一次工作根**（`project_remote` 与旧种子都只写不删）：
+  ```sh
+  rm -f data-plane-run/work/topology/sinks/business.d/{demo,macos_agent,macos_agent_metrics,agent_discovery}.toml
+  ```
+  同时建议清一下数据面工作根的旧产物 `out_dat/{demo.json,macos-agent-metrics.json}`。
+- 若站点接了 `WPARSE_PROJECT_INFRA_REPO`，数据面配置仍以 wp-infra 为准（本包只改
+  「首次启动 / 无远端」的种子）；两边现在内容一致（wp-infra v1.1.4）。
+- 只换种子与 `18-tcp_sink` 配置：镜像 tag（网关 / 前端 / wparse / VM）**未变**。
+
 ## [0.4.3-alpha] - 2026-10-27
 
 ### 变更（组件版本：WarpParse）

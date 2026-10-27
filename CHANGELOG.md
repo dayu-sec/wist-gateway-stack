@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.1-alpha] - 2026-10-27
+
+### 变更（组件版本：WarpParse）
+
+- **`WPARSE_TAG` → `0.34.1-alpha`**（上游 patch 0.34.0 → 0.34.1）。
+  网关 / 前端 / 知识库均不变，只换数据面引擎。
+- 本次**未改** `sys/data-plane/` 的任何配置：wparse 的项目配置仍按原样挂载。
+- TCR 侧 `dy-sec.tencentcloudcr.com/cloud/warp-parse:0.34.1-alpha` 已存在且与上游 digest 一致，
+  `./dev/push-images.sh --dry-run` 确认 **0 个待推**。
+
+### 升级注意
+
+- 升级后跑一次 `gops sys localize`（把 `WPARSE_TAG` 落进站点 `.env`）再 `gops run start`；
+  只换镜像，不需要动数据面配置或重新授权采集。
+
 ## [0.4.0-alpha] - 2026-10-27
 
 ### 新增（数据库日志目录不再写死）

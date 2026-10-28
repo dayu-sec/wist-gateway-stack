@@ -86,3 +86,13 @@ max_seconds     = 604800     # 分卷保留时长（秒，0 = 不按时间清；
 signing_public_key_file = "{{knowledge_signing_pubkey}}"
 {{/if}}
 source_dir = "knowledge/initial"
+
+# 数据面（wparse）工作根 —— **只读**浏览用（管理面「数据采集 → 配置与规则」）。
+#
+# 宿主 `data-plane-run/work` 由 compose 只读挂到容器的 `/data-plane`
+# （见 sys/docker-compose.yml）；页面从这里读 conf / topology / connectors / models。
+#
+# **故意不做存在性校验**：没挂载只让这一个页面回 503，不把网关挡在启动之外。
+# 可浏览的范围由网关侧白名单决定（见 wist-gateway `api/data_plane.rs`），不是整棵目录。
+[data_plane]
+work_dir = "/data-plane"

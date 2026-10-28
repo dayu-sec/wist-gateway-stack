@@ -55,6 +55,12 @@
 > （`gops sys perms --apply` 会从 compose 派生并对齐；也可手工 `sudo chown -R 999:999 data-plane-run/work`）。
 > ⚠ 手工 chown 时**不要**改成部署账号（0.2.12 之前的入口用 `cp -a` 补种子，要求 `conf/connectors/models/topology` 属主是容器用户）。
 >
+> **网关侧只读复用同一份工作根**：`gateway` 容器把 `${WPARSE_RUN_WORK}` 只读挂到 `/data-plane`
+> （`[data_plane] work_dir = "/data-plane"`），只用于管理面「数据采集 → 配置与规则」页面浏览
+> `conf / topology / connectors / models` 与 `wparse.local.toml`；可浏览范围由网关白名单收窄，
+> `identity/`、`data/`、`.run/` 不在其中。只读挂载不改变属主，`gops sys perms` 按只读口径
+> （文件 0640 / 目录 2750）对齐即可。
+>
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
 > `docker stop` 的 SIGTERM 直达引擎、能优雅退出；拿不到锁时日志 `flock: failed to get lock`、容器 `Exited (75)`）。

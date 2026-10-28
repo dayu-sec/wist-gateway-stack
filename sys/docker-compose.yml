@@ -251,6 +251,11 @@ services:
       # gwlinkd 的「Agent 包交付」（②）落在它的 `agents/` 子目录（`/packages/agents`）：
       # 它交付后按 mtime 只留最新 N 份且不区分类型，与知识库包混放会把后者清掉。
       - ${PACKAGE_DIR}:/packages:ro
+      # 数据面工作根（只读）：管理面「数据采集 → 配置与规则」直接看 wparse 实际用的
+      # conf / topology / connectors / models，不用 SSH 到宿主。
+      # 只读；可浏览范围由网关侧白名单收窄（见 wist-gateway `api/data_plane.rs`），
+      # identity/ 与 data/ 不在白名单内。
+      - ${WPARSE_RUN_WORK}:/data-plane:ro
     ports:
       - "${GATEWAY_PORT}:3000"
     depends_on:

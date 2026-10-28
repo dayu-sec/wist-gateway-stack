@@ -3,6 +3,40 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0-alpha] - 2026-10-28
+
+### 新增（网关只读挂载数据面工作根）
+
+管理面「数据采集 → 配置与规则」需要看 wparse **实际在用**的 conf / topology /
+connectors / models，以前只能 SSH 到宿主翻 `data-plane-run/work`。本版把同一份工作根
+**只读**挂进网关：
+
+- `sys/docker-compose.yml`：`gateway` 服务新增 `- ${WPARSE_RUN_WORK}:/data-plane:ro`；
+- `sys/configs/gateway/wist-gateway.toml.tpl`：新增 `[data_plane] work_dir = "/data-plane"`。
+
+可浏览范围由网关侧白名单收窄（只开 `conf` / `topology` / `connectors` / `models` 与
+`wparse.local.toml`），`identity/`、`data/`、`.run/` 不在其中；只读挂载不改属主，
+`gops sys perms` 按只读口径（文件 `0640` / 目录 `2750`）对齐即可。
+
+### 变更（组件版本：网关 / 前端跟版）
+
+- **`GATEWAY_TAG` → `v0.25.0-alpha`**、**`WEB_TAG` → `v0.20.0-alpha`**（成对升）：
+  - 网关：新增 `GET /api/v1/admin/data-plane/files` 与 `/api/v1/admin/data-plane/file`
+    （白名单目录树 + 单文件内容，未挂载回 503）；
+  - 前端：`/pipeline` 拆成**吞吐** / **配置与规则** 两个 tab，后者为可展开的目录树 +
+    右侧只读查看器。
+
+### 升级注意
+
+- **必须同升**：只升网关没有页面，只升前端「配置与规则」tab 会报 404（旧网关无此接口）。
+- 升级后跑 `gops sys localize` → `gops run start`：`.env` 里的 `GATEWAY_TAG` / `WEB_TAG`
+  及新挂载要重新渲染才会生效；`WPARSE_RUN_WORK` 缺省是 `./data-plane-run/work`，
+  自定义过该值的站点无需改动（网关复用同一个变量）。
+- 修正：`v0.4.6-alpha` 只改了 `sys/merged_vars.yml` 没改 `sys/setting/vars.yml`，导致任何一次
+  `gops sys update` / `gops sys localize` 都会把 tag 回退到 `v0.23.0` / `v0.18.1`。本版两文件
+  已同步（`vars.yml` → `gops sys update` → `merged_vars.yml`）。
+- TCR 源需确认 `wist-gateway:v0.25.0-alpha` 与 `wist-gateway-web:v0.20.0-alpha` 已由 CI 推上去。
+
 ## [0.4.6-alpha] - 2026-10-28
 
 ### 变更（组件版本：网关 / 前端跟版）

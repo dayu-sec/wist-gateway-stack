@@ -3,6 +3,35 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0-alpha] - 2026-10-28
+
+### 新增（Git Proxy 独立域名 / 双向证书备料）
+
+- **Git Proxy 可用独立域名**：新增 `GIT_PROXY_DOMAIN`（默认空）。填了就会把它在 wparse 容器里
+  映射到宿主网关，网关于是可以用 `https://wp-git.<zone>/...` 拉规则 —— 配合 Center 侧的
+  `GIT_PROXY_DOMAIN` 与主机第二个 IP，改地址即可**去掉端口**（证书复用同一张叶，网关不用重入网）。
+  **只填域名、不填 IP**：换 IP / 换 EIP 不需要改网关配置。
+- **双向证书备料**：localize 把网关自己的客户端证书投影到
+  `data-plane-run/.run/git-client.{crt,key}.host`（`0600`），启动时复制进 wparse 运行卷
+  `/data/.run/git-client.{crt,key}`（属主 wparse）。当前 warp-parse 还不支持把客户端证书交给
+  libgit2（wp-labs/warp-parse#371），所以**暂时没有运行时效果**；上游支持后即可把中心侧的
+  `GIT_PROXY_CLIENT_CERT_VERIFY` 切到 `on`。
+- **域名一致性告警**：`GIT_PROXY_DOMAIN` 与 `WPARSE_PROJECT_*_REPO` 的主机名不一致、或
+  `CENTER_API_DOMAIN` 与 `CENTER_ENDPOINT` 不一致时，localize 会打印告警（典型场景：dev 的
+  values 被抄到生产）。
+
+### 变更（**破坏性**：需改现场 values）
+
+- **`CENTER_DOMAIN` → `CENTER_API_DOMAIN`**：它只用于单机部署时在 wparse 容器里把 Center 域名
+  指回宿主（`extra_hosts`），旧名看不出是哪一面（网关自己的对外域名是 `WEB_DOMAIN`）；改名后
+  与 center-stack 的 `CENTER_API_*` 成对。
+  - **升级必做**：把 `values/<系统名>/sys_value.yml` 里的 `CENTER_DOMAIN:` 改成
+    `CENTER_API_DOMAIN:`。**gops 对 values 里的未知键不报错**（只进 `.env`），不改会被静默忽略 →
+    容器内的域名映射退化成 `center.invalid`。
+  - **已加守卫**：旧键仍在而新键为空时，localize 直接失败并打印改名指引。
+- 升级后跑一次 `gops sys localize` + `gops run start`：`extra_hosts` 属于容器属性，
+  不重建容器不会生效（只改 values 的话容器仍按旧的域名映射跑）。
+
 ## [0.5.0-alpha] - 2026-10-28
 
 ### 新增（网关只读挂载数据面工作根）

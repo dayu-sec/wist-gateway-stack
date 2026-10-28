@@ -31,7 +31,9 @@ system:
   value: Asia/Shanghai
 - name: WEB_DOMAIN
   value: gw.example.com
-- name: CENTER_DOMAIN
+- name: CENTER_API_DOMAIN
+  value: ''
+- name: GIT_PROXY_DOMAIN
   value: ''
 - name: GATEWAY_CONFIG_DIR
   value: ./configs/gateway

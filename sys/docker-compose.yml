@@ -116,6 +116,19 @@ services:
         }
         cp -f /seed/admin_api.token.host /run/admin_api.token
         chmod 600 /run/admin_api.token
+        # Git 客户端证书（双向证书）：libgit2 不认 GIT_SSL_CERT/KEY，只认 gitconfig 的
+        # http.sslCert/sslKey；但 **当前 wparse 并不读 gitconfig**（实测：坏 sslCAInfo 也被忽略），
+        # 所以现在只把证书物化好（0600，属主 wparse），等 wparse 支持后直接用。
+        for f in git-client.crt git-client.key; do
+          if [ -s "/seed/$$f.host" ]; then
+            cp -f "/seed/$$f.host" "/run/$$f"
+            chmod 600 "/run/$$f"
+          else
+            rm -f "/run/$$f"
+          fi
+        done
+        # 清掉早期实验遗留的 gitconfig（当前不被消费，留着只会误导）
+        rm -f /run/gitconfig /run/.gitconfig /run/xdg/git/config
         echo "wparse run volume ready: /run/admin_api.token (0600)"
     volumes:
       - wparse-run:/run
@@ -198,10 +211,13 @@ services:
       # 管理面只发布回环：gwlinkd 是本机宿主进程；**不要**写成 0.0.0.0。
       - "127.0.0.1:${WPARSE_ADMIN_PORT}:19090"
     extra_hosts:
-      # 单机部署：Center 域名在宿主 /etc/hosts 指向 127.0.0.1，容器通过 DNS 继承后
-      # 会把 Center Git Proxy 解析成容器自己���git clone 失败）。这里改指宿主网关。
-      # CENTER_DOMAIN 为空时映射一个无效占位名，不影响真实 DNS 部署。
-      - "${CENTER_DOMAIN:-center.invalid}:host-gateway"
+      # 单机部署：这两个域名在宿主 /etc/hosts 指向 127.0.0.1，容器通过 DNS 继承后会解析成
+      # **容器自己**（git clone / API 调用直接连不上）。这里改指宿主网关。
+      # 值**只放域名、不放 IP**：换 IP / 换 EIP 不应该要改网关配置；真实 DNS 可达的部署留空即可，
+      # 此时退化成 `<name>.invalid` 这条无效映射，不产生任何影响。
+      # 单机部署因此要求 git-proxy 必须绑 0.0.0.0（回环地址在容器里不可见）。
+      - "${CENTER_API_DOMAIN:-center.invalid}:host-gateway"
+      - "${GIT_PROXY_DOMAIN:-wp-git.invalid}:host-gateway"
     depends_on:
       victoria-metrics:
         condition: service_healthy

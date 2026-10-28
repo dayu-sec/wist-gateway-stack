@@ -71,11 +71,19 @@ system:
   - name: WEB_DOMAIN
     value: gw.example.com
 
-  # Center 的对外域名（单机部署时与 WEB_DOMAIN 相同）。
+  # Center **API** 的对外域名（单机部署时与 WEB_DOMAIN 相同；要与 CENTER_ENDPOINT 同一主机名）。
   # 仅用于让 **wparse 容器**把该域名解析到宿主网关：
   #   宿主 /etc/hosts 常把该域名指到 127.0.0.1，容器通过 DNS 继承后会把 Center 解析成自己。
   # 多机部署（Center 真实 DNS 可达）留空即可，不会注入映射。
-  - name: CENTER_DOMAIN
+  # 0.6.0-alpha 起由 `CENTER_DOMAIN` 改名而来：旧键会被 gops 静默接受但不再生效，
+  # 因此 `init-wparse-admin.sh` 检测到旧键仍在会直接失败（改名那一刻就该让人看见）。
+  - name: CENTER_API_DOMAIN
+    value: ''
+
+  # Git Proxy 的独立域名（可选）。与 CENTER_API_DOMAIN 同理，**仅用于 wparse 容器**：
+  #   单机部署时宿主 /etc/hosts 常把它指到 127.0.0.1，容器继承后会打到容器自己 → git clone 就报错。
+  #   多机部署（真实 DNS 可达）留空即可，不会注入映射。
+  - name: GIT_PROXY_DOMAIN
     value: ''
 
   # 挂载源路径（按部署环境摆放）

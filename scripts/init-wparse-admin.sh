@@ -149,6 +149,92 @@ migrate_wparse_admin_conf "${RUN_DIR}/work"
 # 开发态（如果这台机器上还有）：同一份种子，同样的迁移。
 migrate_wparse_admin_conf "${RUN_DIR}/dev"
 
+# ── 域名映射守卫（extra_hosts 口径）──
+# `CENTER_API_DOMAIN` / `GIT_PROXY_DOMAIN` **只**用于 `extra_hosts`：单机部署时把域名在
+# wparse 容器里指回宿主。它们的失败方式是**静默**的 —— compose 退化成 `<name>.invalid`
+# 这条无效映射，容器里域名解析照样失败，只是失败点挪到了 `git clone` / 升级里。
+# 所以两件最容易犯的错在这里当场拦：
+#   1) 旧键 `CENTER_DOMAIN` 没改名（gops 对 values 未知键静默接受，旧键只会进 .env 不报错）；
+#   2) 映射的域名与容器真正要访问的主机名不一致（典型：dev 的 values 被抄到生产）。
+if [[ -n "${CENTER_DOMAIN:-}" && -z "${CENTER_API_DOMAIN:-}" ]]; then
+  echo "错误：CENTER_DOMAIN 已改名为 CENTER_API_DOMAIN（0.6.0-alpha 起）。" >&2
+  echo "      gops 对 values 的未知键不报错，旧键会静默失效（extra_hosts 退化成 center.invalid）。" >&2
+  echo "      处置：把 values 里的 CENTER_DOMAIN: 改成 CENTER_API_DOMAIN: 后重跑 localize。" >&2
+  exit 1
+fi
+
+# URL → 主机名（去 scheme / 路径 / 端口）。只要有 https:// 或 host:port 这种形状就够用，
+# 没引 bashism 之外的依赖。
+url_host() {
+  local url="$1"
+  url="${url#*://}"
+  url="${url%%/*}"
+  printf '%s' "${url%%:*}"
+}
+
+# 映射的域名必须正是那个要访问的域名，否则这条映射一无是处（换成 IP 也不该改这里）。
+check_host_mapping() {
+  local var="$1" mapped="$2" ref_var="$3" url="$4" host=""
+  if [[ -z "${mapped}" || -z "${url}" ]]; then
+    return 0
+  fi
+  host="$(url_host "${url}")"
+  if [[ -n "${host}" && "${host}" != "${mapped}" ]]; then
+    warn "${var}=${mapped} 与 ${ref_var} 的主机名 ${host} 不一致：这条映射对容器无效（从别的现场抄了 values？）"
+  fi
+}
+
+check_host_mapping CENTER_API_DOMAIN "${CENTER_API_DOMAIN:-}" CENTER_ENDPOINT \
+  "${CENTER_ENDPOINT:-${GWLINKD_CENTER_ENDPOINT:-}}"
+check_host_mapping GIT_PROXY_DOMAIN "${GIT_PROXY_DOMAIN:-}" WPARSE_PROJECT_MODELS_REPO \
+  "${WPARSE_PROJECT_MODELS_REPO:-}"
+check_host_mapping GIT_PROXY_DOMAIN "${GIT_PROXY_DOMAIN:-}" WPARSE_PROJECT_INFRA_REPO \
+  "${WPARSE_PROJECT_INFRA_REPO:-}"
+
+# ── Git 客户端身份（双向证书）──
+# wparse 用 **libgit2**（静态链接，容器里根本没 git 二进制），所以 `GIT_SSL_CERT` /
+# `GIT_SSL_KEY` 这类 **git CLI 专属**变量无效。libgit2 只认 gitconfig 的 `http.sslCert/sslKey`，
+# 但 **当前 wparse 并不读 gitconfig**（实测：把 sslCAInfo 写坏也照样拉成功）——
+# 客户端证书需要 wparse 上游支持。这里先把证书物化好（0600），上游支持后直接用。
+CRED="${STACK_ROOT}/identity/gwlinkd/credential.json"
+GIT_CERT_HOST="${RUN_DIR}/.run/git-client.crt.host"
+GIT_KEY_HOST="${RUN_DIR}/.run/git-client.key.host"
+
+if [[ -f "${CRED}" ]]; then
+  tmp_crt="$(mktemp "${RUN_DIR}/.run/.git-client.crt.host.XXXXXX")"
+  tmp_key="$(mktemp "${RUN_DIR}/.run/.git-client.key.host.XXXXXX")"
+  python3 - "${CRED}" "${tmp_crt}" "${tmp_key}" <<'PY'
+import json
+import sys
+
+src, crt_path, key_path = sys.argv[1:4]
+with open(src, encoding="utf-8") as handle:
+    data = json.load(handle)
+bundle = data.get("bundle") or {}
+cert = bundle.get("certificate") or ""
+key = data.get("private_key_pem") or ""
+if "BEGIN CERTIFICATE" not in cert or "PRIVATE KEY" not in key:
+    raise SystemExit("credential.json 缺 certificate / private_key_pem")
+for path, pem in ((crt_path, cert), (key_path, key)):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(pem if pem.endswith("\n") else pem + "\n")
+PY
+  chmod 600 "${tmp_crt}" "${tmp_key}"
+  for pair in "${tmp_crt}:${GIT_CERT_HOST}" "${tmp_key}:${GIT_KEY_HOST}"; do
+    src_file="${pair%%:*}"
+    dst_file="${pair##*:}"
+    if [[ -f "${dst_file}" ]] && cmp -s "${src_file}" "${dst_file}"; then
+      rm -f "${src_file}"
+    else
+      mv -f "${src_file}" "${dst_file}"
+      note "已更新 Git 客户端证书（宿主侧）：${dst_file}"
+    fi
+  done
+else
+  warn "缺 ${CRED}（网关未入网？）：跳过客户端证书投影"
+  rm -f "${GIT_CERT_HOST}" "${GIT_KEY_HOST}"
+fi
+
 if [[ -f "${TOKEN_HOST}" && -s "${TOKEN_HOST}" ]]; then
   note "admin API token 已存在，跳过：${TOKEN_HOST}"
 else

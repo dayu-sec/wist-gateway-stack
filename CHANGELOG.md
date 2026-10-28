@@ -3,6 +3,32 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.1-alpha] - 2026-10-28
+
+### 变更（组件跟版：数据面引擎 WarpParse `0.34.2` → `0.35.3`）
+
+只换数据面镜像：网关 / 前端 / 知识库 / VM 均未动，`sys/data-plane/` 的配置也**不需要改**
+（种子里的 `[admin_api.auth]` 已不带 0.34.0 移除的 `mode`，也没用到新键）。
+
+用户可见的三点：
+
+- **文件 Sink 可以按容量滚动 + 归档压缩**（0.35.0）：`max_size`（支持 `10MB` / `1GiB` 写法，`0` = 不限）、
+  `max_rolls`（默认保留 3 个）、`roll_compress`（`none|gzip|zip`）；历史文件按 `out.dat.1[.gz|.zip]`
+  编号、超出的删最旧，滚动时收尾并重建压缩流（每个历史文件可独立解压，失败回落不压缩）。
+  > 本栈没用这三个键；将来要用，得先把它们加进对应 connector 的 `allow_override`。
+  > `protocol = "arrow"` 不支持滚动，配了直接报配置错误。
+- **清掉六条依赖安全公告**：zstd 三条（0.35.2，`RUSTSEC-2026-0391/0398/0403`）、
+  zip 三条（0.35.1，`RUSTSEC-2026-0367/0368/0369`，仅影响解压路径，本栈只写归档）。
+- **修 `max_size = "10MB"` 报类型错误**（0.35.3）：内置 `file_*` 模板不再给 `max_size` /
+  `roll_compress` 配默认值，配置合并时的类型校验不再误判字符串容量。
+
+### 升级注意
+
+- 只换数据面：`gops sys localize`（把 `WPARSE_TAG` 落进站点 `.env`）→ `gops run start`
+  （wparse 容器会因镜像变化重建；`/data` 与 `.run` 卷不动，规则与 token 不丢）。
+- **wparse 是上游镜像、没有 TCR 版本**：`ghcr.io/wp-labs/warp-parse:0.35.3-alpha` 可拉；
+  内网环境先把该 tag 同步到内网仓库，再把 `WARP_SPC` / `WPARSE_IMAGE` 指过去。
+
 ## [0.6.0-alpha] - 2026-10-28
 
 ### 新增（Git Proxy 独立域名 / 双向证书备料）

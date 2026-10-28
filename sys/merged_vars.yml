@@ -12,7 +12,7 @@ system:
 - name: VM_TAG
   value: v1.154.0
 - name: WPARSE_TAG
-  value: 0.34.2-alpha
+  value: 0.35.3-alpha
 - name: GATEWAY_PORT
   value: 443
 - name: WEB_PORT

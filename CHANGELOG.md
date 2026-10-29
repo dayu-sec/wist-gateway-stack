@@ -3,6 +3,16 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.2-alpha] - 2026-10-29
+
+### 变更（发版带上升级兼容声明）
+
+- 新增栈根 `compat.json`：`requires: { "wist-center": ">=0.24.0", "wist-gwlinkd": ">=0.18.4" }`，
+  `supports: { "wist-gateway": ">=0.26.0", "wist-agentd": ">=0.10.0" }`，
+  `compat_mode=true` + `coexists_with`（center `>=0.22.0` / gwlinkd `>=0.18.0`）。
+  中心派发栈升级时会按每台网关上报的 `version` / `gwlinkd_version` 逐台判定。
+- 发布流水线校验包内有 `compat.json`（`git archive` 只收入库文件 —— 仓根这份必须提交才会进包）。
+
 ## [0.6.1-alpha] - 2026-10-28
 
 ### 变更（组件跟版：数据面引擎 WarpParse `0.34.2` → `0.35.3`）

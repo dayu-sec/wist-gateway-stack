@@ -149,6 +149,8 @@ jobs:
           gzip -9 "${bundle}.tar"
           echo "包内关键文件："
           tar -tzf "${bundle}.tar.gz" | grep -E "sys/.*vars\.yml|sys/sys_model\.yml|sys/docker-compose\.yml"
+          # 升级兼容声明（根目录）：`git archive` 只收入库文件，所以仓根的 compat.json 必须提交才会进包。
+          tar -tzf "${bundle}.tar.gz" | grep -E '^compat\.json$' || { echo "::error::包内缺 compat.json（是否忘了提交？）"; exit 1; }
           echo "包内检查器："
           tar -tzf "${bundle}.tar.gz" | grep -E '^bin/.*/wist-stackcheck$'
           ls -lh "${bundle}.tar.gz"

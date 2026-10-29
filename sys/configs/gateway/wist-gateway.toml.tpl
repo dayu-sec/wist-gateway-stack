@@ -91,6 +91,8 @@ source_dir = "knowledge/initial"
 #
 # 宿主 `data-plane-run/work` 由 compose 只读挂到容器的 `/data-plane`
 # （见 sys/docker-compose.yml）；页面从这里读 conf / topology / connectors / models。
+# 「采集日志」页 tail 的输出目录按 wparse 的布局推导：`<work_dir>/data/out_dat`
+# （宿主 `data-plane-run/data` 由 compose 只读挂到 `/data-plane/data`）。
 #
 # **故意不做存在性校验**：没挂载只让这一个页面回 503，不把网关挡在启动之外。
 # 可浏览的范围由网关侧白名单决定（见 wist-gateway `api/data_plane.rs`），不是整棵目录。

@@ -61,6 +61,11 @@
 > `identity/`、`data/`、`.run/` 不在其中。只读挂载不改变属主，`gops sys perms` 按只读口径
 > （文件 0640 / 目录 2750）对齐即可。
 >
+> **输出目录单独挂到 `/data-plane/data`**：`${WPARSE_RUN_DATA}` 只读挂进 gateway 容器，
+> 管理面「采集日志」页按 wparse 的布局 `work_root/data/out_dat` tail 文本输出
+> （`*.log` / `*.json` / `*.jsonl` 等）。输出目录不在配置浏览白名单里，走独立的
+> 输出 tail 接口（仍是只读 + 白名单 + 禁符号链接）。
+>
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以
 > `docker stop` 的 SIGTERM 直达引擎、能优雅退出；拿不到锁时日志 `flock: failed to get lock`、容器 `Exited (75)`）。

@@ -272,6 +272,11 @@ services:
       # 只读；可浏览范围由网关侧白名单收窄（见 wist-gateway `api/data_plane.rs`），
       # identity/ 与 data/ 不在白名单内。
       - ${WPARSE_RUN_WORK}:/data-plane:ro
+      # 数据面**输出**目录（只读）：管理面「采集日志」tail `data/out_dat` 下的文本文件。
+      # 挂到 `/data-plane/data`（而不是另开一个根），让网关按 wparse 自己的布局
+      # `work_root/data/out_dat` 推导，无需再配一个输出目录。
+      # 容器里 wparse 的 `/data/data` 就是宿主 `${WPARSE_RUN_DATA}`，两边一致。
+      - ${WPARSE_RUN_DATA}:/data-plane/data:ro
     ports:
       - "${GATEWAY_PORT}:3000"
     depends_on:

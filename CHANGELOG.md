@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.1-alpha] - 2026-10-29
+
+### 变更（组件跟版：初始知识包 + 兼容声明）
+
+- 初始知识包 `KNOWLEDGE_PATH` 从 `v0.5.5/wist-knowledge-0.5.5.tar.gz` 升到
+  **`v0.7.1/wist-knowledge-0.7.1.tar.gz`**（`sys/setting/vars.yml` 改，`gops sys update`
+  同步 `sys/merged_vars.yml`）。新知识包带 `compat.json`（`requires: wist-gateway >=0.26.0`），
+  网关录入/激活时会按本机版本校验，不再只能靠人工对版本。
+- 镜像 tag 不变（`GATEWAY_TAG v0.27.0-alpha` / `WEB_TAG v0.21.0-alpha` / `WPARSE_TAG 0.35.3-alpha`
+  已在 0.7.0 跟齐）。
+
+> 现场升级：`gops prj upgrade` 拉本栈；若 `.env` 覆盖过 `KNOWLEDGE_PATH`，覆盖值优先，需同步改掉。
+> 已初始化过知识库的现场不会自动重拉初始包（这一步只在首次部署时做）。
+
 ## [0.7.0-alpha] - 2026-10-29
 
 ### 变更（组件跟版：gateway `0.27.0` / web `0.21.0`）

@@ -58,7 +58,7 @@ system:
 - name: ARTIFACT_HOME
   value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
 - name: KNOWLEDGE_PATH
-  value: v0.5.5/wist-knowledge-0.5.5.tar.gz
+  value: v0.7.1/wist-knowledge-0.7.1.tar.gz
 - name: GWLINKD_CENTER_ENDPOINT
   value: ''
 - name: GWLINKD_GATEWAY_ID

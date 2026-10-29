@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.0-alpha] - 2026-10-29
+
+### 变更（组件跟版：gateway `0.27.0` / web `0.21.0`）
+
+- `GATEWAY_TAG`：`v0.25.0-alpha` → `v0.27.0-alpha`；`WEB_TAG`：`v0.20.0-alpha` → `v0.21.0-alpha`。
+- 网关带数据面输出 tail 接口与升级兼容声明；前端带兼容性展示与采集日志 tail / `grep` 过滤。
+
+### 新增（采集日志：数据面输出目录只读挂载）
+
+- gateway 容器新增 `${WPARSE_RUN_DATA}:/data-plane/data:ro`。网关按自己的布局
+  `<work_dir>/data/out_dat` 推导输出目录，页面「采集日志」可直接跟随
+  `*.log` / `*.json` / `*.jsonl` 等文本输出，不用 SSH 到宿主。
+- 输出目录仍**只读**；同一宿主路径被 wparse（读写）与 gateway（只读）挂载时，
+  `gops sys perms` 按“读写优先”合并，权限口径不变。
+- 升级后确认 `data-plane-run/data` 已由 `scripts/init-wparse-admin.sh` 预建并完成
+  `gops sys perms --apply`，否则页面会明确提示「还没有输出目录」。
+
+### 兼容性
+
+- 栈 `compat.json` 的 `supports.wist-gateway = ">=0.26.0"` 已覆盖 `0.27.0`，不需要改。
+- 上游镜像检查：`./dev/push-images.sh --dry-run` 确认 warp-parse `0.35.3-alpha` 与
+  victoria-metrics `v1.154.0` 在 TCR 已存在且 digest 一致，无需推送。
+
 ## [0.6.2-alpha] - 2026-10-29
 
 ### 变更（发版带上升级兼容声明）

@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.1-alpha] - 2026-10-30
+
+### 变更（初始知识包跟到 `v0.8.0`）
+
+- `KNOWLEDGE_PATH`：`v0.7.1/wist-knowledge-0.7.1.tar.gz` →
+  **`v0.8.0/wist-knowledge-0.8.0.tar.gz`**（`sys/setting/vars.yml` 改，`gops sys update` 同步
+  `sys/merged_vars.yml`；COS 与 GitHub Release 两边都已就位，后者带签名 `.sig`）。
+- 新知识包带**流量检测面 `TrafficInspection`**（`catalog_version` 16）：单元 `linux-suricata-eve`
+  跟尾 `/var/log/suricata/eve.json`，事实门 `path_exists`（网关的路径探测白名单从目录推导）；
+  新包 `linux-ids` 挂在三份 Linux 模板上，没跑 Suricata 的机器不会展开这个面。
+- 包内 `compat.json` 声明 `requires.wist-gateway >= 0.28.0`（首个内置词表认识该面的版本），
+  混版现场录入时会直接被拦。
+- 已初始化过知识库的现场**不会**自动重拉初始包（这一步只在首次部署做）：要拿新面，
+  去「知识库」页录入 `packages/` 下的新包并激活；或按兼容检查通过后手工升级。
+
 ## [0.8.0-alpha] - 2026-10-30
 
 ### 新增（一次性调查：数据面落盘 + 组件闭环）

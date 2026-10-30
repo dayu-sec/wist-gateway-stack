@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.2-alpha] - 2026-10-30
+
+### 变更（调查的入口与授权在界面上看得见）
+
+- `GATEWAY_TAG`：`v0.28.0-alpha` → **`v0.28.1-alpha`**；`WEB_TAG`：`v0.22.0-alpha` → **`v0.22.1-alpha`**。
+- 网关：调查列表回带 `quota { limit_per_hour, used_last_hour }`（页面能说「本小时已用 x/12」）；
+  `init-config` 模板与**本栈的 `sys/configs/gateway/wist-gateway.toml.tpl`** 都补上了注释的
+  `[investigations]` 段 —— 以前这个授权开关只存在于代码里，运维不会知道有它。
+- 前端：**主机详情页新增「一次性调查」入口**（此前只能从机队列表进）；调查页新增
+  **「授权与额度」面板**，只读展示生效值：允许的面 / 本小时额度（已用·上限）/ 报告保留期 /
+  Agent 自报能力与是否 root。
+- 授权仍然是**网关配置级**（`[investigations]`：`allowed_topics` / `max_per_agent_per_hour` /
+  `report_retention_days`），改完重启网关；控制台不写配置（没有运行态改写 / 热加载这条路）。
+
 ## [0.8.1-alpha] - 2026-10-30
 
 ### 变更（初始知识包跟到 `v0.8.0`）

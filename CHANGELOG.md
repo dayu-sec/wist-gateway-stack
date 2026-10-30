@@ -3,6 +3,32 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.0-alpha] - 2026-10-30
+
+### 新增（一次性调查：数据面落盘 + 组件闭环）
+
+- 数据面带上 `IVSREP` 通道：`topology/sinks/business.d/agent_ivsrep.toml`（`sync = true`，落
+  `./data/ivsrep/agent-ivsrep.jsonl`）+ `models/wpl/agent_uplink/parse.wpl` 的
+  `agent_uplink_ivsrep` 规则 + `models/oml/agent_uplink/agent_uplink_ivsrep/adm.oml`
+  （信封四字段 + `body` 原样透传：数据面不做字段建模，新增题目不用改 WPL/OML）。
+  报告按 `command_id` 去重、按**帧信封里的 `agent`** 归属，管理面最多列最近 50 份。
+- 新增回归测试 `dev/tests/agent-uplink-ivsrep.test.sh`：用**上游** `wp-rules` / `wp-infra`
+  覆盖进来跑 `wparse batch`，钉住信封四字段与正文 `command_id` / `report_schema` 原样保留。
+- sink 刻意**不开轮转**：轮转后文件名带 `.gz` / 序号，网关只认 `.json/.jsonl/.ndjson`，
+  历史报告会从视图里消失；报告一条几 KB，网关读取端已按「读尾部 + 新→旧」有界。
+- 现场注意：`data/ivsrep/` 由 wparse 首次写入时创建；网关容器已只读挂载整棵 `data/`，
+  所以不需要新挂载，也不需要网关收报。
+
+### 变更（组件跟版：gateway `0.28.0` / web `0.22.0`）
+
+- `GATEWAY_TAG`：`v0.27.0-alpha` → `v0.28.0-alpha`；`WEB_TAG`：`v0.21.0-alpha` → `v0.22.0-alpha`。
+- 网关带一次性调查的完整闸门：按面授权（`[investigations] allowed_topics`，403）、
+  每 agent 每小时配额（429）、报告可见保留期（只过滤不删文件），以及 G1 审计 `requested_by`。
+- 前端带主机页「调查」入口：菜单可点性 = 网关允许集 ∩ agent 自报能力，非 root 标「部分答案」，
+  四个错误码分开说，发起人与保留期回显。
+- 升级顺序：数据面规则先落盘无害（没下发过调查就不发帧）；**网关必须早于 agentd**
+  （`AgentStatusReport` 是 `deny_unknown_fields` 的，旧网关会整条拒收带新字段的上报）。
+
 ## [0.7.1-alpha] - 2026-10-29
 
 ### 变更（组件跟版：初始知识包 + 兼容声明）

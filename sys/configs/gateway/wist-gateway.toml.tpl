@@ -87,6 +87,19 @@ signing_public_key_file = "{{knowledge_signing_pubkey}}"
 {{/if}}
 source_dir = "knowledge/initial"
 
+# 一次性调查（`investigate`）的**网关侧授权与额度** —— 与采集面完全分开的一道授权轴。
+#
+# agentd 只保证「能跑、只读、有界」；「谁允许在这台机器上读什么」是控制面的事：
+#   · allowed_topics           允许触发的面（与内置词表取交集；省略 = 全部，`[]` = 一个都不许）
+#   · max_per_agent_per_hour   每台 agent 每小时次数（`0` = 不限）—— 拦的是连点/脚本误触
+#   · report_retention_days    报告在管理面的可见天数（`0` = 不限）；**只过滤不删文件**
+# 不写这一段 = 全开 / 12 次 / 7 天。被关掉的面在管理面置灰（`POST` 回 403）。
+# 改完要重启网关（配置在启动时装载；控制台只读展示生效值）。
+# [investigations]
+# allowed_topics = ["disk"]
+# max_per_agent_per_hour = 12
+# report_retention_days = 7
+
 # 数据面（wparse）工作根 —— **只读**浏览用（管理面「数据采集 → 配置与规则」）。
 #
 # 宿主 `data-plane-run/work` 由 compose 只读挂到容器的 `/data-plane`

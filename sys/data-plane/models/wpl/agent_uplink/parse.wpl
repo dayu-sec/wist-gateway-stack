@@ -54,4 +54,21 @@ package agent_uplink {
             chars:body\0
         )
     }
+
+    // 一次性调查的完整报告（agentd `investigate` 的 ` IVSREP: ` 帧）。
+    // 正文是 `Report::to_uplink_body` 的对象（带 `command_id`，与 ack 靠它 join），
+    // 这里**不拆字段**：与事实/快照同一条纪律 —— 数据面只搬契约对象，结构由消费者解析。
+    #[tag(dev_type: "调查报告", log_desc: "Agent 一次性调查报告", log_type: "agent_uplink_ivsrep_frame")]
+    rule agent_uplink_ivsrep {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+            ),
+            symbol(IVSREP:),
+            chars:body\0
+        )
+    }
 }

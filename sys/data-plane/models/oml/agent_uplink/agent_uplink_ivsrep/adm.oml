@@ -1,0 +1,19 @@
+name : agent_uplink_ivsrep
+rule : agent_uplink/agent_uplink_ivsrep
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+tenant_id = chars(2092453428448002048);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+// 报告正文保持**原样字符串**（与事实/快照同一口径）：网关按 wist-contracts / 报告自带
+// `report_schema` 解析，数据面不做字段建模 —— 否则加一个调查题目就要改一次 WPL/OML。
+body = read(body);

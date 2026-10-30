@@ -1,0 +1,36 @@
+# Agent 一次性调查报告（wist-agentd ` IVSREP: ` 帧）独立 sink 分组。
+#
+# 与 agent-facts（事实摘要）/ agent-dsnap（原文快照）分开：报告是**按命令的一次性产物**，
+# 消费者是网关管理面（「主机 → 调查」页），不是资产目录、也不是日志流水。
+#
+# 落点约定（**网关侧的读取路径由它推导**，两侧不能各写一份）：
+#   wparse 工作根 ./data/ivsrep/*.jsonl
+#     → 宿主 data-plane-run/data/ivsrep/
+#     → 网关容器 /data-plane/data/ivsrep/（compose 只读挂载整棵 data/）
+#     → 网关 `[data_plane] work_dir` + `data/ivsrep`（`api/investigations.rs` 的 `REPORT_DIR`）
+#
+# 一行 = 一条记录：帧信封（schema/agent/ts/seq）+ `body`（报告对象原样字符串，带 `command_id`）。
+# 网关按 `command_id` 去重、按**信封里的 `agent`** 归属（与内部接入端点同一条纪律）。
+#
+# 只落文件：报告不需要广播给中心，也不需要进网关库 —— 网关直接从目录读。
+[sink_group]
+name = "agent-ivsrep"
+oml = ["agent_uplink_ivsrep"]
+tags = ["biz:agent-ivsrep"]
+batch_size = 1
+batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+base = "./data/ivsrep/"
+file = "agent-ivsrep.jsonl"
+# 立即落盘（`sync = true`）：报告是**按命令的一次性产物**，管理面每 3s 轮询一次目录，
+# 缓冲住会让页面停在「报告未到」——那是出事时最误导人的状态。
+# 刻意**不**开轮转（`max_size` / `max_rolls`）：轮转后文件名带 `.gz` 或序号，网关只认
+# `.json/.jsonl/.ndjson`，历史报告会从视图里消失；报告本身很小（一条几 KB），
+# 网关读取端已按「读尾部」有界，长文件不会把页面拖死。
+sync = true

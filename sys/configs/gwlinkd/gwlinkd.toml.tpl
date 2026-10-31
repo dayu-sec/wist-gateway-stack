@@ -50,10 +50,16 @@ upgrade_project_dir = "{{upgrade_project_dir}}"
 # 发布态整栈重启。这里显式渲染，是让运维一眼看到发布态会做什么；想只重启 wparse 就在这里改。
 # 这条只决定“怎么做”：是否生效由指令规则定（`bind-tenant` 一定生效），留空 = 用缺省。
 # `wparse_work_dir` 不渲染：缺省由 gwlinkd 在系统根下解析 `data-plane-run/work`（开发态 `dev`）。
+#
+# **先 `sys perms --apply` 再 stop/start**：bind source 的权限漂移（root 建的挂载点/手工拷进去的 CA/
+# 上游脚本按 umask 落的文件）只能靠 `--apply` 收，而 `gops run start` 的 perms 前置是 fail-fast。
+# 不先对齐就是「stop 成功 / start 拒启」⇒ **整栈停在停止态**，且 gwlinkd 每 ~61s 补偿一次再停一次。
+# `&&` 是必须的：对齐失败就**不**执行 stop，栈继续跑（宁可这次绑定没生效，也不要停业务）。
+# `gops sys perms` 在 macOS/OrbStack 上是跳过的空操作，同一个命令两边通用。
 {{#if upgrader_program}}
-wparse_apply_command = "{{upgrader_program}} run stop && {{upgrader_program}} run start"
+wparse_apply_command = "{{upgrader_program}} sys perms --apply && {{upgrader_program}} run stop && {{upgrader_program}} run start"
 {{else}}
-wparse_apply_command = "gops run stop && gops run start"
+wparse_apply_command = "gops sys perms --apply && gops run stop && gops run start"
 {{/if}}
 wparse_apply_timeout_seconds = 120
 # 发布 ②「Agent 包交付」：gwlinkd 取到中心包后，落到宿主投放目录（agent_package_drop_dir），

@@ -239,9 +239,35 @@ if [[ ! -w "${TRUST_DIR}" ]]; then
   echo "         修法：sudo chown -R \$(id -u):\$(id -g) '${TRUST_DIR}'" >&2
   exit 1
 fi
-# 目录里只会有**公开**证书（CA 的公钥部分），所以 755 就够：也给得出集装箱（uid 999）
-# 一个在 macOS/OrbStack 上也能进的门（那里没有 `gops sys perms` 可跑）。
-chmod 755 "${TRUST_DIR}" 2>/dev/null || true
+# 模式与属组**必须**等于 `gops sys perms` 的只读契约（目录 2750 / 文件 0640、属组 = 容器 gid）：
+# 本目录是 compose 里 `:ro` 挂载的 bind source —— 模式宽于契约就是 `[pending]`，而
+# `gops run start` 的 perms 前置是 **fail-fast**。于是「脚本单独跑过一次（localize 的 ⑥ 没跟在后面）」
+# 就足以让下一次「绑定生效」的 `stop && start` 把整栈停在停止态
+# （2026-10-30 现场：2755/0644 → 绑定失败 → gwlinkd 每 ~61s 补偿一次再停一次）。
+# macOS / OrbStack 没有 `gops sys perms`，容器经 userns 映射按 uid 999 读宿主目录，
+# 那里只能靠 other 位给门（755/644）。
+CONTAINER_GID=999
+TRUST_DIR_MODE=2750
+TRUST_FILE_MODE=0640
+ALIGN_GID=1
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  TRUST_DIR_MODE=0755
+  TRUST_FILE_MODE=0644
+  ALIGN_GID=0
+fi
+
+# 属组失败不硬停：`gops sys perms` 的报错比这里更完整（它会给出 usermod 的具体修法）。
+projection_perms() {
+  local path="$1" mode="$2"
+  if [[ "${ALIGN_GID}" == "1" ]]; then
+    chgrp "${CONTAINER_GID}" "${path}" 2>/dev/null || echo \
+      "  [WARN] 无法把 ${path} 的属组设为 ${CONTAINER_GID}（部署账号不在该组？sudo usermod -aG ${CONTAINER_GID} <账号> 后重新登录）" >&2
+  fi
+  # 空闲（内容没变）时也跑：目标值恒等于契约，重复 chmod 不会制造漂移。
+  chmod "${mode}" "${path}" 2>/dev/null || true
+}
+
+projection_perms "${TRUST_DIR}" "${TRUST_DIR_MODE}"
 
 # 投影位置如果是个目录（只会是人为/旧版本留给我们的意外），先清掉空的。
 if [[ -d "${TRUST_DST}" ]] && ! rmdir "${TRUST_DST}" 2>/dev/null; then
@@ -254,7 +280,8 @@ if [[ -f "${TRUST_SRC}" ]] && grep -q 'BEGIN CERTIFICATE' "${TRUST_SRC}"; then
     echo "  信任锚投影已是最新：${TRUST_DST}"
   else
     cp -f "${TRUST_SRC}" "${TRUST_DST}"
-    chmod 644 "${TRUST_DST}"
+    # cp 到新文件只会给 umask 的结果（通常 0644）——按契约收一次。
+    projection_perms "${TRUST_DST}" "${TRUST_FILE_MODE}"
     echo "  已投影中心信任锚到容器目录：${TRUST_DST}"
   fi
 else

@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.10-alpha] - 2026-10-31
+
+### 变更（配套 agentd `0.15.0`：负载调查能点名「服务」）
+
+- 本包**不含** agentd（以包形式单独录入）；本条只说明升级收益与验收口径：
+  把 agentd 升到 **≥ `0.15.0-alpha`** 后，`load` 题多一节 `load.top_services`：
+  按**服务**聚合 CPU/RSS（多 worker 已加总），Linux 上归属取 cgroup
+  （systemd unit / docker / k8s pod），并且用 cgroup `cpu.stat` 的累计差值给出
+  **不依赖进程采样**的精确值（包含窗口内起落的进程）。
+- 现场意义：8 个 worker 各 12% 时，进程榜里谁都不显眼，服务合计却是 96%；
+  这是“负载高但找不到是谁”的典型成因（与磁盘题“最大的文件不是根因”同构）。
+- 组件 tag 不变（`GATEWAY_TAG v0.30.0-alpha` / `WEB_TAG v0.25.0-alpha`）；
+  数据面规则、报告落盘路径、授权模型都没动。
+- 投放提醒（本次发布踩到）：**GitHub Release 的资产先就绪，COS 镜像会晚几十秒**。
+  镜像未同步时，网关拉到的是一页错误 HTML，摘要对不上 → `400 install_package_digest_mismatch`。
+  遇到就等一会儿重试，或先 `curl -sI <cos url>` 确认 `Content-Length` 与本地包一致。
+
 ## [0.8.9-alpha] - 2026-10-31
 
 ### 新增（跟版：调查面 `load`「负载过高」）

@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.12-alpha] - 2026-10-31
+
+### 修复（磁盘调查：找到“最大的目录”）
+
+- `GATEWAY_TAG` → **`v0.31.0-alpha`**：下发调查时 `max_seconds` 的夹紧从 30 改为 **300**
+  （旧值会把 UI 传来的大预算默默夹回去，而真实机器的 `/Users` 两百万条、一分多钟才扫完）。
+- 推荐配套 agentd **≥ `0.16.0-alpha`**（以包形式单独录入）：
+  * 体量改按**盘上实际占用**（`st_blocks*512`，`du` 口径）—— 稀疏文件不再把报告撑爆
+    （现场：一个 OrbStack 镜像逻辑 927 GiB、实际 63 GiB，而整盘才 926 GiB）；
+  * 条目上限 200k → **3M**，由**时间**主导（默认 120s、上限 300s，扫完提前结束）；
+  * 目录记账换成 arena（每目录 1.4 KB → ~100B），同样 200k 条从 66 MB → 28 MB、3.9s → 2.1s。
+- 修完实测（`investigate disk --path /Users`，默认 120s）：`devspace` 99.7 GiB、
+  `devspace/rust` 93.1 GiB 直接出现在榜首（之前完全不出现）。
+- `WEB_TAG` 不变（`v0.25.0-alpha`）；数据面规则、报告落盘路径、授权模型均无变化。
+
 ## [0.8.11-alpha] - 2026-10-31
 
 ### 变更（配套 agentd `0.15.1`：`load` 题的 5 轮 review 修复）

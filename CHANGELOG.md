@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.6-alpha] - 2026-10-31
+
+### 变更（配套 agentd `0.13.0`：磁盘调查“找得到占比最大的目录”）
+
+- 本包**不含** agentd（以包形式单独录入）；本条只说明升级收益与验收口径：
+  把 agentd 升到 **≥ `0.13.0-alpha`** 后，`disk` 题的「一级目录占用」会**总是列全**
+  （以前 `/Applications` 那种十几万条的目录会把条目预算吃干，同级 `/Users` 连名字都不出现），
+  没扫完的一级目录会逐行标 `没扫完，实际更大`，并给出 `--path <目录>` 的重扫命令。
+- 实测（926 GiB 的 macOS）：旧版只能归因 25 GiB 且答案错位；新版默认参数归因 ~83 GiB，
+  并点名 `/Users` / `/private` / `/Applications` / `/opt`；按提示单独扫 `/Users` 后
+  `~/.Trash` 151.9 GiB 成为热点。
+- 组件 tag 不变（`GATEWAY_TAG v0.29.0-alpha` / `WEB_TAG v0.24.0-alpha`）；数据面规则、
+  授权页、报告落盘路径都没动。
+
 ## [0.8.5-alpha] - 2026-10-31
 
 ### 修复（绑定客户前先对齐权限，避免整栈停在停止态）

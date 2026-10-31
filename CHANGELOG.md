@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.3-alpha] - 2026-10-30
+
+### 变更（调查授权可按机器改：页面勾选即时生效）
+
+- `GATEWAY_TAG`：`v0.28.1-alpha` → **`v0.29.0-alpha`**；`WEB_TAG`：`v0.22.1-alpha` → **`v0.23.0-alpha`**。
+- 授权分成两层，语义刻意不同：
+  - **上界** `[investigations] allowed_topics`（网关配置，改完重启）= 这套环境允许什么；
+  - **下界** 按机器存库（`PUT/DELETE …/investigations/grant`，页面勾选保存）= 这台机器开哪几面，
+    **即时生效**，且只能在上界之内收窄（越界 403，不静默夹住）。
+- 前端：「授权与额度」面板多了勾选编辑器 —— 继承时勾选状态就是网关默认，保存后用网关回的
+  生效集刷新菜单；不可点的面分三种理由（网关没开 / 本机未授权 / agent 未上报）。
+- 授权变更记 `updated_by = admin:<token 指纹>`（审计）；**只影响下发**，
+  已经落盘的报告不会因为事后收权就看不到。
+- 升级注意：新表 `investigation_grant` 随网关迁移自动建；旧 agentd 不需要动
+  （授权闸只在网关侧）。
+
 ## [0.8.2-alpha] - 2026-10-30
 
 ### 变更（调查的入口与授权在界面上看得见）

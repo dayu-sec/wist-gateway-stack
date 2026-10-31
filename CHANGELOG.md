@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.11-alpha] - 2026-10-31
+
+### 变更（配套 agentd `0.15.1`：`load` 题的 5 轮 review 修复）
+
+- 推荐配套 **agentd ≥ `0.15.1-alpha`**（本包不含 agentd，以包形式单独录入）：
+  `0.15.0` 的负载调查修了四个会让人得出错误结论的地方 ——
+  **百分比分母改取真实经过时间**（机器越忙 `sleep` 越容易超时，用“想等多久”会把所有服务同时算高）、
+  `/proc/stat` 不再把 `guest/guest_nice` 算两遍、`-pod` 不再误判成 k8s（否则下一条命令会变成 kubectl）、
+  以及「有 cgroup 口径」不再被误报成「非 Linux/没权限」。
+- 组件 tag 不变（`GATEWAY_TAG v0.30.0-alpha` / `WEB_TAG v0.25.0-alpha`）；
+  数据面规则、报告落盘路径、授权模型都没动。
+
 ## [0.8.10-alpha] - 2026-10-31
 
 ### 变更（配套 agentd `0.15.0`：负载调查能点名「服务」）

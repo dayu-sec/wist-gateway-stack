@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.4-alpha] - 2026-10-30
+
+### 新增（发布态数据面配置的门禁）
+
+- `dev/tests/data-plane-config.test.sh`：把 **`sys/data-plane/` 整份 seed**（7 个 sink 分组 +
+  全部模型）拿给当前 `wparse` 装载，失败即红。之前只有 `agent-uplink-ivsrep.test.sh`，
+  而它只放**一份** sink —— 任何一个 sink 参数写错，站点表现是「引擎起来了但一条数据都没有」，
+  比崩溃更难查。
+- 背景（已知地雷，本门禁就是为它加的）：上游 `wp-infra` HEAD 的文件 sink 加了
+  `max_size` / `max_rolls` / `roll_compress`，而本栈钉的 `wparse 0.35.3-alpha` **不接受**
+  这三个键（单独加任一个都会让 `load sink route confs` 整体失败；`sync` 没问题）。
+  本栈的 seed 没有这三个键，所以默认部署是好的；但只要现场配了 `WPARSE_PROJECT_INFRA_REPO`
+  从 Git Proxy 同步上游配置，就会踩到。
+
+### 变更（组件跟版：web `0.24.0`）
+
+- `WEB_TAG`：`v0.23.0-alpha` → **`v0.24.0-alpha`**（网关仍为 `v0.29.0-alpha`，本次不动）。
+- 前端：授权页合并（`采集面授权` / `调查授权` 两个 tab）；报告列表新增「调查 ID」列，
+  数据面报告与控制面命令用它对上。
+
 ## [0.8.3-alpha] - 2026-10-30
 
 ### 变更（调查授权可按机器改：页面勾选即时生效）

@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.5-alpha] - 2026-10-31
+
+### 修复（绑定客户前先对齐权限，避免整栈停在停止态）
+
+- `scripts/init-gwlinkd-pub.sh`：投影信任锚时按 **`gops sys perms` 的只读契约**落模式与属组
+  （Linux：目录 `2750` / 文件 `0640`、属组 = 容器 gid `999`；macOS/OrbStack：`755`/`644`，不动属组）。
+  以前是 `chmod 755` + `cp` 后的 umask `0644`，模式宽于契约就是 `[pending]`，
+  而 `gops run start` 的 perms 前置是 **fail-fast** —— 脚本单独跑过一次，就足以让下一次
+  「绑定生效」的 `stop && start` 停在停止态（2026-10-30 现场：gwlinkd 每 ~61s 补偿一次再停一次）。
+- `sys/configs/gwlinkd/gwlinkd.toml.tpl`：`wparse_apply_command` 前面加 `gops sys perms --apply &&`；
+  **对齐失败就不执行 stop**（宁可这次绑定没生效，也不要停业务）。macOS/OrbStack 上
+  `sys perms` 是空操作，同一条命令两边通用。
+- 组件 tag 不变（`GATEWAY_TAG v0.29.0-alpha` / `WEB_TAG v0.24.0-alpha`）。
+- 配套 agentd：调查面需 **≥ 0.11.0**，磁盘“目录归因 + 热点路径”需 **≥ 0.12.0**（agentd 以包形式单独录入）。
+
 ## [0.8.4-alpha] - 2026-10-30
 
 ### 新增（发布态数据面配置的门禁）

@@ -361,9 +361,10 @@ gops sys update && gops sys localize
 gops run start
 
 # 投放 agent 安装包并设为分发来源（容器读**不到**宿主机路径 → 统一走 /packages）：
-#   --latest 取 ../wist-agentd/target/package 最新；也可传具体文件/目录
+#   --latest 取 ../wist-agentd/target/package 里**每个平台**最新的一个（macOS ×2 + Linux ×2）
 ./scripts/import-package.sh --latest --set
 #   等价于：cp 到 packages/ + 调管理 API 把来源设为 /packages/<文件名>
+#   一次只投放某个包：给具体文件；一次投放多平台：给多个文件（平台名从文件名推导）
 
 # 投放**知识库内容包**（采集目录/包/模板 + 用途规则 + 发现策略）。
 # 不录就是空载：不产「系统类型」建议、不产用途建议（发现策略走 agentd 内建默认值）。

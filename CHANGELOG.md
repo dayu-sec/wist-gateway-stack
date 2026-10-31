@@ -3,6 +3,39 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.8-alpha] - 2026-10-31
+
+### 修复（`import-package.sh --set` 在网关 0.29 上必然 422）
+
+发布 0.13.1 的现场发现的真 bug：包已拷进 `packages/`，但「设为分发来源」一直
+**HTTP 422 `missing field artifacts`** —— 脚本还在发旧版**平铺**请求体
+`{package_url, package_sha256}`，而网关 v0.28+ 要求按平台分组：
+`{artifacts:[{platform, package_url, package_sha256}]}`。
+表现是「包放进去了，但 UI 上的来源永远设不上，安装命令自然发不出去」。
+
+- 请求体改为 `{artifacts:[...]}`，并额外带 `requested_by: scripts/import-package.sh`
+  （落库的 `updated_by` 能看出是谁录的）；
+- **平台名从文件名推导**（`wist-agentd-v0.13.1-alpha-aarch64-apple-darwin.tar.gz` →
+  `aarch64-apple-darwin`）：版本段自己带连字符，不能用「最后一个连字符切」，
+  改为对已知四种 triple 做后缀匹配；识别不了就**明确失败**，不拿猜的平台去设来源；
+- **`--latest` / 传目录改为每平台各取最新一份**（以前只取最新的一个文件）：
+  否则另外三种架构的机器会拿到错平台的包（网关以 `platform_mismatch` 拒收）；
+- 可一次给多个包；非 200 时把**网关返回正文**打出来（以前只打状态码，
+  现场分不出是形状不对还是包不对）；
+- 兼容 macOS 自带 bash 3.2：没有 `mapfile`，且 `set -u` 下空数组展开会报
+  `unbound variable`（改用换行分隔清单 + `<<<` 读取）。
+
+### 测试
+
+- `dev/tests/import-package-payload.test.sh`：起一个桩服务收请求体，钉住
+  「`--latest` 每平台各取一份」+「请求体是 `artifacts` 形状且平台/摘要正确」+
+  「平台识别不了时明确失败」。（缺 python3 时跳过，不阻断开发机。）
+
+### 变更（配套 agentd `0.13.1`）
+
+- 推荐配套 **agentd ≥ `0.13.1-alpha`**（同 0.8.7 的口径；本包不含 agentd）。
+- 组件 tag 与数据面规则、授权页、报告落盘路径均无变化。
+
 ## [0.8.7-alpha] - 2026-10-31
 
 ### 变更（磁盘调查：配套 agentd 提到 `0.13.1`）

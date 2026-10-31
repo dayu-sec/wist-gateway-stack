@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.9-alpha] - 2026-10-31
+
+### 新增（跟版：调查面 `load`「负载过高」）
+
+- `GATEWAY_TAG` → **`v0.30.0-alpha`**、`WEB_TAG` → **`v0.25.0-alpha`**：网关词表与页面
+  都认识 `load` 了（授权页勾选 / 调查页题目下拉 / 报告标题都会多一项）。
+- 配套 agentd **≥ `0.14.0-alpha`**（以包形式单独录入）：新增 `investigate load`，七节证据
+  （每核负载 → CPU 与每核 → 进程排行 → 内存/swap → iowait 与 D 状态 → agent 自占 → 采样口径）。
+- **发布序**：agentd → 网关 → 前端。旧网关收到 `load` 会 400；旧 agentd 不报这个能力，
+  页面自然不显示（不会点了没反应）。
+- 数据面规则、报告落盘路径、授权模型都没动（报告仍走 `IVSREP`，按 `command_id` 关联）。
+
 ## [0.8.8-alpha] - 2026-10-31
 
 ### 修复（`import-package.sh --set` 在网关 0.29 上必然 422）

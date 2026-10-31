@@ -3,6 +3,19 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.14-alpha] - 2026-10-31
+
+### 变更（发布火车：网关 0.32 + 前端 0.27）
+
+- `GATEWAY_TAG` → **`v0.32.1-alpha`**：调查面词表加四题（`accounts` / `persistence` / `exposure` /
+  `telemetry-health`），报告视图保留 `findings_unknown` 与 `judged`（读不到不再被抹成 0/正常）。
+  * `v0.32.0-alpha` 因 GitHub `macos-14` runner 镜像 brownout **未产出制品**；`0.32.1` 内容相同、只修 CI。
+- `WEB_TAG` → **`v0.27.0-alpha`**：四道新题的文案，`judged=false` 时不再渲染成“正常”而是“证据”，
+  并展示 `limits` / `coverage`；调查授权改为按调查面批量授权。
+- 推荐配套 agentd **≥ `0.18.2-alpha`**（以包形式单独录入）：新增 `telemetry-health`
+  （“我们瞎了多久”：源静默 / spool 积压 / 输出闸门），报告头补 `boot_id` / `boot_time`。
+- 数据面规则、报告落盘路径、授权模型均无变化。
+
 ## [0.8.13-alpha] - 2026-10-31
 
 ### 变更（发布火车：网关 0.31.1 + 前端 0.26）

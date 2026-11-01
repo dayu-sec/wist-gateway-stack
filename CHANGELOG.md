@@ -3,6 +3,31 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.16-alpha] - 2026-11-01
+
+### 修复（数据面：记录被钉死成某个租户）
+
+- 栈种子的 **29 份 OML** 里删掉手写的站点常量 `tenant_id = chars(<19 位租户>)`。
+  它把**每条**记录（fact / metric / dsnap / IVSREP / 登录 / 审计 …）的身份都钉成那个租户，
+  现场换绑客户后数据里仍是旧身份（实测历史 `agent-metrics.jsonl` 里就有 8.6 万条错记录）。
+- 租户来源统一收敛到 **sink 标签**：`topology/sinks/defaults.toml` 的
+  `tenant_id:${WIST_TENANT_ID:unbound}`（gwlinkd 写 `WIST_TENANT_ID`）。
+- 新增门禁 `dev/tests/models-no-site-constants.test.sh`：模型里再出现 `tenant_id = chars(<数字>)`
+  （或任何 8 位以上纯数字常量）即红；并断言 `defaults.toml` 仍注入 `tenant_id` 标签 ——
+  删掉模型里那份之后，标签是唯一来源，丢了就等于所有记录都没有租户。
+- 数据面规则形状、报告落盘路径、授权模型均无变化（只少一个字段）。
+
+### 升级注意（重要）
+
+- 数据面工作根是**只补缺失、不覆盖**（容器 entrypoint 与 `dev/svc.sh` 都是 `cp -an`），
+  所以**已部署站点升级后旧 OML 仍在**。两种收尾：
+  * 站点接了 `[project_remote]`（从 Center Git Proxy 拉 `wp-rules`）：下次启动整份 `models/`
+    会被远端替换，自动干净；
+  * 没接远端：删掉工作根里的旧副本再重启，例如
+    `rm -rf data-plane-run/work/models/oml && gops run stop && gops run start`
+    （种子会在启动时重新灌入；`data/` 与 `.run/` 不受影响）。
+- 历史已写出的记录仍带旧常量，属**既有数据**，不随本版回改；要清就按站点自己的留存策略处理。
+
 ## [0.8.15-alpha] - 2026-10-31
 
 ### 变更（发布火车：网关 0.33 —— 机队上中心）

@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.24-alpha] - 2026-11-01
+
+### 组件跟版 + 初始知识库 0.8.1（流量检测落点固定）
+
+- `KNOWLEDGE_PATH` → `v0.8.1/wist-knowledge-0.8.1.tar.gz`（`catalog_version` 16 → 17）：
+  Suricata 是**自定义安装**，`linux-suricata-eve` 的来源与事实门统一为
+  `/opt/suricata/logs/eve.json`（不是发行版默认的 `/var/log/suricata`）。
+- `GATEWAY_TAG` → `v0.34.4-alpha`：网关侧把「事实门与采集来源必须是同一路径」钉进用例。
+- `WEB_TAG` / `WPARSE_TAG` / `VM_TAG` 不变；`INVESTIGATION_REPORT_DIR` 仍是 `data/out_dat`。
+
+### 升级注意
+
+- **已授权过流量检测的站点不会自动改路径**：`standing_work` 锁在展开时的 `catalog_version` 上，
+  升级后要在管理面**激活 0.8.1 知识包**并重新授权，工作才会按新路径派发。
+- 宿主上的 agentd 需 **≥ 0.18.7**（落点文档与采集用例同步）；采集逻辑本身自 0.18.5 起就只认网关派活。
+- Suricata 侧必须把 `eve-log.filename` 指到 `/opt/suricata/logs/eve.json`，并按部署契约配
+  logrotate（`delaycompress`，**不要** `copytruncate`）与目录权限（`0640` / root）。
+- 站点 `.env` 是 `localize` 生成的现场态：升级后先 `gops sys localize` 让 tag 跟上，
+  再 `gops run start`。
+
 ## [0.8.23-alpha] - 2026-11-01
 
 ### 组件跟版（命令「正在跑」与「还没被取走」分开）

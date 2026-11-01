@@ -13,7 +13,7 @@ package privilege_execution {
                 chars@unit
             ),
             symbol(LOGRAW:),
-            kvarr()\s | f_chars_in(type, [SYSCALL, EXECVE, PATH, CWD, PROCTITLE]) | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-privilege-exec)
+            kvarr()\s | f_chars_in(type, [SYSCALL, EXECVE, PATH, CWD, PROCTITLE]) | f_chars_has(family, PrivilegeExecution)
         )
     }
 
@@ -29,7 +29,7 @@ package privilege_execution {
                 chars@unit
             ),
             symbol(LOGRAW:),
-            chars:raw\0 | f_chars_has(family, PrivilegeExecution) | f_chars_has(unit, linux-privilege-exec)
+            chars:raw\0 | f_chars_has(family, PrivilegeExecution)
         )
     }
 }

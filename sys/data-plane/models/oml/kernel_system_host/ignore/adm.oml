@@ -1,0 +1,4 @@
+name : kernel_system_host/ignore
+rule : kernel_system_host/ignore
+---
+* = read();

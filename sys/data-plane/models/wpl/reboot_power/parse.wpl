@@ -13,7 +13,7 @@ package reboot_power {
                 chars@unit
             ),
             symbol(LOGRAW:),
-            chars:raw\0 | f_chars_has(family, RebootPower) | f_chars_has(unit, linux-reboot-power)
+            chars:raw\0 | f_chars_has(family, RebootPower)
         )
     }
 }

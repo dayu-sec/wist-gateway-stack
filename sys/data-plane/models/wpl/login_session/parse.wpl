@@ -18,7 +18,7 @@ package login_session {
             chars:body_clock,
             chars:body_host,
             chars:body_program\:,
-            chars:raw\0 | f_chars_has(family, LoginSession) | f_chars_has(unit, linux-auth-session)
+            chars:raw\0 | f_chars_has(family, LoginSession)
         )
     }
 
@@ -37,7 +37,7 @@ package login_session {
             time_3339:body_timestamp,
             chars:body_host,
             chars:body_program\:,
-            chars:raw\0 | f_chars_has(family, LoginSession) | f_chars_has(unit, linux-auth-session)
+            chars:raw\0 | f_chars_has(family, LoginSession)
         )
     }
 }

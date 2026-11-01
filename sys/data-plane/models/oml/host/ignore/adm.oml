@@ -1,4 +1,0 @@
-name : host/ignore
-rule : host/ignore
----
-* = read();

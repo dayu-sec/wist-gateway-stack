@@ -4,6 +4,7 @@ rule : container_workload/*
 schema = read(schema);
 agent = read(agent);
 ts = read(ts);
+occur_time = pipe read(ts) | Time::to_ts_zone(0, ms);
 seq = read(seq);
 family = read(family);
 unit = read(unit);

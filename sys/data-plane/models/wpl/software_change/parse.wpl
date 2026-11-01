@@ -13,7 +13,7 @@ package software_change {
                 chars@unit
             ),
             symbol(LOGRAW:),
-            chars:raw\0 | f_chars_has(family, SoftwareChange) | f_chars_has(unit, linux-software-change)
+            chars:raw\0 | f_chars_has(family, SoftwareChange)
         )
     }
 }

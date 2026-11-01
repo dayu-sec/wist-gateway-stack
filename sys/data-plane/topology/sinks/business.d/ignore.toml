@@ -1,6 +1,6 @@
 [sink_group]
 name = "ignore"
-oml = ["host/ignore"]
+oml = ["kernel_system_host/ignore"]
 [[sink_group.sinks]]
 name = "ignore_file"
 connect = "file_json_sink"

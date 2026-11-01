@@ -1,0 +1,32 @@
+name : kernel_system_host_audit_bprm_fcaps
+rule : kernel_system_host/kernel_system_host_audit_bprm_fcaps
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+family = read(family);
+unit = read(unit);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+type = read(type);
+msg = read(msg);
+fver = read(fver);
+fp = read(fp);
+fi = read(fi);
+fe = read(fe);
+old_pp = read(old_pp);
+old_pi = read(old_pi);
+old_pe = read(old_pe);
+old_pa = read(old_pa);
+pp = read(pp);
+pi = read(pi);
+pe = read(pe);
+pa = read(pa);
+frootid = read(frootid);

@@ -1,0 +1,489 @@
+// KernelSystemHost 主机审计与内核日志。
+#[tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
+package kernel_system_host {
+    #[tag(log_desc: "主机审计系统调用", log_type: "kernel_system_host_audit_syscall"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_syscall {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | (
+                kvarr(
+                    @type,
+                    @msg,
+                    @arch,
+                    @syscall,
+                    @success,
+                    @exit,
+                    @a0,
+                    @a1,
+                    @a2,
+                    @a3,
+                    @items,
+                    @ppid,
+                    @pid,
+                    @auid,
+                    @uid,
+                    @gid,
+                    @euid,
+                    @suid,
+                    @fsuid,
+                    @egid,
+                    @sgid,
+                    @fsgid,
+                    @tty,
+                    @ses,
+                    @comm,
+                    @exe,
+                    @subj,
+                    @key
+                )\s
+            ) | f_chars_has(type, SYSCALL) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计 curl 执行", log_type: "kernel_system_host_audit_execve_curl"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_execve_curl {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @argc,
+                @a0,
+                @a1,
+                @a2,
+                @a3,
+                @a4,
+                @a5,
+                @a6,
+                @a7,
+                @a8,
+                @a9,
+                @a10,
+                @a11,
+                @a12,
+                @a13,
+                @a14,
+                @a15
+            )\s | f_chars_has(type, EXECVE) | f_chars_has(a0, curl) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计进程执行", log_type: "kernel_system_host_audit_execve"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_execve {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @argc,
+                @a0,
+                @a1,
+                @a2,
+                @a3,
+                @a4,
+                @a5,
+                @a6,
+                @a7,
+                @a8,
+                @a9,
+                @a10,
+                @a11,
+                @a12,
+                @a13,
+                @a14,
+                @a15
+            )\s | f_chars_has(type, EXECVE) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计文件路径", log_type: "kernel_system_host_audit_path"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_path {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @item,
+                @name,
+                @inode,
+                @dev,
+                @mode,
+                @ouid,
+                @ogid,
+                @rdev,
+                @nametype,
+                @cap_fp,
+                @cap_fi,
+                @cap_fe,
+                @cap_fver,
+                @cap_frootid
+            )\s | f_chars_has(type, PATH) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计工作目录", log_type: "kernel_system_host_audit_cwd"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_cwd {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @cwd
+            )\s | f_chars_has(type, CWD) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计进程标题", log_type: "kernel_system_host_audit_proctitle"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_proctitle {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @proctitle
+            )\s | f_chars_has(type, PROCTITLE) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计登录切换", log_type: "kernel_system_host_audit_login"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_login {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                @type,
+                @msg,
+                @pid,
+                @uid,
+                @subj,
+                @old-auid:old_auid,
+                @auid,
+                @tty,
+                @old-ses:old_ses,
+                @ses,
+                @res
+            )\s | f_chars_has(type, LOGIN) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计 PAM 会话", log_type: "kernel_system_host_audit_pam"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_pam {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | chars_replace("msg=audit", "id=audit") | (
+                kvarr(
+                    @type,
+                    @id:audit_id,
+                    @pid,
+                    @uid,
+                    @auid,
+                    @ses,
+                    @subj,
+                    @msg:detail
+                )\s
+            ) | take(detail) | (
+                kvarr(
+                    @op,
+                    @grantors,
+                    @acct,
+                    @exe,
+                    @hostname,
+                    @addr,
+                    @terminal,
+                    @res
+                )\s
+            ) | f_chars_in(type, [CRED_ACQ, CRED_DISP, CRED_REFR, USER_ACCT, USER_START, USER_END, USER_LOGIN]) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计服务启停", log_type: "kernel_system_host_audit_service"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_service {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | chars_replace("msg=audit", "id=audit") | (
+                kvarr(
+                    @type,
+                    @id:audit_id,
+                    @pid,
+                    @uid,
+                    @auid,
+                    @ses,
+                    @subj,
+                    @msg:detail
+                )\s
+            ) | take(detail) | (
+                kvarr(
+                    @unit:source_unit,
+                    @comm,
+                    @exe,
+                    @hostname,
+                    @addr,
+                    @terminal,
+                    @res
+                )\s
+            ) | f_chars_in(type, [SERVICE_START, SERVICE_STOP]) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计执行文件能力", log_type: "kernel_system_host_audit_bprm_fcaps"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_bprm_fcaps {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                chars@type,
+                chars@msg,
+                chars@fver,
+                chars@fp,
+                chars@fi,
+                chars@fe,
+                chars@old_pp,
+                chars@old_pi,
+                chars@old_pe,
+                chars@old_pa,
+                chars@pp,
+                chars@pi,
+                chars@pe,
+                chars@pa,
+                chars@frootid
+            )\s | f_chars_has(type, BPRM_FCAPS) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计用户命令", log_type: "kernel_system_host_audit_user_cmd"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_user_cmd {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | chars_replace("msg=audit", "id=audit") | (
+                kvarr(
+                    chars@type,
+                    chars@id:audit_id,
+                    chars@pid,
+                    chars@uid,
+                    chars@auid,
+                    chars@ses,
+                    chars@subj,
+                    chars@msg:detail,
+                    chars@UID,
+                    chars@AUID
+                )\s
+            ) | take(detail) | (
+                kvarr(
+                    chars@cwd,
+                    chars@cmd,
+                    chars@exe,
+                    chars@terminal,
+                    chars@res
+                )\s
+            ) | f_chars_has(type, USER_CMD) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计套接字地址", log_type: "kernel_system_host_audit_sockaddr"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_sockaddr {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | (
+                symbol(type=),
+                chars:type,
+                symbol(msg=),
+                chars:msg,
+                symbol(saddr=),
+                chars:saddr,
+                symbol(SADDR=),
+                chars:SADDR\0
+            ) | f_chars_has(type, SOCKADDR) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计网络过滤配置", log_type: "kernel_system_host_audit_netfilter_cfg"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_netfilter_cfg {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                chars@type,
+                chars@msg,
+                chars@table,
+                chars@family:source_family,
+                chars@entries,
+                chars@op,
+                chars@pid,
+                chars@subj,
+                chars@comm
+            )\s | f_chars_has(type, NETFILTER_CFG) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计 BPF 程序", log_type: "kernel_system_host_audit_bpf"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_bpf {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            kvarr(
+                chars@type,
+                chars@msg,
+                chars@'prog-id':prog_id,
+                chars@op
+            )\s | f_chars_has(type, BPF) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[tag(log_desc: "主机审计网卡混杂模式", log_type: "kernel_system_host_audit_anom_promiscuous"), copy_event_parse(rule: "raw_log/raw_log")]
+    rule kernel_system_host_audit_anom_promiscuous {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            chars:audit_log\0 | chars_replace("", " ") | (
+                kvarr(
+                    chars@type,
+                chars@msg,
+                chars@dev,
+                chars@prom,
+                chars@old_prom,
+                chars@auid,
+                chars@uid,
+                chars@gid,
+                    chars@ses,
+                    chars@AUID,
+                    chars@UID,
+                    chars@GID
+                )\s
+            ) | f_chars_has(type, ANOM_PROMISCUOUS) | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+
+    #[late]
+    rule ignore {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:)
+        ),
+        not(peek_symbol(type=)),
+        (
+            chars:raw\0 | f_chars_has(family, PrivilegeExecution)
+        )
+    }
+}

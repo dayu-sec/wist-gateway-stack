@@ -1,7 +1,7 @@
 // KernelSystem 内核与系统日志。
 #[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Agent", dev_type: "主机日志", dev_name: "Wist Agent")]
 package kernel_system {
-    #[tag(log_desc: "内核与系统日志", log_type: "kernel_system_journald")]
+    #[late, tag(log_desc: "内核与系统日志", log_type: "kernel_system_journald")]
     rule kernel_system_journald {
         (
             json(
@@ -30,7 +30,7 @@ package kernel_system {
                 chars@MESSAGE:raw,
                 chars@SYSLOG_IDENTIFIER:body_program,
                 chars@__MONOTONIC_TIMESTAMP:monotonic_timestamp
-            ) | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+            ) | f_chars_has(family, KernelSystem)
         )
     }
 
@@ -49,7 +49,7 @@ package kernel_system {
             time_3339:body_timestamp,
             chars:body_host,
             chars:body_program\:,
-            chars:raw\0 | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+            chars:raw\0 | f_chars_has(family, KernelSystem)
         )
     }
 
@@ -70,7 +70,29 @@ package kernel_system {
             chars:body_clock,
             chars:body_host,
             chars:body_program\:,
-            chars:raw\0 | f_chars_has(family, KernelSystem) | f_chars_has(unit, linux-kernel-system)
+            chars:raw\0 | f_chars_has(family, KernelSystem)
+        )
+    }
+
+    #[tag(log_desc: "主机内核日志", log_type: "kernel_system_host_kernel")]
+    rule kernel_system_host_kernel {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+                chars@family,
+                chars@unit
+            ),
+            symbol(LOGRAW:),
+            json(
+                chars@_TRANSPORT:transport,
+                chars@MESSAGE:kernel_message,
+                chars@PRIORITY:log_priority,
+                chars@SYSLOG_IDENTIFIER:syslog_identifier,
+                chars@_HOSTNAME:source_host
+            ) | f_chars_has(transport, kernel) | f_chars_has(family, KernelSystem)
         )
     }
 }

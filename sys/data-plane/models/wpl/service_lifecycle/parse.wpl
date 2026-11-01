@@ -56,7 +56,7 @@ package service_lifecycle {
                 chars@MESSAGE_ID:message_id,
                 chars@TID:thread_id,
                 chars@UNIT:service_unit
-            ) | f_chars_has(family, ServiceLifecycle) | f_chars_has(unit, linux-service-lifecycle)
+            ) | f_chars_has(family, ServiceLifecycle)
         )
     }
 
@@ -72,7 +72,7 @@ package service_lifecycle {
                 chars@unit
             ),
             symbol(LOGRAW:),
-            chars:raw\0 | f_chars_has(family, ServiceLifecycle) | f_chars_has(unit, linux-service-lifecycle)
+            chars:raw\0 | f_chars_has(family, ServiceLifecycle)
         )
     }
 }

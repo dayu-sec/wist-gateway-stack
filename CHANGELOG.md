@@ -3,6 +3,34 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.18-alpha] - 2026-11-01
+
+### 变更（数据面种子对齐 wp-rules 1.1.0）
+
+- `sys/data-plane/models/{wpl,oml}` 整份换成 **wp-rules 1.1.0**（逐字节相同），并新增
+  `models/version.txt = 1.1.0` —— 种子来历从此可追溯。之前那份是**手工合并的分叉副本**
+  （拿它逐文件比对 wp-rules 任何 tag 都对不上），只吃种子的站点与拉远端规则的站点解析结果不一致。
+- **主机审计规则改名 + 补全**：`oml/host/*`（11 条）→ `oml/kernel_system_host/*`（**16 条**），
+  新增 `audit_bpf` / `audit_bprm_fcaps` / `audit_netfilter_cfg` / `audit_sockaddr` /
+  `audit_user_cmd` / `audit_anom_promiscuous`；`kernel_system/kernel_system_host_kernel` 同时到位。
+- WPL 随上游变化：容器 / 内核 / 登录等去掉 `copy_event_parse(raw_log/raw_log)`、
+  `chars@ts` → `time@ts`（wp-rules 1.0.25 / 1.0.26「补全主机日志规则 / 容器日志修复」的结论）。
+- `sinks/business.d/ignore.toml` 的 OML 名跟着改：`host/ignore` → `kernel_system_host/ignore`
+  （不改就是悬空引用，整份 sink 路由装载失败）。
+
+### 已知（上游同源问题，需在 wp-infra 修）
+
+- `wp-infra` 1.2.0（含 alpha 渠道）的 `business.d/ignore.toml` 仍写 `oml = ["host/ignore"]`，
+  与 wp-rules 1.1.0 的改名不一致 —— 用上游那份就会在 1.1.0 规则上留悬空引用。本栈种子已改，
+  上游待修（同一条改动，别两边各写一份）。
+
+### 升级注意
+
+- 工作根 `cp --update=none` **只补缺失不覆盖**，这一步**必须手工收尾**：旧的 `models/oml/host/`
+  会与新的 `kernel_system_host/` 并存（同一批规则两个名字），要整份重灌：
+  `rm -rf data-plane-run/work/models && gops run stop && gops run start`
+  （`data/` 与 `.run/` 不受影响；接了 `[project_remote]` 的站点启动时会被远端整份替换）。
+
 ## [0.8.17-alpha] - 2026-11-01
 
 ### 修复（指标序列带租户标签）

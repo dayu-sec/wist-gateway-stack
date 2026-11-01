@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.23-alpha] - 2026-11-01
+
+### 组件跟版（命令「正在跑」与「还没被取走」分开）
+
+- `GATEWAY_TAG` → `v0.34.3-alpha`、`WEB_TAG` → `v0.29.1-alpha`。
+  调查页不再把整段扫描显示成「等待认领（≤3s）」：agent 取走命令后会先回一条阶段回报，
+  网关记下认领时刻，页面改显示「调查中」，报告行提示「结果要等扫描结束」。
+  一次 `disk` 调查默认要扫两分钟，以前的文案会让人以为命令丢了。
+- 本版前端同时包含调查授权页的收口（只保留「按调查面」一个入口）。
+- `WPARSE_TAG` / `VM_TAG` 不变；`INVESTIGATION_REPORT_DIR` 仍是 `data/out_dat`。
+
+### 升级注意
+
+- **本版不含 agentd**。要让页面真的出现「调查中」，宿主上的 agentd 需另升到 **0.18.4**；
+  顺序是**先升网关、再升 agentd**（旧网关会把阶段回报当成终态，命令被提前收口）。
+- 站点 `.env` 是 `localize` 生成的现场态：升级后先 `gops sys localize` 让 tag 跟上，
+  再 `gops run start`；只改发布包不 localize 的话，容器还跑旧 tag。
+
 ## [0.8.22-alpha] - 2026-11-01
 
 ### 组件跟版（网关 0.34.2：`out_dat` 里有空文件也照样能读到调查）

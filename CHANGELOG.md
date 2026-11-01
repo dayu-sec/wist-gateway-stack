@@ -3,6 +3,33 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.19-alpha] - 2026-11-01
+
+### 变更（ignore sink 改用通配引用）
+
+- `business.d/ignore.toml`：`oml = ["kernel_system_host/ignore"]` → **`oml = ["*/ignore"]`**。
+  ignore 是「按规则名后缀收”的一类，不该钉死目录前缀：wp-rules 已把主机审计从 `host/*`
+  改名成 `kernel_system_host/*` 一次，以后再加新目录也不用再改 sink。实测通配不会抢记录：
+  精确组（metrics / facts / dsnap / ivsrep）与兑底组 `["*"]` 的分配与改前完全一致。
+- 新增门禁 `dev/tests/sink-oml-refs.test.sh`：sink 引用的每个 OML 名必须**真实存在**（或被通配命中）。
+
+### 更正（0.8.18 的说法有误）
+
+- 0.8.18 里写「引用不存在的 OML 名 → 整份 sink 路由装载失败」是**错的**。实测（wparse 0.35.2）：
+  悬空引用**照样装载成功、进程正常出数**，只是那个分组**永远收不到记录**，记录静默改投兑底 sink
+  `gateway-logs`。比报错更难查，所以这次直接加门禁拦住（没依错就报的想法）。
+
+### 上游建议（wp-infra）
+
+- `wp-infra` 1.2.0（含 alpha）的 `business.d/ignore.toml` 仍是 `oml = ["host/ignore"]`。
+  修的时候建议也用 `*/ignore` 而不是钉死 `kernel_system_host/ignore` —— 同一条改名疼一次就够了。
+
+### 升级注意
+
+- 改的是 `topology/`，工作根 `cp --update=none` 不会覆盖旧文件。只改这一个 sink 时可直接覆盖：
+  `cp sys/data-plane/topology/sinks/business.d/ignore.toml data-plane-run/work/topology/sinks/business.d/`
+  再重启 wparse（或直接 `rm -rf data-plane-run/work/topology && gops run stop && gops run start`）。
+
 ## [0.8.18-alpha] - 2026-11-01
 
 ### 变更（数据面种子对齐 wp-rules 1.1.0）

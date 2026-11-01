@@ -36,6 +36,10 @@ metric = object {
     unit = read(metric_unit);
     mount = read(metric_mount);
     fstype = read(metric_fstype);
+    // 租户标签：来自 wparse 的全局 tag（gwlinkd 写进工作根 `.env` 的
+    // `WP_GLOBAL_TAGS=tenant_id=...`），**不是**模型常量 —— VM 靠它按租户隔离序列。
+    // 未绑定租户时读不到，该键整条不写（与空 mount / fstype 同口径，不会变成空字符串）。
+    tenant_id = read(tenant_id);
 };
 values = read(metric_values);
 timestamps = read(metric_timestamps);

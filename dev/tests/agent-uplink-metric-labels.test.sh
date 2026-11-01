@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # 回归测试：`agent_uplink/metrics_frame` 透传逐挂载点标签，且旧帧（不带标签）不受影响。
 #
-# 钉两件事：
+# 钉三件事：
 #   1. `metric.mount` / `metric.fstype` 能穿过 WPL + OML，落进 VM JSON line；
-#   2. 非文件系统指标没有这两个字段时，OML 不写空标签。
+#   2. 非文件系统指标没有这两个字段时，OML 不写空标签；
+#   3. `metric.tenant_id` 只认**网关全局 tag**（gwlinkd 写进工作根 `.env` 的
+#      `WP_GLOBAL_TAGS=tenant_id=...`）：未绑定时**不写**这个键（不能是空串、也不能是模型常量）；
+#      绑定后它就是 VM 上的租户标签 —— VM 靠它按租户隔离序列。
 #
 # 依赖 `wparse` 二进制（默认 dev/bin/wparse，可用 WPARSE 覆盖）。找不到时跳过，不阻断开发机。
 #
@@ -103,6 +106,13 @@ chk() { if [[ "$2" == "$3" ]]; then echo "  [OK]   $1"; else echo "  [FAIL] $1�
 has() { case "$2" in *"$1"*) echo "  [OK]   $3" ;; *) echo "  [FAIL] $3：$2"; fail=1 ;; esac; }
 hasnt() { case "$2" in *"$1"*) echo "  [FAIL] $3：$2"; fail=1 ;; *) echo "  [OK]   $3" ;; esac; }
 
+out_json() { python3 -c '
+import json, sys
+for line in open(sys.argv[1]):
+    rec = json.loads(line)
+    print(rec["metric"]["__name__"], json.dumps(rec.get("metric"), ensure_ascii=False))
+' "$1"; }
+
 fs_line="$(grep 'system.filesystem.usage' "${OUT}")"
 load_line="$(grep 'system.load_average.1m' "${OUT}")"
 
@@ -110,6 +120,18 @@ has '"mount":"/var"' "${fs_line}" "文件系统指标带 mount 标签"
 has '"fstype":"xfs"' "${fs_line}" "文件系统指标带 fstype 标签"
 hasnt '"mount"' "${load_line}" "非文件系统指标不写空 mount"
 hasnt '"fstype"' "${load_line}" "非文件系统指标不写空 fstype"
+
+# 3) 未绑定租户（没有 WP_GLOBAL_TAGS）：metric 里**一条** tenant_id 都不该有 ——
+#    写空串会让 VM 多出一条 tenant_id="" 的序列，比没有更糟。
+hasnt '"tenant_id"' "$(out_json "${OUT}")" "未绑定租户时 metric 不写 tenant_id"
+
+# 4) 绑定后：gwlinkd 把身份写进工作根 `.env` 的 WP_GLOBAL_TAGS，OML 读全局 tag →
+#    `metric.tenant_id` 必须就是那个值（VM 的租户标签就是从这里来的）。
+printf 'WP_GLOBAL_TAGS=tenant_id=1000000000000000001,wist-gw_id=X4/inst-1\nWIST_TENANT_ID=1000000000000000001\n' \
+  > "${WORK}/.env"
+rm -rf "${WORK}/data/out_dat" "${WORK}/.run"
+"${WPARSE}" batch --work-root "${WORK}" >/dev/null
+has '"tenant_id": "1000000000000000001"' "$(out_json "${OUT}")" "绑定后 metric.tenant_id 来自 WP_GLOBAL_TAGS"
 
 if [[ "${fail}" -ne 0 ]]; then
   echo

@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.17-alpha] - 2026-11-01
+
+### 修复（指标序列带租户标签）
+
+- `agent_uplink_metrics_frame` 的 `metric` 对象补上 `tenant_id = read(tenant_id)`，与
+  `wp-rules` 1.1.0 同口径：VictoriaMetrics 只把 `metric` 对象里的键当标签，扁平 `metric_*`
+  字段里的租户进不了序列 —— 按租户查指标时这些序列一直是「没有租户」。
+- 取值来自**全局 tag**（gwlinkd 写进工作根 `.env` 的 `WP_GLOBAL_TAGS=tenant_id=...`），
+  **不是**模型常量；未绑定租户时该键**整条不写**（实测：空串会给 VM 造出 `tenant_id=""`
+  的序列，比没有更糟），绑定后 `metric.tenant_id` 就是该客户 ID。
+- 门禁 `dev/tests/agent-uplink-metric-labels.test.sh` 扩到 6 项：新增「未绑定不写 tenant_id」与
+  「绑定后 tenant_id 来自 WP_GLOBAL_TAGS」—— 两种状态在同一条用例里各跑一次 batch。
+
+### 升级注意
+
+- 与 0.8.16 同一条限制：数据面工作根 `cp -an` 只补缺失不覆盖，已部署站点升级后旧 OML 仍在
+  （接了 `[project_remote]` 的会被远端整份 `models/` 替换）。要立刻生效：
+  `rm -rf data-plane-run/work/models/oml && gops run stop && gops run start`。
+- 仅多一个 VM 标签；文件 sink 形状、报告落盘路径、授权模型均无变化。
+
 ## [0.8.16-alpha] - 2026-11-01
 
 ### 修复（数据面：记录被钉死成某个租户）

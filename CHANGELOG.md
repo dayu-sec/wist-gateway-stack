@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.21-alpha] - 2026-11-01
+
+### 变更（调查报告改落 `out_dat`，不再单独目录）
+
+- `INVESTIGATION_REPORT_DIR` 默认值 `data/ivsrep` → **`data/out_dat`**：数据面
+  `agent_ivsrep` sink 不再写 `base`（wp-infra-alpha 1.3.0），报告与 raw / parsed / ignore
+  等输出同目录；网关 `[investigations] report_dir` 由同一个变量渲染。
+- `out_dat` 是混放目录：网关读取端改为「报告文件优先」排序（组件 `GATEWAY_TAG` →
+  `v0.34.1-alpha`）。否则 `agent-ivsrep.jsonl` 会在 32 文件 / 8 MiB 预算下被日志 JSON
+  挤掉，调查页永远「报告未到」。
+- 离线部署的种子 `sys/data-plane/.../agent_ivsrep.toml` 同步去掉 `base`；回归测试
+  `dev/tests/agent-uplink-ivsrep.test.sh` 改按 `out_dat` 断言。
+
+### 组件跟版
+
+- `GATEWAY_TAG` → `v0.34.1-alpha`（报告优先级修复）。
+- `WEB_TAG` 保持 `v0.28.0-alpha`；配套 wp-infra-alpha `v1.3.0-alpha`（落点变更）。
+
+### 升级注意
+
+- 升级后报告从 `<data>/out_dat/agent-ivsrep.jsonl` 读；旧目录 `data/ivsrep/` 里的历史报告
+  不再显示（文件不会删，需要就手工并进 `out_dat`）。
+- wp-infra 与网关要**一起升**：只升一边时引擎照常出数、调查页空。
+
 ## [0.8.20-alpha] - 2026-11-01
 
 ### 新增（调查报告目录变成栈变量）

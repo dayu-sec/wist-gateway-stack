@@ -3,6 +3,32 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.20-alpha] - 2026-11-01
+
+### 新增（调查报告目录变成栈变量）
+
+- 新增系统变量 `INVESTIGATION_REPORT_DIR`（缺省 `data/ivsrep`，**相对 wparse 工作根**，
+  即网关容器里的 `/data-plane`）。`scripts/init-gateway.sh` 把它写进
+  `wist-gateway.value.json`，模板渲染成网关的 `[investigations] report_dir`。
+- 缺省值与旧行为完全一致（`<work_dir>/data/ivsrep`），旧部署不需要改配置；
+  要指向别处就在 `values/value.yml` 覆盖后 `gops sys localize`。
+- **两侧必须同时改**：数据面 sink 的 file `base` 决定写哪里，网关 `report_dir` 决定读哪里。
+  在线部署（`[project_remote]` 拉 wp-infra）时以 **wp-infra 的 `agent_ivsrep.toml`** 为准；
+  离线部署还要同步改 `sys/data-plane/topology/sinks/business.d/agent_ivsrep.toml`。
+  这一点已写进 `vars.yml` 的变量注释与 README，避免“只改一边、调查页永远没报告”。
+
+### 组件跟版
+
+- `GATEWAY_TAG` → `v0.34.0-alpha`：调查授权**默认全关**（与采集面一致）、`[investigations] report_dir` 可配。
+- `WEB_TAG` → `v0.28.0-alpha`：调查授权页可开启/取消（按差量保存）、调查页补「未授权任何面」原因。
+
+### 升级注意
+
+- 升级后**没有授权行的机器将无法发起调查**（403 `investigation_not_granted`）：
+  在「授权 → 调查授权」里勾选保存后才下发。这是刻意的安全默认。
+- 本版栈第一次渲染 `[investigations] report_dir`；旧网关会忽略该键（并且不能识别默认全关），
+  所以**网关镜像与栈包要一起升**。
+
 ## [0.8.19-alpha] - 2026-11-01
 
 ### 变更（ignore sink 改用通配引用）

@@ -3,7 +3,7 @@
 #
 # 钉三件事：
 #   1. `wp-rules` 的 WPL 认 ` IVSREP: ` 标记、OML 产出 `agent_uplink_ivsrep_frame` 记录；
-#   2. `wp-infra` 的 `agent_ivsrep` sink 确实落在 `./data/ivsrep/`（网关 `REPORT_DIR` 就按它推导）；
+#   2. `wp-infra` 的 `agent_ivsrep` sink 确实落在 `./data/ivsrep/`（网关缺省就按它推导）；
 #   3. 信封字段（agent / seq / ts）与正文 `body` 原样保留（body 是带 `command_id` 的契约对象）。
 #
 # 模型与 sink 都从**上游仓**（`wp-rules` / `wp-infra`）覆盖进来再跑 —— 验的是要发布的那两份，
@@ -103,7 +103,8 @@ EOF
 
 "${WPARSE}" batch --work-root "${WORK}" >/dev/null
 
-# 网关按 `<work_dir>/data/ivsrep` 读（`api/investigations.rs` 的 REPORT_DIR）——
+# 网关按 `<work_dir>/data/ivsrep` 读（`api/investigations.rs` 的 DEFAULT_REPORT_DIR，
+# 可用 `[investigations] report_dir` 覆盖）——
 # 路径错了这个测试必须红，否则现场表现是“agentd 说发了、页面永远空”。
 OUT="${WORK}/data/ivsrep/agent-ivsrep.jsonl"
 [[ -f "${OUT}" ]] || { echo "missing report sink output: ${OUT}" >&2; exit 1; }

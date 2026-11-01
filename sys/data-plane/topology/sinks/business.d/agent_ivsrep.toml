@@ -7,7 +7,8 @@
 #   wparse 工作根 ./data/ivsrep/*.jsonl
 #     → 宿主 data-plane-run/data/ivsrep/
 #     → 网关容器 /data-plane/data/ivsrep/（compose 只读挂载整棵 data/）
-#     → 网关 `[data_plane] work_dir` + `data/ivsrep`（`api/investigations.rs` 的 `REPORT_DIR`）
+#     → 网关报告目录：缺省 `[data_plane] work_dir` + `data/ivsrep`
+#       （`api/investigations.rs` 的 `DEFAULT_REPORT_DIR`；可用 `[investigations] report_dir` 覆盖）
 #
 # 一行 = 一条记录：帧信封（schema/agent/ts/seq）+ `body`（报告对象原样字符串，带 `command_id`）。
 # 网关按 `command_id` 去重、按**信封里的 `agent`** 归属（与内部接入端点同一条纪律）。

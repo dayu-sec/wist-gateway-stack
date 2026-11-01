@@ -23,7 +23,7 @@
 #   <栈根>/identity/gateway/private/gateway-ca.key.pem          # 网关 CA 私钥（**务必备份**）
 #   <栈根>/identity/gateway/{public,private}/agent-ca.*.pem     # agent CA（签 agent 客户端证书；私钥务必备份）
 #   <栈根>/identity/gateway/{public,private}/admin-tls.*.pem    # 网关叶证书（CA 签；可轮换）
-#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（url / 验签公钥）
+#   <dir>/wist-gateway.value.json                           # 渲染模板用的值（url / 报告目录 / 验签公钥）
 #   <栈根>/.wist/sec-value.yml                                # 密钥文件：admin token（网关 `${SEC_ADMIN_TOKEN}` 的来源）
 #
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
@@ -39,6 +39,9 @@
 #   VICTORIA_METRICS_URL 网关查询观测后端的地址（写进 value.json，供模板渲染 victoria_metrics_url）。
 #                       缺省 http://victoria-metrics:8428（发布态 = compose 服务名）。开发态
 #                       （网关跑在宿主进程）要改成宿主可达地址，如 http://127.0.0.1:18429。
+#   INVESTIGATION_REPORT_DIR  一次性调查报告目录（写进 value.json，供模板渲染 report_dir）。
+#                       相对 = 相对网关的 [data_plane] work_dir（`/data-plane`）；缺省 data/ivsrep。
+#                       必须与数据面 sink 的 `base` 一致（在线部署以 wp-infra 为准）。
 #   CERT_DAYS           叶证书有效期天数（默认 397）
 #   CA_DAYS             CA 有效期天数（默认 3650）
 #   GATEWAY_CA_CRT / GATEWAY_CA_KEY   复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
@@ -75,6 +78,9 @@ CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
 # 网关查询观测后端的地址：随运行形态（容器 / 宿主进程）而变，故进渲染值而非写死模板。
 VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
+# 一次性调查报告目录：与数据面 sink 的 base 同一份路径（相对 wparse 工作根）。
+# 写进渲染值是为了让网关可覆盖，而不是在模板里再写一份字面量。
+REPORT_DIR_VALUE="${INVESTIGATION_REPORT_DIR:-data/ivsrep}"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
 # python3 也是硬依赖（admin token / 值文件都用它）：早说清楚，别等到第 226 行才以 127 死掉。
@@ -244,7 +250,7 @@ print("  已在密钥文件写入 admin_token：", path)
 PY
 chmod 600 "$SEC_FILE"
 
-# ④ 渲染值文件（public_base_url / victoria_metrics_url / 验签公钥）——**不含 admin token**。
+# ④ 渲染值文件（public_base_url / victoria_metrics_url / report_dir / 验签公钥）——**不含 admin token**。
 #    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变、public_base_url
 #    随 WEB_DOMAIN 而变，两项都**每轮对齐到当前值**，免得「复用已有 value.json」把错值一直
 #    带进渲染结果（症状：数据采集页 502；或脚本拿占位域名去 POST）。
@@ -256,7 +262,8 @@ if [[ ! -f "$VALUE_JSON" ]]; then
   cat >"$VALUE_JSON" <<EOF
 {
   "public_base_url": "https://${domain}",
-  "victoria_metrics_url": "${VM_URL}"
+  "victoria_metrics_url": "${VM_URL}",
+  "investigation_report_dir": "${REPORT_DIR_VALUE}"
 }
 EOF
   chmod 600 "$VALUE_JSON"
@@ -266,10 +273,15 @@ else
     echo "需要 python3 才能更新 ${VALUE_JSON}" >&2
     exit 1
   }
-  python3 - "$VALUE_JSON" "$VM_URL" "$domain" <<'PY'
+  python3 - "$VALUE_JSON" "$VM_URL" "$domain" "$REPORT_DIR_VALUE" <<'PY'
 import json, os, sys, tempfile
 
-path, vm_url, domain = sys.argv[1], sys.argv[2], sys.argv[3].strip()
+path, vm_url, domain, report_dir = (
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3].strip(),
+    sys.argv[4].strip(),
+)
 with open(path) as handle:
     value = json.load(handle)
 # admin token 已迁到密钥文件（`.wist/sec-value.yml`）：就地从 value.json 里清掉。
@@ -277,6 +289,10 @@ changed = "admin_api_token" in value
 value.pop("admin_api_token", None)
 if value.get("victoria_metrics_url", "") != vm_url:
     value["victoria_metrics_url"] = vm_url
+    changed = True
+# 报告目录也是**派生值**（随变量 / 现场配置），每轮对齐 —— 否则改了变量仍旧渲染旧路径。
+if report_dir and value.get("investigation_report_dir") != report_dir:
+    value["investigation_report_dir"] = report_dir
     changed = True
 # public_base_url 同样是**派生值**（host = WEB_DOMAIN）：显式给了 WEB_DOMAIN 就对齐。
 # 以前只在新建时写，域名一改就永远停在旧值 —— 典型症状是脚本拿着 `gw.example.com`

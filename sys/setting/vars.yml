@@ -26,9 +26,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.33.0-alpha
+    value: v0.34.0-alpha
   - name: WEB_TAG
-    value: v0.27.0-alpha
+    value: v0.28.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.154.0
@@ -115,6 +115,21 @@ system:
   # 之后 wparse 的 models/conf/topology/connectors 都在这里被 Git 同步更新。
   - name: WPARSE_RUN_WORK
     value: ./data-plane-run/work
+
+  # 一次性调查报告目录（**相对 wparse 工作根**，即网关容器里的 `/data-plane`）。
+  #
+  # 同一个值渲染两侧，缺一不可：
+  #   · 网关：`[investigations] report_dir`（模板渲染进 wist-gateway.toml）；
+  #   · 数据面：`topology/sinks/business.d/agent_ivsrep.toml` 的 file sink `base`。
+  #
+  # ⚠ 在线部署（`[project_remote]` 从 Center Git Proxy 拉 wp-infra）时，sink 由
+  #   **wp-infra 的 agent_ivsrep.toml** 决定（当前 `base = "./data/ivsrep/"`）：
+  #   那边改了 base，这里必须同步改；离线部署（走 sys/data-plane 种子）同理，
+  #   要同步改 `sys/data-plane/topology/sinks/business.d/agent_ivsrep.toml`。
+  #   只改一边的现场表现是「agentd 说发了、调查页一帧报告都没有」。
+  # 写绝对路径也支持（网关直接用），但那需要自己在 compose 里给网关加只读挂载。
+  - name: INVESTIGATION_REPORT_DIR
+    value: data/ivsrep
   # Gateway 拉取规则仓库的地址（Center Git Proxy，**Gateway 主机视角**）。
   # 留空 = project_remote 关闭；现场在 values/ 里按 Center 实际可达地址覆盖。
   - name: WPARSE_PROJECT_MODELS_REPO

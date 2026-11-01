@@ -6,9 +6,9 @@ system:
 - name: VM_SPC
   value: quay.io/victoriametrics
 - name: GATEWAY_TAG
-  value: v0.33.0-alpha
+  value: v0.34.0-alpha
 - name: WEB_TAG
-  value: v0.27.0-alpha
+  value: v0.28.0-alpha
 - name: VM_TAG
   value: v1.154.0
 - name: WPARSE_TAG
@@ -47,6 +47,8 @@ system:
   value: ./data-plane-run/.run
 - name: WPARSE_RUN_WORK
   value: ./data-plane-run/work
+- name: INVESTIGATION_REPORT_DIR
+  value: data/ivsrep
 - name: WPARSE_PROJECT_MODELS_REPO
   value: ''
 - name: WPARSE_PROJECT_INFRA_REPO

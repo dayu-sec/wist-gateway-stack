@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.15-alpha] - 2026-10-31
+
+### 变更（发布火车：网关 0.33 —— 机队上中心）
+
+- `GATEWAY_TAG` → **`v0.33.0-alpha`**：新增环回「Agent 明细」面
+  `GET /api/v1/gateway/agents`（仅本机调用，供宿主侧 gwlinkd 拉取后 mTLS 转报中心），
+  机队投影带 `node_id` / `hostname` / `ip_addresses`。
+- **需要一起升级的组件**（不在本包内）：
+  * `wist-gwlinkd` ≥ **`0.19.0-alpha`**（60s 拉取并转报 `POST /api/v1/gateway/agents/status`）；
+  * `wist-center` ≥ **`0.27.0-alpha`**（`agent_status` 三列，启动自动补列）；
+  * `wist-center-web` ≥ **`0.23.0-alpha`**（Agent 卡片显示 hostname / IP）。
+- 升级顺序：**center → 网关 → gwlinkd**。反了只是暂时看不到机队数据，不会报错。
+- 数据面规则、报告落盘路径、授权模型均无变化。
+
 ## [0.8.14-alpha] - 2026-10-31
 
 ### 变更（发布火车：网关 0.32 + 前端 0.27）

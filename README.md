@@ -66,11 +66,14 @@
 > （`*.log` / `*.json` / `*.jsonl` 等）。输出目录不在配置浏览白名单里，走独立的
 > 输出 tail 接口（仍是只读 + 白名单 + 禁符号链接）。
 >
-> **一次性调查报告目录**（`INVESTIGATION_REPORT_DIR`，缺省 `data/ivsrep`）：
-> 同一个值渲染两侧 —— 网关 `[investigations] report_dir`（相对 `[data_plane] work_dir`）与
-> 数据面 sink 的 file `base`。**在线部署以 wp-infra 的 `agent_ivsrep.toml` 为准**：那边改了
-> `base`，就要把本变量改成同一个值（`values/value.yml` 里覆盖 → `gops sys localize`）；
+> **一次性调查报告目录**（`INVESTIGATION_REPORT_DIR`，缺省 `data/out_dat`）：
+> 只渲染网关的 `[investigations] report_dir`。数据面**不再单独开目录**：
+> `agent_ivsrep.toml` 不写 `base`，报告跟其它输出一起落连接器的默认 `./data/out_dat/`
+> （与 raw / parsed / ignore 同目录）。
+> **两侧必须同步**：换回单独目录时 wp-infra 要把 `base` 加回去，并把这个变量一起改；
 > 只改一边的现场表现是「agentd 说发了、调查页一帧报告都没有」。
+> `out_dat` 是混放目录，网关读取端按「报告文件优先」排序（网关 ≥ `0.34.1-alpha`），
+> 否则报告会被日志 JSON 挤掉文件数 / 字节预算。
 >
 > **单实例保障**（同一 work root 只能一个引擎；引擎自身没有这层保护）：容器 entrypoint 先用
 > `flock --verbose -n -E 75 -F /data/.run/.wparse.lock` 持锁，再把引擎交给 PID 1（`-F` 不 fork，所以

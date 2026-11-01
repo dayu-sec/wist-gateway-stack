@@ -3,12 +3,15 @@
 # 与 agent-facts（事实摘要）/ agent-dsnap（原文快照）分开：报告是**按命令的一次性产物**，
 # 消费者是网关管理面（「主机 → 调查」页），不是资产目录、也不是日志流水。
 #
-# 落点约定（**网关侧的读取路径由它推导**，两侧不能各写一份）：
-#   wparse 工作根 ./data/ivsrep/*.jsonl
-#     → 宿主 data-plane-run/data/ivsrep/
-#     → 网关容器 /data-plane/data/ivsrep/（compose 只读挂载整棵 data/）
-#     → 网关报告目录：缺省 `[data_plane] work_dir` + `data/ivsrep`
-#       （`api/investigations.rs` 的 `DEFAULT_REPORT_DIR`；可用 `[investigations] report_dir` 覆盖）
+# 落点约定：**不单独开目录** —— 报告与其它输出一起落在文件 sink 的默认目录：
+#   wparse 工作根 ./data/out_dat/agent-ivsrep.jsonl（连接器默认 base，本分组**不覆写**）
+#     → 宿主 data-plane-run/data/out_dat/
+#     → 网关容器 /data-plane/data/out_dat/（compose 只读挂载整棵 data/）
+#     → 网关 `[investigations] report_dir`（stack：`INVESTIGATION_REPORT_DIR`）= `data/out_dat`
+#
+# ⚠ 两侧必须同步：sink 改落点，网关的 `report_dir` 也要改；对不上时引擎照常出数、
+#   但「主机 → 调查」页永远是空的。`out_dat` 是混放目录（raw / parsed / ignore 等日志 JSON
+#   也在里面），网关读取端按「报告文件优先」排序（网关 ≥ 0.34.1-alpha）。
 #
 # 一行 = 一条记录：帧信封（schema/agent/ts/seq）+ `body`（报告对象原样字符串，带 `command_id`）。
 # 网关按 `command_id` 去重、按**信封里的 `agent`** 归属（与内部接入端点同一条纪律）。
@@ -27,7 +30,6 @@ connect = "file_json_sink"
 tags = ["sink:json"]
 
 [sink_group.sinks.params]
-base = "./data/ivsrep/"
 file = "agent-ivsrep.jsonl"
 # 立即落盘（`sync = true`）：报告是**按命令的一次性产物**，管理面每 3s 轮询一次目录，
 # 缓冲住会让页面停在「报告未到」——那是出事时最误导人的状态。

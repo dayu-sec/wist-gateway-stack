@@ -26,7 +26,7 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.34.0-alpha
+    value: v0.34.1-alpha
   - name: WEB_TAG
     value: v0.28.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
@@ -118,18 +118,18 @@ system:
 
   # 一次性调查报告目录（**相对 wparse 工作根**，即网关容器里的 `/data-plane`）。
   #
-  # 同一个值渲染两侧，缺一不可：
-  #   · 网关：`[investigations] report_dir`（模板渲染进 wist-gateway.toml）；
-  #   · 数据面：`topology/sinks/business.d/agent_ivsrep.toml` 的 file sink `base`。
+  # 只渲染网关的 `[investigations] report_dir`；**写入侧不再单独开目录**：
+  # 数据面 `agent_ivsrep.toml` 不写 `base`，报告跟其它输出一起落连接器默认的
+  # `./data/out_dat/`（与 raw / parsed / ignore 同目录）。
   #
-  # ⚠ 在线部署（`[project_remote]` 从 Center Git Proxy 拉 wp-infra）时，sink 由
-  #   **wp-infra 的 agent_ivsrep.toml** 决定（当前 `base = "./data/ivsrep/"`）：
-  #   那边改了 base，这里必须同步改；离线部署（走 sys/data-plane 种子）同理，
-  #   要同步改 `sys/data-plane/topology/sinks/business.d/agent_ivsrep.toml`。
+  # ⚠ 默认值改不得：它必须与 wp-infra（alpha 1.3.0+）的落点一致。
+  #   换回单独目录（`data/ivsrep`）= wp-infra 要把 `base` 加回去，两侧同时改；
   #   只改一边的现场表现是「agentd 说发了、调查页一帧报告都没有」。
+  # ⚠ `out_dat` 是混放目录：网关读取端按「报告文件优先」排序（网关 ≥ 0.34.1-alpha），
+  #   否则报告会被日志 JSON 挤掉文件数 / 字节预算。
   # 写绝对路径也支持（网关直接用），但那需要自己在 compose 里给网关加只读挂载。
   - name: INVESTIGATION_REPORT_DIR
-    value: data/ivsrep
+    value: data/out_dat
   # Gateway 拉取规则仓库的地址（Center Git Proxy，**Gateway 主机视角**）。
   # 留空 = project_remote 关闭；现场在 values/ 里按 Center 实际可达地址覆盖。
   - name: WPARSE_PROJECT_MODELS_REPO

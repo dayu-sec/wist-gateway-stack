@@ -40,8 +40,8 @@
 #                       缺省 http://victoria-metrics:8428（发布态 = compose 服务名）。开发态
 #                       （网关跑在宿主进程）要改成宿主可达地址，如 http://127.0.0.1:18429。
 #   INVESTIGATION_REPORT_DIR  一次性调查报告目录（写进 value.json，供模板渲染 report_dir）。
-#                       相对 = 相对网关的 [data_plane] work_dir（`/data-plane`）；缺省 data/ivsrep。
-#                       必须与数据面 sink 的 `base` 一致（在线部署以 wp-infra 为准）。
+#                       相对 = 相对网关的 [data_plane] work_dir（`/data-plane`）；缺省 data/out_dat。
+#                       必须与数据面 sink 的落点一致（alpha 通道：out_dat，sink 不写 base）。
 #   CERT_DAYS           叶证书有效期天数（默认 397）
 #   CA_DAYS             CA 有效期天数（默认 3650）
 #   GATEWAY_CA_CRT / GATEWAY_CA_KEY   复用**外部 CA**（两者都提供才生效；用于既有 CA 或 KMS/HSM 导出的 CA）
@@ -78,9 +78,9 @@ CERT_DAYS="${CERT_DAYS:-397}"
 CA_DAYS="${CA_DAYS:-3650}"
 # 网关查询观测后端的地址：随运行形态（容器 / 宿主进程）而变，故进渲染值而非写死模板。
 VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
-# 一次性调查报告目录：与数据面 sink 的 base 同一份路径（相对 wparse 工作根）。
+# 一次性调查报告目录：与数据面 sink 的落点同一份路径（相对 wparse 工作根）。
 # 写进渲染值是为了让网关可覆盖，而不是在模板里再写一份字面量。
-REPORT_DIR_VALUE="${INVESTIGATION_REPORT_DIR:-data/ivsrep}"
+REPORT_DIR_VALUE="${INVESTIGATION_REPORT_DIR:-data/out_dat}"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
 # python3 也是硬依赖（admin token / 值文件都用它）：早说清楚，别等到第 226 行才以 127 死掉。

@@ -28,9 +28,9 @@
 #                         （如 http://127.0.0.1:18429）。默认值在 sys/setting/vars.yml 的
 #                         VICTORIA_METRICS_URL。值取自 scripts/init-gateway.sh 写的渲染值。
 #   investigation_report_dir  一次性调查报告目录。相对 = 相对 [data_plane] work_dir
-#                         （容器里是 `/data-plane`），默认 `data/ivsrep`。必须与数据面
-#                         sink 的 `base` 一致（在线部署以 wp-infra 的 agent_ivsrep.toml 为准）；
-#                         空/没渲染 = 用网关内置默认（同一个路径），不会把调查页面弄坏。
+#                         （容器里是 `/data-plane`），默认 `data/out_dat`（数据面 sink 不写 base，
+#                         报告与其它输出同目录）。与 wp-infra 的落点必须一致；
+#                         空/没渲染 = 用网关内置默认（`data/ivsrep`，旧布局）。
 #
 # 管理台/管理 API 的 Bearer token **不在这里渲染成明文**：配置里写 `${SEC_ADMIN_TOKEN}`，
 # 由网关加载时从密钥文件解析（`WIST_GATEWAY_SEC_FILE` 指向的 `.wist/sec-value.yml`，键 `admin_token`）。
@@ -95,7 +95,8 @@ source_dir = "knowledge/initial"
 #
 # agentd 只保证「能跑、只读、有界」；「谁允许在这台机器上读什么」是控制面的事：
 #   · report_dir               报告目录（相对 [data_plane] work_dir，也可写绝对路径）；**必须与数据面
-#                              sink 的 base 一致**（在线部署以 wp-infra 的 agent_ivsrep.toml 为准）
+#                              sink 的落点一致**（alpha：`data/out_dat`，sink 不写 base；
+#                              `out_dat` 是混放目录，需网关 ≥ 0.34.1-alpha 的报告优先排序）
 #   · allowed_topics           允许触发的面（与内置词表取交集；省略 = 全部，`[]` = 一个都不许）
 #   · max_per_agent_per_hour   每台 agent 每小时次数（`0` = 不限）—— 拦的是连点/脚本误触
 #   · report_retention_days    报告在管理面的可见天数（`0` = 不限）；**只过滤不删文件**

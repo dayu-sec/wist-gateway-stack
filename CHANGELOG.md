@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.22-alpha] - 2026-11-01
+
+### 组件跟版（网关 0.34.2：`out_dat` 里有空文件也照样能读到调查）
+
+- `GATEWAY_TAG` → `v0.34.2-alpha`。在 0.34.1 的「报告文件优先排序」之上，修掉了：
+  `out_dat` 里只要有一个 0 字节的 JSON（wparse 启动时建的 `ignore.json` / `error.json` 占位），
+  读取端就会把它当成「预算用完」并**提前结束扫描** —— 排在它后面的 `agent-ivsrep.jsonl`
+  一份都读不到，页面永远「报告目录里还没有这台主机的报告」。
+- `WEB_TAG` / `WPARSE_TAG` / `VM_TAG` 不变；`INVESTIGATION_REPORT_DIR` 仍是 `data/out_dat`。
+
+### 升级注意
+
+- 站点 `.env` 是 `localize` 生成的现场态：升级后先 `gops sys localize` 让 `GATEWAY_TAG` 跟上，
+  再 `gops run start`；只改发布包不 localize 的话，容器还跑旧 tag。
+
 ## [0.8.21-alpha] - 2026-11-01
 
 ### 变更（调查报告改落 `out_dat`，不再单独目录）

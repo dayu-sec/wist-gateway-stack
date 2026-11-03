@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.29-alpha] - 2026-11-03
+
+### 组件跟版（前端 0.31.0）
+
+- `WEB_TAG` → `v0.31.0-alpha`：指标标签页新增「**重新下发**」（配套网关 0.39 的刷新接口）；
+  知识库页头新增「更新知识库」入口（出厂初始内容 / 空载时还有引导条）；
+  Agent 五页（主机指标 / 采集工作 / 用途 / 指标标签 / 一次性调查）共用一条 tab 导航。
+- `GATEWAY_TAG` / `WPARSE_TAG` / `VM_TAG` / `KNOWLEDGE_PATH` 不变。
+
+### 升级注意
+
+- 「重新下发」需要网关 ≥ `0.39.0-alpha`（本栈上一版已跟到，无需额外操作）。
+- 升级后先 `gops sys localize`，再 `gops run start`（浏览器可能需强刷以拿到新前端资源）。
+
 ## [0.8.28-alpha] - 2026-11-03
 
 ### 组件跟版（网关 0.39.0）

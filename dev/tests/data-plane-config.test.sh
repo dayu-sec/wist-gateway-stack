@@ -76,9 +76,15 @@ for name in gateway-logs gateway-raw-logs agent-facts agent-dsnap agent-metrics 
   fi
 done
 
-# 报告目录必须是 `data/ivsrep`（网关按 `<work_dir>/data/ivsrep` 推导，改了这条要同时改网关）。
-if ! grep -qs 'base = "./data/ivsrep/"' "${WORK}/topology/sinks/business.d/agent_ivsrep.toml"; then
-  echo '[FAIL] agent_ivsrep sink 的落点不是 ./data/ivsrep/' >&2
+# 报告落点必须是**连接器默认目录**（`./data/out_dat`），即本分组不覆写 `base`：
+# 网关按 `report_dir`（stack 缺省 `data/out_dat`）读目录，两侧改一边就会让「主机 → 调查」页恒空。
+IVSREP_SINK="${WORK}/topology/sinks/business.d/agent_ivsrep.toml"
+if grep -qs '^\s*base\s*=' "${IVSREP_SINK}"; then
+  echo '[FAIL] agent_ivsrep sink 不该覆写 base（应落到连接器默认的 ./data/out_dat）' >&2
+  exit 1
+fi
+if ! grep -qs '^file = "agent-ivsrep.jsonl"$' "${IVSREP_SINK}"; then
+  echo '[FAIL] agent_ivsrep sink 的输出文件名不是 agent-ivsrep.jsonl' >&2
   exit 1
 fi
 

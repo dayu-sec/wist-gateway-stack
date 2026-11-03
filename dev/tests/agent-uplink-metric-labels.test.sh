@@ -11,6 +11,9 @@
 #      没配就不写 —— 否则 `env=""` 会把序列按空值分组。注意与引擎在顶层注入的 `env`
 #      （部署环境）不是一回事，所以断言只看 `metric` 对象。
 #   5. 挂载点 label 的名字是 `mountpoint`（规范 §3 的样例帧），旧名 `mount` 不得再产出。
+#   6. **满字段帧**：把 agentd 能发的 `metric.*` 字段全部填满，输出 `metric` 的键集合必须与
+#      输入帧逐键相等 —— 少一个（WPL/OML 没搬）或多一个（OML 凭空造）都算失败。
+#      这条是唯一能挡住「静默丢维度」的结构性防线。
 #
 # 依赖 `wparse` 二进制（默认 dev/bin/wparse，可用 WPARSE 覆盖）。找不到时跳过，不阻断开发机。
 #
@@ -98,6 +101,7 @@ mkdir -p "${WORK}/data/in_dat"
 cat > "${WORK}/data/in_dat/gen.dat" <<'EOF'
 {"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":1} METRICS: {"metric":{"__name__":"system.filesystem.usage","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"percent","disk_role":"system","mountpoint":"/var","fstype":"xfs","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker"},"values":[95.0],"timestamps":[1760860800000]}
 {"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":2} METRICS: {"metric":{"__name__":"system.load_average.1m","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"1"},"values":[0.25],"timestamps":[1760860800000]}
+{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":3} METRICS: {"metric":{"__name__":"agent_memory_bytes","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"bytes","disk_role":"data","mountpoint":"/data","fstype":"ext4","device":"/dev/sdb1","cpu":"cpu0","mode":"rw","state":"up","target_kind":"disk","outcome":"succeeded","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker","shard":"3","tier":"hot","region":"cn-north","zone":"az-1"},"values":[1048576],"timestamps":[1760860800000]}
 EOF
 
 "${WPARSE}" batch --work-root "${WORK}" >/dev/null
@@ -140,6 +144,65 @@ has '"role": "broker"' "${fs_metric}" "选择类 label role 进 metric"
 hasnt '"env"' "${load_metric}" "未配选择层时不写空 env"
 hasnt '"cluster"' "${load_metric}" "未配选择层时不写空 cluster"
 hasnt '"app"' "${load_metric}" "未配选择层时不写空 app"
+
+# 2.6) 满字段帧：输入的 `metric` 键必须与契约表一致，且**逐键**出现在输出 `metric` 里。
+#      少一个 = WPL/OML 少搬了一个维度（`mount`→`mountpoint` 就这么静默丢过）；
+#      多一个 = OML 凭空造了 agentd 没发的键。两种都不允许。
+#      `tenant_id` 不在此列 —— 它由网关全局 tag 注入，见 4)。
+if ! python3 - "${WORK}/data/in_dat/gen.dat" "${OUT}" <<'PY'
+import json
+import sys
+
+# 契约表：agentd 上送的 `metric.*` 可透传字段（数组类 values/timestamps 与 tenant_id 不在此列）。
+CANON = [
+    "__name__", "agent", "instance", "kind", "target_ref", "resource_ref", "unit",
+    "disk_role", "mountpoint", "fstype", "device", "cpu", "mode", "state",
+    "target_kind", "outcome",
+    "env", "cluster", "app", "role", "shard", "tier", "region", "zone",
+]
+
+src = None
+for line in open(sys.argv[1], encoding="utf-8"):
+    if "agent_memory_bytes" not in line:
+        continue
+    frame = json.loads(line.split("METRICS: ", 1)[1])
+    src = sorted(frame["metric"].keys())
+    break
+
+out = None
+for line in open(sys.argv[2], encoding="utf-8"):
+    rec = json.loads(line)
+    if rec["metric"].get("__name__") == "agent_memory_bytes":
+        out = sorted(rec["metric"].keys())
+        break
+
+ok = True
+if src is None:
+    print("  [FAIL] 满字段帧没出现在输入里")
+    ok = False
+elif out is None:
+    print("  [FAIL] 满字段帧没有产出输出")
+    ok = False
+else:
+    if src != sorted(CANON):
+        print("  [FAIL] 测试帧字段与契约表不一致: " + json.dumps(src, ensure_ascii=False))
+        ok = False
+    missing = [k for k in src if k not in out]
+    extra = [k for k in out if k not in src]
+    if missing:
+        print("  [FAIL] 输出 metric 丢了字段（WPL/OML 少搬）: " + ", ".join(missing))
+        ok = False
+    if extra:
+        print("  [FAIL] 输出 metric 多出字段（OML 凭空造）: " + ", ".join(extra))
+        ok = False
+    if ok:
+        print("  [OK]   满字段帧 %d 个 metric 键全部透传" % len(src))
+
+sys.exit(0 if ok else 1)
+PY
+then
+  fail=1
+fi
 
 # 3) 未绑定租户（没有 WP_GLOBAL_TAGS）：metric 里**一条** tenant_id 都不该有 ——
 #    写空串会让 VM 多出一条 tenant_id="" 的序列，比没有更糟。

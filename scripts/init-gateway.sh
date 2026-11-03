@@ -24,7 +24,7 @@
 #   <栈根>/identity/gateway/{public,private}/agent-ca.*.pem     # agent CA（签 agent 客户端证书；私钥务必备份）
 #   <栈根>/identity/gateway/{public,private}/admin-tls.*.pem    # 网关叶证书（CA 签；可轮换）
 #   <dir>/wist-gateway.value.json                           # 渲染模板用的值（url / 报告目录 / 验签公钥）
-#   <栈根>/.wist/sec-value.yml                                # 密钥文件：admin_token（网关 `${SEC_ADMIN_TOKEN}`）+ web_entry_password（页面入口口令）
+#   <栈根>/.wist/sec-value.yml                                # 密钥文件：admin token（网关 `${SEC_ADMIN_TOKEN}` 的来源）
 #
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
 #   sys/configs/gateway/wist-gateway.toml.tpl 渲染（gx.tpl）。
@@ -247,29 +247,6 @@ text += f"admin_token: {secrets.token_hex(24)}\n"
 with open(path, "w") as handle:
     handle.write(text)
 print("  已在密钥文件写入 admin_token：", path)
-PY
-chmod 600 "$SEC_FILE"
-
-# ③b 页面入口的口令（人面）：同一份密钥文件，键 `web_entry_password`。
-#     为什么不复用 admin_token：人要在浏览器认证框里敲它，而且要能单独轮换、单独停用；
-#     令牌只给机器（直连网关端口 / 脚本）。两把分开，泄露一面不连坐另一面。
-#     **只建不打印**：口令就在文件里，需要时 `gops sec get --show web_entry_password`。
-#     打印一次就等于把它留在终端 / CI 日志 / 工单里 —— 而这正是不希望发生的事。
-#     消费方：`scripts/init-web-conf.sh` 把它算成 `configs/web/htpasswd`（apr1）。
-python3 - "$SEC_FILE" <<'PY'
-import re, secrets, sys
-path = sys.argv[1]
-with open(path) as handle:
-    text = handle.read()
-if re.search(r"(?m)^\s*web_entry_password\s*:", text):
-    print("  复用已有 web_entry_password：", path)
-    sys.exit(0)
-if text and not text.endswith("\n"):
-    text += "\n"
-text += f"web_entry_password: {secrets.token_hex(12)}\n"
-with open(path, "w") as handle:
-    handle.write(text)
-print("  已在密钥文件写入 web_entry_password（不显示）：", path)
 PY
 chmod 600 "$SEC_FILE"
 

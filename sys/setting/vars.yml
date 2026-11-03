@@ -9,10 +9,9 @@
 #
 # 说明：
 #   - 只有 `system:` 段的变量会进入 resolved_vars.yml 并最终导出到 .env；
-#   - **密钥不要写在这里**：`admin_token`（管理面 Bearer）与 `web_entry_password`（页面入口口令）
-#     都在栈根 `.wist/sec-value.yml` 里，由 `scripts/init-gateway.sh` 按缺补齐；
-#     localize 只用它推导 `configs/web/htpasswd`（apr1），值不落配置。
-#     其它密钥如需，compose 里用 ${SEC_xxx} 占位，运行时由 `gops run start` 注入，不落盘；
+#   - 密钥不要写在这里：网关 admin token 走密钥文件（栈根 `.wist/sec-value.yml`）；
+#     其它密钥如需，compose 里用 ${SEC_xxx} 占位，运行时由 `gops run start`
+#     从 ~/.galaxy/sec_value.yml 注入，不落盘；
 #   - 容器内端口/路径/服务名是应用契约，直接写在 sys/docker-compose.yml 里。
 system:
   # 镜像源前缀：国内走腾讯云 TCR，境外改成 ghcr.io/dayu-sec
@@ -90,13 +89,9 @@ system:
   # 挂载源路径（按部署环境摆放）
   - name: GATEWAY_CONFIG_DIR
     value: ./configs/gateway
-  # 前端站点配置：由 sys/configs/web/nginx.conf.tpl 在 localize 时渲染到此（运行物，不入库）。
-  # 注意它**不是**直接给 nginx 的配置：里面管理面 Bearer 还是占位符，由容器启动钩子补上。
+  # 前端站点配置：由 sys/configs/web/nginx.conf.tpl 在 localize 时渲染到此（运行物，不入库）
   - name: WEB_NGINX_CONF
     value: ./configs/web/nginx.conf
-  # 入口 basic auth 的 htpasswd（只存 apr1 摘要）：由 scripts/init-web-conf.sh 从密钥文件推导
-  - name: WEB_HTPASSWD
-    value: ./configs/web/htpasswd
   # 站点身份（dev/prod 共用，不入库）：证书/私钥在 ./identity/{gateway,web}/{public,private}；
   # 由 compose 直接以字面量挂载（不在变量里——位置固定在栈根，不随部署环境变）。
   # wparse 工程（**只读种子**）：配置的唯一源（conf/connectors/models/topology；管理面在项目根

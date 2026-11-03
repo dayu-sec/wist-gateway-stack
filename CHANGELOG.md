@@ -3,26 +3,6 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
-### 人机入口：basic auth + 入口注入管理面 Bearer
-
-控制台不再让浏览器持 admin token：人过入口认证，`/api` 由 nginx 补 Bearer。
-
-- **入口 basic auth**（整站，含首屏）：口令在栈根 `.wist/sec-value.yml` 的 `web_entry_password`，
-  由 `scripts/init-web-conf.sh` 算成 `configs/web/htpasswd`（只存 apr1）。
-  用户名固定 `admin`；换口令 = 改密钥 + `gops sys localize` + 重启 web。
-- **`sys/web/web-entrypoint.sh`**（新增，容器入口包装）：启动时从密钥文件取 `admin_token`，
-  替换站点配置里的 `@WIST_GATEWAY_ADMIN_TOKEN@` 占位，再交回官方 nginx entrypoint。
-  缺 token / 含非法字符 / 占位符没替换干净 → **容器直接失败**，不带占位符硬起。
-  - 为什么不在 `/docker-entrypoint.d/` 放钩子：那里要求**执行位**，而 bind 挂载权限统一由
-    `gops sys perms` 按只读语义收敛 —— 一旦丢了执行位，钩子被**静默跳过**，症状是页面正常、`/api` 全 401。
-- **`sys-prj.yml` 新增 `secrets:` 声明**（`.wist/sec-value.yml`、`0600`）；
-  `scripts/init-gateway.sh` 按缺补齐 `web_entry_password`（**不回显**，也不随机打印）。
-- **机器面不变**：直连 `GATEWAY_PORT` 的客户端仍然自己带 Bearer。
-- 回归测试：`dev/tests/web-entry-auth.test.sh`（口令→htpasswd 的失败/幂等/轮换，
-  加上容器侧占位替换，docker 部分本地无镜像时自动跳过）。
-
 ## [0.8.24-alpha] - 2026-11-01
 
 ### 组件跟版 + 初始知识库 0.8.1（流量检测落点固定）

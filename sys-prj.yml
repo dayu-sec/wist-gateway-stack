@@ -12,19 +12,6 @@ test_envs:
 #   allow_external:           # 允许对齐系统根之外的 bind source
 #     - /srv/shared/packages
 
-# 密钥文件：`gops run` / `gops sec` 从这里加载 `SEC_*`，`scripts/*` 用 `gops sec get` 读它。
-#
-#   .wist/sec-value.yml（0600、不入库、不进包）
-#     admin_token: "..."          # → SEC_ADMIN_TOKEN：网关管理面 Bearer（机器面）
-#     web_entry_password: "..."   # 页面入口的 basic auth 口令（人面，localize 时算成 htpasswd）
-#
-# 两把分开的理由：人进页面用短的、可轮换的口令；token 只给机器（直连网关端口 / 脚本）。
-# 页面这一跳由 nginx 把 token 补上，所以**浏览器不持 token**（D2）。
-secrets:
-  file: .wist/sec-value.yml
-  format: yaml
-  mode: "0600"
-
 # `gops sys package` 打包时排除的路径（glob，相对系统根；默认模式与 `--full` **都生效**）。
 #
 # 站点身份（CA / 证书 / 私钥 / 对外域名）**不在资源树里**，它们是**站点级、dev/prod 共用**的唯一一份，
@@ -91,7 +78,7 @@ backup:
   # 发布态资源整目录：渲染出的配置（wist-gateway.toml / nginx.conf / *.value.json）+ **store 库**
   # （agent 登记 / 已签凭据 —— 丢了 agent 要重建登记）+ logs + knowledge/initial。收整目录以便原样回放。
   - configs
-  # 栈根现场密钥文件：admin token + 页面入口口令（`scripts/init-gateway.sh` 按缺补齐，**唯一一份、不可推导**）。
+  # 栈根现场密钥文件：admin token（`scripts/init-gateway.sh` 生成，**唯一一份、不可推导**）。
   # 丢了不是“要重装”，而是“口令被重新随机生成” ⇒ 恢复后所有用旧 token 的客户端（页面、
-  # import-knowledge.sh / import-package.sh）全失效；页面入口口令也会变成一个新的（可从文件重新读到）。
+  # import-knowledge.sh / import-package.sh）全失效。与“还原能原样复原”是同一件事。
   - .wist

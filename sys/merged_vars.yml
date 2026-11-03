@@ -39,8 +39,6 @@ system:
   value: ./configs/gateway
 - name: WEB_NGINX_CONF
   value: ./configs/web/nginx.conf
-- name: WEB_HTPASSWD
-  value: ./configs/web/htpasswd
 - name: WPARSE_WORK_DIR
   value: ./sys/data-plane
 - name: WPARSE_RUN_DATA

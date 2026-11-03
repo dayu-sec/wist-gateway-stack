@@ -3,6 +3,27 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.31-alpha] - 2026-11-04
+
+### 组件跟版（前端 0.31.1）
+
+- `WEB_TAG` → `v0.31.1-alpha`：五个主机页（主机指标 / 采集工作 / 用途 / 指标标签 / 一次性调查）
+  改用共用页头 —— 返回 → 主机名 → 身份行 → tab 条 → 导语，页面专属事实与说明文字下移到 tab 之下，
+  **切 tab 时页头与 tab 不再跳动**。网关状态页的实时读数从一条「·」长句改成逐项指标卡。
+- `GATEWAY_TAG` / `WPARSE_TAG` / `VM_TAG` / `KNOWLEDGE_PATH` 不变。
+
+### 测试（指标链路）
+
+- 指标帧契约新增两条断言：
+  - 扁平 `metric_<k>` 与嵌套 `metric.<k>` 必须**同集同值**（中心侧读扁平、VM 读嵌套，
+    只改一边就是一半消费者静默失联）；
+  - `agent-metrics` 分组不得出现 `file_json_sink` / `agent-metrics.jsonl`，且必须仍有
+    `vm_metrics_sink`（自观测的唯一写入者）—— 上一版去掉 JSONL 兜底后的回归防线。
+
+### 升级注意
+
+- 升级后先 `gops sys localize`，再 `gops run start`；浏览器可能需强刷以拿到新前端资源。
+
 ## [0.8.30-alpha] - 2026-11-04
 
 ### 变更（指标链路收口）

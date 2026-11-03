@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.30-alpha] - 2026-11-04
+
+### 变更（指标链路收口）
+
+- **数据面不再落 `agent-metrics.jsonl`**：`agent-metrics` 分组里去掉了 `file_json_sink` 兜底。
+  这个文件全仓无消费者（网关读 VM，不读它），15s 一批、从不清理，机器跑久只是白占磁盘。
+  分组本身保留（`vm_metrics_sink` 仍是唯一写入者）；需要看原始帧时临时把 sink 加回来即可。
+- **指标帧契约新增「满字段帧」逐键断言**（`dev/tests/agent-uplink-metric-labels.test.sh`）：
+  一帧填满 agentd 能发的全部 `metric.*` 字段，断言输出 `metric` 的键集合与输入**逐键相等** —
+  少一个（WPL/OML 没搬）或多一个（OML 凭空造）都直接失败。这是 `mount`→`mountpoint`
+  那类静默丢维度的唯一结构性防线。
+- 组件 tag 不变（`GATEWAY_TAG` / `WEB_TAG` / `WPARSE_TAG` / `VM_TAG` / `KNOWLEDGE_PATH`）。
+
+### 修复（测试门禁）
+
+- `dev/tests/data-plane-config.test.sh` 里 `agent_ivsrep` 的落点断言已过期（自调查报告改落
+  `out_dat` 起就恒失败），改为断言**不覆写 `base`** 且文件名是 `agent-ivsrep.jsonl`——
+  与网关 `report_dir` 缺省值重新对齐。
+
+### 升级注意
+
+- 升级后 `data/out_dat/agent-metrics.jsonl` 不再增长；已存在的历史文件可手动删除。
+- 升级后先 `gops sys localize`，再 `gops run start`。
+
 ## [0.8.29-alpha] - 2026-11-03
 
 ### 组件跟版（前端 0.31.0）

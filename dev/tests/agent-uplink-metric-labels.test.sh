@@ -148,6 +148,7 @@ hasnt '"app"' "${load_metric}" "未配选择层时不写空 app"
 # 2.6) 满字段帧：输入的 `metric` 键必须与契约表一致，且**逐键**出现在输出 `metric` 里。
 #      少一个 = WPL/OML 少搬了一个维度（`mount`→`mountpoint` 就这么静默丢过）；
 #      多一个 = OML 凭空造了 agentd 没发的键。两种都不允许。
+#      另查扁平 `metric_<k>` 与嵌套 `metric.<k>` 同集同值（中心侧读扁平、VM 读嵌套）。
 #      `tenant_id` 不在此列 —— 它由网关全局 tag 注入，见 4)。
 if ! python3 - "${WORK}/data/in_dat/gen.dat" "${OUT}" <<'PY'
 import json
@@ -170,9 +171,11 @@ for line in open(sys.argv[1], encoding="utf-8"):
     break
 
 out = None
+out_rec = None
 for line in open(sys.argv[2], encoding="utf-8"):
     rec = json.loads(line)
     if rec["metric"].get("__name__") == "agent_memory_bytes":
+        out_rec = rec
         out = sorted(rec["metric"].keys())
         break
 
@@ -195,8 +198,27 @@ else:
     if extra:
         print("  [FAIL] 输出 metric 多出字段（OML 凭空造）: " + ", ".join(extra))
         ok = False
+
+    # 2.6.1) 双表示不许漂移。OML 同一份数据产出两套：
+    #  * 嵌套 `metric.<k>`  —— VM 只认这个；
+    #  * 扁平 `metric_<k>`  —— 文件/中心侧的现有消费方在用。
+    # 只改一边（典型：嵌套改了名、扁平没改）时两边单测都绿，但其中一半消费者静默失联。
+    flat_missing, flat_mismatch = [], []
+    for k in src:
+        flat_key = "metric_name" if k == "__name__" else "metric_" + k
+        if flat_key not in out_rec:
+            flat_missing.append(flat_key)
+        elif out_rec[flat_key] != out_rec["metric"][k]:
+            flat_mismatch.append("{}={!r} vs metric.{}".format(flat_key, out_rec[flat_key], k))
+    if flat_missing:
+        print("  [FAIL] 满字段帧缺少扁平字段（只写了嵌套）: " + ", ".join(flat_missing))
+        ok = False
+    if flat_mismatch:
+        print("  [FAIL] 扁平字段与嵌套 metric 不一致: " + "; ".join(flat_mismatch))
+        ok = False
+
     if ok:
-        print("  [OK]   满字段帧 %d 个 metric 键全部透传" % len(src))
+        print("  [OK]   满字段帧 %d 个 metric 键全部透传且扁平/嵌套一致" % len(src))
 
 sys.exit(0 if ok else 1)
 PY

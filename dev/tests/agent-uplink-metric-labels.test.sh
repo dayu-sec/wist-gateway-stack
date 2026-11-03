@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# 回归测试：`agent_uplink/metrics_frame` 透传逐挂载点标签，且旧帧（不带标签）不受影响。
+# 回归测试：`agent_uplink/metrics_frame` 透传**全部序列 label 与选择类 label**，且旧帧（不带标签）不受影响。
 #
-# 钉三件事：
-#   1. `metric.mount` / `metric.fstype` 能穿过 WPL + OML，落进 VM JSON line；
-#   2. 非文件系统指标没有这两个字段时，OML 不写空标签；
+# 钉五件事：
+#   1. 序列 label（`instance` / `mountpoint` / `fstype` / `disk_role` …）能穿过 WPL + OML，落进 VM JSON line；
+#   2. 指标没有这些字段时，OML 不写空标签；
 #   3. `metric.tenant_id` 只认**网关全局 tag**（gwlinkd 写进工作根 `.env` 的
 #      `WP_GLOBAL_TAGS=tenant_id=...`）：未绑定时**不写**这个键（不能是空串、也不能是模型常量）；
 #      绑定后它就是 VM 上的租户标签 —— VM 靠它按租户隔离序列。
+#   4. 选择类 label（`env` / `cluster` / `app` / `role` … 网关下发）同样要进 `metric`，
+#      没配就不写 —— 否则 `env=""` 会把序列按空值分组。注意与引擎在顶层注入的 `env`
+#      （部署环境）不是一回事，所以断言只看 `metric` 对象。
+#   5. 挂载点 label 的名字是 `mountpoint`（规范 §3 的样例帧），旧名 `mount` 不得再产出。
 #
 # 依赖 `wparse` 二进制（默认 dev/bin/wparse，可用 WPARSE 覆盖）。找不到时跳过，不阻断开发机。
 #
@@ -92,8 +96,8 @@ EOF
 
 mkdir -p "${WORK}/data/in_dat"
 cat > "${WORK}/data/in_dat/gen.dat" <<'EOF'
-{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":1} METRICS: {"metric":{"__name__":"system.filesystem.usage","agent":"agent-001","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"percent","mount":"/var","fstype":"xfs"},"values":[95.0],"timestamps":[1760860800000]}
-{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":2} METRICS: {"metric":{"__name__":"system.load_average.1m","agent":"agent-001","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"1"},"values":[0.25],"timestamps":[1760860800000]}
+{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":1} METRICS: {"metric":{"__name__":"system.filesystem.usage","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"percent","disk_role":"system","mountpoint":"/var","fstype":"xfs","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker"},"values":[95.0],"timestamps":[1760860800000]}
+{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":2} METRICS: {"metric":{"__name__":"system.load_average.1m","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"1"},"values":[0.25],"timestamps":[1760860800000]}
 EOF
 
 "${WPARSE}" batch --work-root "${WORK}" >/dev/null
@@ -115,11 +119,27 @@ for line in open(sys.argv[1]):
 
 fs_line="$(grep 'system.filesystem.usage' "${OUT}")"
 load_line="$(grep 'system.load_average.1m' "${OUT}")"
+fs_metric="$(out_json "${OUT}" | grep '^system.filesystem.usage')"
+load_metric="$(out_json "${OUT}" | grep '^system.load_average.1m')"
 
-has '"mount":"/var"' "${fs_line}" "文件系统指标带 mount 标签"
+has '"mountpoint":"/var"' "${fs_line}" "文件系统指标带 mountpoint 标签"
 has '"fstype":"xfs"' "${fs_line}" "文件系统指标带 fstype 标签"
-hasnt '"mount"' "${load_line}" "非文件系统指标不写空 mount"
+hasnt '"mountpoint"' "${load_line}" "非文件系统指标不写空 mountpoint"
 hasnt '"fstype"' "${load_line}" "非文件系统指标不写空 fstype"
+# 旧名 `mount` 是历史误写（agentd 发的是 `mountpoint`）：改名后不得再出现，否则同一份数据会有两种 key。
+hasnt '"mount"' "${fs_metric}" "不再产出旧名 mount"
+
+# 2.5) 序列 label 与选择类 label（网关下发）：全部要进 `metric`（VM 只认 metric 对象里的 label）。
+#      只看 metric 对象：顶层那个 `env` 是引擎注入的部署环境（恒为 dev），不是选择层。
+has '"instance": "host-1:host"' "${fs_metric}" "序列 label instance 进 metric"
+has '"disk_role": "system"' "${fs_metric}" "序列 label disk_role 进 metric"
+has '"env": "prod"' "${fs_metric}" "选择类 label env 进 metric"
+has '"cluster": "kafka-prod"' "${fs_metric}" "选择类 label cluster 进 metric"
+has '"app": "kafka"' "${fs_metric}" "选择类 label app 进 metric"
+has '"role": "broker"' "${fs_metric}" "选择类 label role 进 metric"
+hasnt '"env"' "${load_metric}" "未配选择层时不写空 env"
+hasnt '"cluster"' "${load_metric}" "未配选择层时不写空 cluster"
+hasnt '"app"' "${load_metric}" "未配选择层时不写空 app"
 
 # 3) 未绑定租户（没有 WP_GLOBAL_TAGS）：metric 里**一条** tenant_id 都不该有 ——
 #    写空串会让 VM 多出一条 tenant_id="" 的序列，比没有更糟。

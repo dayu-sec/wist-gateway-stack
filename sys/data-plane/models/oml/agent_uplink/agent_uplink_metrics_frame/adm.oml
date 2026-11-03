@@ -15,12 +15,33 @@ log_type = read(log_type);
 log_desc = read(log_desc);
 metric_name = read(metric_name);
 metric_agent = read(metric_agent);
+metric_instance = read(metric_instance);
 metric_kind = read(metric_kind);
 metric_target_ref = read(metric_target_ref);
 metric_resource_ref = read(metric_resource_ref);
 metric_unit = read(metric_unit);
-metric_mount = read(metric_mount);
+// 序列 label：名字与 agentd 线上报文一字不差（`instance` / `mountpoint` / `disk_role` …）。
+// 读不到就不写 —— 不猜、不补默认。
+metric_disk_role = read(metric_disk_role);
+metric_mountpoint = read(metric_mountpoint);
 metric_fstype = read(metric_fstype);
+metric_device = read(metric_device);
+metric_cpu = read(metric_cpu);
+metric_mode = read(metric_mode);
+metric_state = read(metric_state);
+metric_target_kind = read(metric_target_kind);
+metric_outcome = read(metric_outcome);
+// 选择类 label（`env` / `cluster` / `app` / `role` / `shard` / `tier` / `region` / `zone`）：
+// 由网关下发、**贴在全部序列**上（不是这条指标自己的属性）。读不到就不写 —— 不猜、不补默认。
+// 注意前缀：引擎自己会在顶层注入一个 `env`（部署环境），所以这里统一用 `metric_*` 区分。
+metric_env = read(metric_env);
+metric_cluster = read(metric_cluster);
+metric_app = read(metric_app);
+metric_role = read(metric_role);
+metric_shard = read(metric_shard);
+metric_tier = read(metric_tier);
+metric_region = read(metric_region);
+metric_zone = read(metric_zone);
 metric_values = read(metric_values);
 metric_timestamps = read(metric_timestamps);
 // VictoriaMetrics 的 `/api/v1/import`（jsonline）**只认** `metric` / `values` / `timestamps`，
@@ -30,12 +51,30 @@ metric_timestamps = read(metric_timestamps);
 metric = object {
     __name__ = read(metric_name);
     agent = read(metric_agent);
+    instance = read(metric_instance);
     kind = read(metric_kind);
     target_ref = read(metric_target_ref);
     resource_ref = read(metric_resource_ref);
     unit = read(metric_unit);
-    mount = read(metric_mount);
+    disk_role = read(metric_disk_role);
+    mountpoint = read(metric_mountpoint);
     fstype = read(metric_fstype);
+    device = read(metric_device);
+    cpu = read(metric_cpu);
+    mode = read(metric_mode);
+    state = read(metric_state);
+    target_kind = read(metric_target_kind);
+    outcome = read(metric_outcome);
+    // 选择类 label：规范 §3.4 要求它们出现在每条序列上（查询/告警靠它分组）。
+    // 值为空时 Wparse 不写该键（不会出现 `env=""` 这种污染序列的空标签）。
+    env = read(metric_env);
+    cluster = read(metric_cluster);
+    app = read(metric_app);
+    role = read(metric_role);
+    shard = read(metric_shard);
+    tier = read(metric_tier);
+    region = read(metric_region);
+    zone = read(metric_zone);
     tenant_id = read(tenant_id);
 };
 values = read(metric_values);

@@ -15,12 +15,32 @@ package agent_uplink {
             json(
                 chars@metric/__name__:metric_name,
                 chars@metric/agent:metric_agent,
+                chars@metric/instance:metric_instance,
                 chars@metric/kind:metric_kind,
                 chars@metric/target_ref:metric_target_ref,
                 chars@metric/resource_ref:metric_resource_ref,
                 chars@metric/unit:metric_unit,
-                chars@metric/mount:metric_mount,
+                // 序列 label：agentd 发什么名字，这里就原样搬什么（不重命名）——
+                // 规范 `metrics-data-spec.md` §3 的样例帧用的就是 `instance` / `mountpoint`。
+                chars@metric/disk_role:metric_disk_role,
+                chars@metric/mountpoint:metric_mountpoint,
                 chars@metric/fstype:metric_fstype,
+                chars@metric/device:metric_device,
+                chars@metric/cpu:metric_cpu,
+                chars@metric/mode:metric_mode,
+                chars@metric/state:metric_state,
+                chars@metric/target_kind:metric_target_kind,
+                chars@metric/outcome:metric_outcome,
+                // 选择类 label（网关下发，闭集 `wist_api::metrics_labels::rules::KEYS`）：
+                // WPL 不会自动搬运未声明的键，所以逐键显式列。缺键不会让规则失败（读不到就不写）。
+                chars@metric/env:metric_env,
+                chars@metric/cluster:metric_cluster,
+                chars@metric/app:metric_app,
+                chars@metric/role:metric_role,
+                chars@metric/shard:metric_shard,
+                chars@metric/tier:metric_tier,
+                chars@metric/region:metric_region,
+                chars@metric/zone:metric_zone,
                 array@values:metric_values,
                 array@timestamps:metric_timestamps,
             )

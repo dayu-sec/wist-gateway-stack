@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.27-alpha] - 2026-11-03
+
+### 组件跟版 + 指标序列 label 补全
+
+- `GATEWAY_TAG` → `v0.38.3-alpha`、`WEB_TAG` → `v0.30.0-alpha`（管理面「手工刷新」入口、`app` / `role` 推断等）。
+- 指标帧透传 agentd 的**全部序列 label**：`instance` / `disk_role` / `mountpoint` / `fstype` /
+  `device` / `cpu` / `mode` / `state` / `target_kind` / `outcome`。
+  此前只搬 `mount`（真机帧上**从未命中**）与 `fstype`，挂载点与实例维度一直缺失。
+- 新增**选择类 label**（`env` / `cluster` / `app` / `role` / `shard` / `tier` / `region` / `zone`）：
+  网关下发的值现在会贴到该机器的**每条**指标序列上，可直接按环境 / 集群 / 应用聚合。
+
+### 升级注意
+
+- **挂载点 label 由 `mount` 改名为 `mountpoint`**（与 `wist-agentd` 规范 `metrics-data-spec.md` §3 一致）。
+  旧名此前在真机帧上从未匹配成功，已有序列不受影响；如有自建看板写过 `mount`，请改成 `mountpoint`。
+- 选择类 label 的值变化会**断开序列**（规范 §3.4 / §9）：改 `env` / `cluster` / `app` 会让该机器历史分段。
+- 升级后先 `gops sys localize` 让新 tag 落进 `.env`，再 `gops run start`。
+
 ## [0.8.26-alpha] - 2026-11-03
 
 ### 修复（容器时区：wparse 日志慢 8 小时）

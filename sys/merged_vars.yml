@@ -6,7 +6,7 @@ system:
 - name: VM_SPC
   value: quay.io/victoriametrics
 - name: GATEWAY_TAG
-  value: v0.38.3-alpha
+  value: v0.39.0-alpha
 - name: WEB_TAG
   value: v0.30.0-alpha
 - name: VM_TAG

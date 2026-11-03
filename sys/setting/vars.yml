@@ -65,6 +65,12 @@ system:
     value: 6
   - name: TZ
     value: Asia/Shanghai
+  # 时区数据落点：`scripts/init-timezone.sh`（localize 阶段）把宿主当前时区的 zone 文件
+  # 复制到这里，容器用 `TZ=:/etc/tz-runtime/localtime` 读取。
+  # 为什么不直接挂宿主 /etc/localtime：见该脚本顶部（权限对齐会去改宿主系统文件；
+  # 且镜像是否自带 tzdata 不可假设）。
+  - name: TZ_RUNTIME_DIR
+    value: ./configs/runtime/tz
 
   # 对外域名（前端站点证书的 SAN，也是网关 public_base_url 的 host）
   # —— 只是**默认值**；现场值走 values/value.yml（改那里 localize 即生效）

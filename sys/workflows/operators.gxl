@@ -108,6 +108,14 @@ mod operators {
     //     容器内绑 0.0.0.0:19090 + TLS，宿主只发布 127.0.0.1；token 落在
     //     data-plane-run/.run/admin_api.token（进不了 sys/data-plane/ 只读种子）。
     gx.cmd ( "./scripts/init-wparse-admin.sh" );
+    // ⑥'' 时区数据（所有容器共用一份）：把宿主当前时区的 zone 文件复制进栈内。
+    //     线上症状：wparse 日志比本地时间慢 8 小时 —— 容器默认 UTC，而它原来既没有 TZ 也没有
+    //     时区数据。为什么不直接挂宿主 /etc/localtime：本栈的宿主权限由 `gops sys perms`
+    //     从 compose 派生（只读文件挂载 → 0640），挂系统文件等于让一次部署去改它的权限；
+    //     而只设 `TZ=<zone 名>` 又要求镜像自带 tzdata（wparse / web 是上游镜像，不可假设）。
+    //     复制到栈内 + 容器用 `TZ=:<file>` 读 —— 两边的坑都绕开。
+    //     必须在 perms 之前：新建目录要跟其它 bind 源一起对齐（属主=部署账号、属组=999）。
+    gx.cmd ( "./scripts/init-timezone.sh" );
     // ⑥ 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
     //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
     //     **不改属主** —— 未对齐会稳定地造成：wparse 写不出 /data/.run 的锁（以 75 无限重启）、

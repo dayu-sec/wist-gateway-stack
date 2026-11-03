@@ -50,6 +50,7 @@ services:
       - "${VM_PORT}:8428"
     volumes:
       - metrics_data:/storage
+      - ${TZ_RUNTIME_DIR}:/etc/tz-runtime:ro
     command:
       - --envflag.enable
       - --envflag.prefix=VM_
@@ -58,7 +59,9 @@ services:
       - --storageDataPath=/storage
       - --search.latencyOffset=0s
     environment:
-      - TZ=${TZ}
+      # 与其它服务同一份时区数据（见 scripts/init-timezone.sh）：镜像不一定带 tzdata，
+      # 只写 `TZ=<zone 名>` 时索引不到会静默回落 UTC。
+      - TZ=:/etc/tz-runtime/localtime
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8428/health"]
       interval: 30s
@@ -176,6 +179,10 @@ services:
         exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
           /usr/local/bin/wparse daemon --work-root /data
     environment:
+      # 时区：读**栈内**那份 zone 数据（由 scripts/init-timezone.sh 在 localize 阶段复制）。
+      # 用 `TZ=:<file>` 而不是 `TZ=<zone 名>`：后者要求镜像自带 tzdata，索引不到时 glibc 会
+      # 静默回落 UTC（看起来设了、其实没生效）；前者只认我们给的这份文件。
+      TZ: ":/etc/tz-runtime/localtime"
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
       # 数据面 sink（agent-facts / agent-logs）用的网关内部接入端点；
       # 与网关配置的 [ingest].listen_addr 对应（明文 HTTP，只走 compose 内网）。
@@ -204,6 +211,8 @@ services:
       # 信任锚：挂**目录**（可能为空），不挂单文件 —— 真身在 identity/gwlinkd/control-center.pem，
       # 由 init-gwlinkd-pub.sh 投影到这里；没有中心 CA 时目录空着也是合法现场。
       - ./identity/gwlinkd/trust:/data/identity/trust:ro
+      # 时区数据（只读，栈内路径 —— 不挂宿主系统文件，见 scripts/init-timezone.sh）
+      - ${TZ_RUNTIME_DIR}:/etc/tz-runtime:ro
     ports:
       # agent 数据面入口（wparse source tcp_1）。明文，需对 agent 可达；
       # 管控面 agent 上送地址由网关下发（/api/v1/admin/agent/uplink），要与这里一致。
@@ -240,6 +249,8 @@ services:
       WIST_GATEWAY_PUB_CONFIG: /config/identity/public/wist-gateway-pub.toml
       # 全栈版本（页面左下角展示）：直接读挂进来的 `version.txt`，不在环境里复制一份版本号。
       WIST_GATEWAY_STACK_VERSION_FILE: /config/stack-version.txt
+      # 时区：进程日志与页面上的时间按这个走（见 scripts/init-timezone.sh 里的说明）。
+      TZ: ":/etc/tz-runtime/localtime"
     volumes:
       # 配置**按语义拆开挂**，而不是整目录 rw 挂到 /config：
       #   · 只读：wist-gateway.toml（含渲染值）、knowledge/（启动期知识源）
@@ -277,6 +288,8 @@ services:
       # `work_root/data/out_dat` 推导，无需再配一个输出目录。
       # 容器里 wparse 的 `/data/data` 就是宿主 `${WPARSE_RUN_DATA}`，两边一致。
       - ${WPARSE_RUN_DATA}:/data-plane/data:ro
+      # 时区数据（只读，栈内路径；与 wparse 共用同一份）
+      - ${TZ_RUNTIME_DIR}:/etc/tz-runtime:ro
     ports:
       - "${GATEWAY_PORT}:3000"
     depends_on:
@@ -288,8 +301,12 @@ services:
     container_name: wist-gateway-stack-web
     image: ${WIST_SPC}/wist-gateway-web:${WEB_TAG}
     restart: unless-stopped
+    environment:
+      # 时区：nginx 的 access/error log 用本地时间（见 scripts/init-timezone.sh 说明）。
+      TZ: ":/etc/tz-runtime/localtime"
     volumes:
       - ${WEB_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
+      - ${TZ_RUNTIME_DIR}:/etc/tz-runtime:ro
       # 站点身份（dev/prod 共用，只读）：前端公开证书在 /certs/public、私钥在 /certs/private。
       - ./identity/web:/certs:ro
     ports:

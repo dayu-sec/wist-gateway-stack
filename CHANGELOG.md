@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.26-alpha] - 2026-11-03
+
+### 修复（容器时区：wparse 日志慢 8 小时）
+
+- **四个容器统一到宿主时区**：`wparse` / `gateway` / `web` 此前**既没有 `TZ` 也没有时区数据**，
+  镜像默认 UTC → 日志时间比 UTC+8 的宿主慢 8 小时（`victoria-metrics` 虽然设了
+  `TZ=${TZ}`，但镜像不带 tzdata 时同样会静默回落 UTC）。
+- 做法：新增 `scripts/init-timezone.sh`（localize 阶段，早于 `gops sys perms --apply`），
+  把宿主当前时区的 zone 文件复制到 `configs/runtime/tz/localtime`；容器以
+  **`TZ=:/etc/tz-runtime/localtime`** 读取，compose 只读挂 `${TZ_RUNTIME_DIR}`。
+- 为什么**不**直接挂宿主 `/etc/localtime`（issue 里的建议）：
+  1. `gops sys perms` 从 compose 派生宿主机属主/权限，只读**文件**挂载会被改成 `0640` ——
+     等于让一次部署去掉宿主系统文件的 other 读权限；它们还是「系统根之外」的 bind source，
+     需要额外进 `perms.allow_external`。
+  2. 只设 `TZ=<zone 名>` 要求**镜像自带 tzdata**；wparse / web 是上游镜像，无法假设，
+     而「TZ 有名、镜像没 zoneinfo」时 glibc 正是回落 UTC（本次 bug 的形态）。
+  复制进栈内 + `TZ=:<file>` 同时绕开这两点：不碰宿主系统文件，也不依赖镜像内容。
+- 新增变量 `TZ_RUNTIME_DIR`（默认 `./configs/runtime/tz`，已被 `/configs/` 的 gitignore 覆盖）。
+
 ## [0.8.25-alpha] - 2026-11-03
 
 ### 组件跟版（主机指标对齐规范 v1）

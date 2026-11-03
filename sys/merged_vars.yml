@@ -29,6 +29,8 @@ system:
   value: 6
 - name: TZ
   value: Asia/Shanghai
+- name: TZ_RUNTIME_DIR
+  value: ./configs/runtime/tz
 - name: WEB_DOMAIN
   value: gw.example.com
 - name: CENTER_API_DOMAIN

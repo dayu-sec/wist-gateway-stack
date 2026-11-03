@@ -15,6 +15,7 @@
 #     客户覆盖写 values/value.yml（该文件版本化），不要改生成物。
 #   - 容器内端口/路径/服务名是应用契约，直接写在这里。
 #   - 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，只读挂进网关容器）；
+#     页面入口的口令（`web_entry_password`）也在同一份里，由 localize 算成 htpasswd 摘要；
 #     其它密钥如需，仍可用 `${SEC_xxx}` 占位、由 `gops run start` 注入、不落盘。
 
 # 运行身份（与宿主侧权限的对接口径；容器身份以这里的 `user:` 为准，`gops sys perms` 直接读它）：
@@ -284,12 +285,29 @@ services:
         condition: service_healthy
 
   # ── 前端 ──
+  #
+  # 人机入口：整站都要入口认证（basic auth），过了之后**由这里**给 /api 补上管理面 Bearer。
+  # 所以浏览器不持 admin token（D2）；token 只在密钥文件里，也不进渲染物。
   web:
     container_name: wist-gateway-stack-web
     image: ${WIST_SPC}/wist-gateway-web:${WEB_TAG}
     restart: unless-stopped
+    # 入口包装脚本：拼出带 admin token 的 nginx 配置，再交回官方 entrypoint（见脚本头部）。
+    # 显式 `sh <文件>` 调起：不依赖挂载文件的执行位（那一位由 gops sys perms 按只读语义收敛）。
+    entrypoint: ["/bin/sh", "/opt/wist/web-entrypoint.sh"]
+    environment:
+      # 入口口令与 admin token 都从密钥文件读；钩子只取 admin_token（口令早已算成 htpasswd 摘要）。
+      WIST_GATEWAY_SEC_FILE: /secrets/sec-value.yml
     volumes:
-      - ${WEB_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro
+      # 站点配置的**输入**（渲染物，含 @WIST_GATEWAY_ADMIN_TOKEN@ 占位）。
+      # 不能直接当 nginx 配置用：占位符会原样发出去（全部 401）。
+      - ${WEB_NGINX_CONF}:/etc/nginx/wist/nginx.conf.in:ro
+      # 入口包装脚本：把 token 拼进配置
+      - ./sys/web/web-entrypoint.sh:/opt/wist/web-entrypoint.sh:ro
+      # 入口 basic auth 的 apr1 摘要（由 scripts/init-web-conf.sh 从密钥文件推导）。
+      - ${WEB_HTPASSWD}:/etc/nginx/htpasswd:ro
+      # 密钥文件（只读）：钩子只读它的 `admin_token`。挂**目录**而非文件（同网关容器）。
+      - ./.wist:/secrets:ro
       # 站点身份（dev/prod 共用，只读）：前端公开证书在 /certs/public、私钥在 /certs/private。
       - ./identity/web:/certs:ro
     ports:

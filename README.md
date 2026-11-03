@@ -245,6 +245,33 @@ gops sys localize
 
 > 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，键 `admin_token`，只读挂进网关容器、`WIST_GATEWAY_SEC_FILE` 指定）；该文件由 `scripts/init-gateway.sh` 生成、`.gitignore`。其它密钥如需，仍可用 `${SEC_xxx}` 占位由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入、不落盘。
 
+### 人怎么进控制台（入口认证）
+
+控制台（`wist-gateway-web`）的入口认证是 **HTTP Basic**，用户名固定 `admin`，口令在**同一个密钥文件**里：
+
+```text
+.wist/sec-value.yml           # 0600、不入库、不进交付包
+  admin_token: "…"            # 机器面：管理 API 的 Bearer（直连网关端口的脚本 / 客户端）
+  web_entry_password: "…"     # 人面：浏览器打开控制台时输的口令
+        │
+        └─ gops sys localize
+              ├─ scripts/init-web-conf.sh  → configs/web/htpasswd（apr1 摘要）
+              └─ 渲染 configs/web/nginx.conf（含 @WIST_GATEWAY_ADMIN_TOKEN@ 占位）
+                    │
+     容器启动：sys/web/web-entrypoint.sh 把 token 拼进去 → /etc/nginx/conf.d/default.conf
+```
+
+要点：
+
+- **浏览器不再持 admin token**：人过了 basic auth，nginx 给 `/api/` 补 `Authorization: Bearer <admin_token>`。
+  页面右上角那个「Admin Token」控件因此长期显示“未设置”也不影响使用（它只对直连网关端口的场景有意义）。
+- **两把钥匙分开**：口令给人、token 给机器 —— 泄露一面不连坐另一面，也能各自轮换。
+- **口令怎么查 / 怎么换**：`gops sec get --show web_entry_password`；换口令改那一行，再
+  `gops sys localize` + 重启 web（nginx 只在启动时读 htpasswd）。
+- **缺 key 就起不来**：容器入口包装直接失败并说清缺什么 —— 不带占位符硬起（那样所有 `/api` 都是 401，
+  现场看起来像“token 不对”）。`scripts/init-gateway.sh` 按缺补齐两个键，**不回显**。
+- **直连网关端口（`GATEWAY_PORT`）的机器面没变**：仍然要自己带 Bearer，不经过这一道。
+
 ### 前置：挂载文件
 
 compose 还挂这些路径：
@@ -253,7 +280,9 @@ compose 还挂这些路径：
    > `configs/gateway/` **本身不再是挂载源**：它必须由 `gops sys localize` 以**部署账号**创建。
    > **不要先 `docker compose up` 再 localize** —— Docker 会以 root 建出缺失的挂载源，而且缺失的
    > `wist-gateway.toml` 会被建成同名**目录**（之后渲染会失败）。
-2. `sys/configs/web/nginx.conf.tpl` —— 前端站点配置**模板**。**仓库自带**，由 `gops sys localize` 渲染到 `configs/web/nginx.conf`（注入 `WEB_DOMAIN` → `server_name`）：443 上终止 TLS、托管前端静态产物、SPA 深链回退到 `index.html`、把 `/api` 反代到 `gateway:3000`（网关那侧是**自签 HTTPS**，已关掉证书校验）。
+2. `sys/configs/web/nginx.conf.tpl` —— 前端站点配置**模板**。**仓库自带**，由 `gops sys localize` 渲染到 `configs/web/nginx.conf`（注入 `WEB_DOMAIN` → `server_name`）：443 上终止 TLS、**入口 basic auth**、托管前端静态产物、SPA 深链回退到 `index.html`、把 `/api` 反代到 `gateway:3000`（网关那侧是**自签 HTTPS**，已关掉证书校验）。
+   > 渲染物**不是直接给 nginx 的**：里面管理面 Bearer 还是占位符，由容器入口包装 `sys/web/web-entrypoint.sh` 从密钥文件拼上（见上「人怎么进控制台」）。
+   > 所以 compose 把它挂到 `/etc/nginx/wist/nginx.conf.in`，而不是 `/etc/nginx/conf.d/default.conf`。
 3. `identity/web/{public,private}/` —— 前端站点 TLS 证书/私钥（**页面自己的**，与网关分开）。用 `scripts/init-web-tls.sh <域名> identity/web` 在目标机现场生成（身份 dev/prod 共用，只读挂到 web 容器 `/certs`）。
 4. `packages/`（`${PACKAGE_DIR}`）—— 安装包**投放目录**，只读挂到网关容器 `/packages`。用 `scripts/import-package.sh` 导入（见下 A）；界面「本地来源」填 **`/packages/<文件名>`**（容器读不到宿主任意路径；或改用 `https://...` URL）。
    > **发布 ②（中心下发 agent 包到网关）也走这份目录**：gwlinkd 用中心信任取到包后落到 `PACKAGE_DIR`，再把这个**同一份**以**容器路径**（`GWLINKD_AGENT_PACKAGE_CONTAINER_DIR`，即 `/packages/<文件名>`）交给网关托管。栈已把 `${PACKAGE_DIR}`（宿主）与 `/packages`（容器）由 `scripts/init-gwlinkd.sh` 渲染进 gwlinkd 配置；未配则 ② fail-closed。交付成功后 gwlinkd 按 `agent_package_drop_keep`（缺省 12）保留最新若干份。

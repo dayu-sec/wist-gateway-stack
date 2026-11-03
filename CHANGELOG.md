@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.25-alpha] - 2026-11-03
+
+### 组件跟版（主机指标对齐规范 v1）
+
+- `GATEWAY_TAG` → `v0.36.0`：网关的主机/进程指标改用规范名，旧的 `system.memory.total`、
+  `system.disk.usage`、`process.memory.rss_kb` 这类点分旧名不再使用。`WEB_TAG`、`WPARSE_TAG`、
+  `VM_TAG`、`KNOWLEDGE_PATH` 均不变。
+
+### 升级注意
+
+- **宿主 agentd 需 ≥ 0.21.1-alpha**：新版 agentd 只上送规范名，未升级的 agent 仍会上送旧名，
+  网关的新指标页会看不到它们的数据；网关与 agentd 应在同一个升级窗口内完成。
+- agentd 0.21.1-alpha 起 Linux 制品恢复发布（0.20.x 与 0.21.0 因构建失败没有产出可用的 Linux 包）。
+- 站点升级：先 `gops sys localize` 让新的 `GATEWAY_TAG` 落进 `.env`，再 `gops run start`。
+
 ## [0.8.24-alpha] - 2026-11-01
 
 ### 组件跟版 + 初始知识库 0.8.1（流量检测落点固定）

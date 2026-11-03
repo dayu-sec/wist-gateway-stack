@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.28-alpha] - 2026-11-03
+
+### 组件跟版（网关 0.39.0）
+
+- `GATEWAY_TAG` → `v0.39.0-alpha`：管理面新增**手工刷新入口**（`POST …/agents/{id}/refresh`，
+  `what` 与 CLI `refresh --only` 同一套词）；修复 Agent 总览的资源趋势（读侧改回规范指标名）。
+- 网关不再把 agent 自身指标写进这台 VM：自观测时序**只由数据面写入**，不会再出现两条同义序列
+  （`count`/`sum` 类查询双计）。`WEB_TAG` / `WPARSE_TAG` / `VM_TAG` / `KNOWLEDGE_PATH` 不变。
+
+### 升级注意
+
+- 自观测历史依赖 agentd 的指标帧：**`agentd < 0.20` 的机器没有自观测趋势**（即时值仍在）。
+- 管理面的「重新下发」按钮要等前端下一版（`WEB_TAG` 目前仍是指 `v0.30.0-alpha`）。
+- 升级后先 `gops sys localize`，再 `gops run start`。
+
 ## [0.8.27-alpha] - 2026-11-03
 
 ### 组件跟版 + 指标序列 label 补全

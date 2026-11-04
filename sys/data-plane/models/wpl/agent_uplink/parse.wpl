@@ -12,38 +12,12 @@ package agent_uplink {
                 digit@seq,
             ),
             symbol(METRICS:),
+            // 这里只声明**数组**。`json(...)` 是原生反序列化：标量与嵌套字段（`metric/*`）
+            // 自动就位，OML 用 `read(metric/xxx)` 按路径取；但 `values` / `timestamps` 这类
+            // 数组不会被自动绑定，必须显式列在这里。
+            // 不逐字段列那 24 个标量：同一份字段集在 WPL 和 OML 各维护一遭，
+            // 正是 `mount`→`mountpoint` 那次静默漂移的来源。
             json(
-                // 嵌套路径**不重命名**：`json()` 在没有 `:alias` 时按路径绑定，
-                // OML 用 `read(metric/xxx)` 直接取。早先那批 `:metric_xxx` 别名是为
-                // 「扁平字段」起的名字 —— 那套扁平字段已无消费者（见 adm.oml 顶部）。
-                chars@metric/__name__,
-                chars@metric/agent,
-                chars@metric/instance,
-                chars@metric/kind,
-                chars@metric/target_ref,
-                chars@metric/resource_ref,
-                chars@metric/unit,
-                // 序列 label：agentd 发什么名字，这里就原样声明什么
-                //（规范 `metrics-data-spec.md` §3 的样例帧用的就是 `instance` / `mountpoint`）。
-                chars@metric/disk_role,
-                chars@metric/mountpoint,
-                chars@metric/fstype,
-                chars@metric/device,
-                chars@metric/cpu,
-                chars@metric/mode,
-                chars@metric/state,
-                chars@metric/target_kind,
-                chars@metric/outcome,
-                // 选择类 label（网关下发，闭集 `wist_api::metrics_labels::rules::KEYS`）：
-                // WPL 不会自动搬运未声明的键，所以逐键显式列。缺键不会让规则失败（读不到就不写）。
-                chars@metric/env,
-                chars@metric/cluster,
-                chars@metric/app,
-                chars@metric/role,
-                chars@metric/shard,
-                chars@metric/tier,
-                chars@metric/region,
-                chars@metric/zone,
                 array@values,
                 array@timestamps,
             )

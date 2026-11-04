@@ -1,18 +1,35 @@
 # Agent 主机指标（wist-agentd ` METRICS:` 帧）独立 sink 分组。
 #
 # **与平台无关**：Linux / macOS 的 agentd 发的是同一种帧（规则 `agent_uplink/agent_uplink_metrics_frame`），
-# 旧名 `macos-agent-metrics` 只是「只有 macOS agent」时期的遗留。本分组只走通用 VM sink
-# 写入 VictoriaMetrics；日志走 business.d/parsed.toml。
+# 旧名 `macos-agent-metrics` 只是「只有 macOS agent」时期的遗留。
+# 本分组落本地 JSONL + 通用 VM sink 写入 VictoriaMetrics；日志走 business.d/parsed.toml。
 #
-# 这里**故意没有本地 JSONL 兜底**：`file_json_sink` → `agent-metrics.jsonl` 全仓无消费者，
-# 每批写一条、从不清理（机器跑久了只是白占磁盘）。排查确实要看原始帧时，临时加回这个 sink
-# 即可（见 CHANGELOG 0.8.30 说明），不要长期开启。
+# 本地 JSONL 的定位是**排查窗口**：VM 里只有已规范化并成功导入的点，原始帧（含被丢弃的、
+# 导入失败的、选择层还没生效的）只在这里留底。占用上限 = `max_size × (max_rolls + 1)`
+# ≈ 300MB（100MB × 3 份，历史份 gzip）。不想要这块磁盘就删掉下面那个 `json` sink。
+#
+# ⚠ 三个轮转键（`max_size` / `max_rolls` / `roll_compress`）必须先出现在连接器的
+#   `allow_override` 里（`connectors/sink.d/06-file_json_sink.toml`），否则报错不是「忽略该键」，
+#   而是 `配置错误 / load sink route confs` + exit 300，**整个 wparse 起不来**（0.8.33 已对齐上游）。
 [sink_group]
 name = "agent-metrics"
 oml = ["agent_uplink_metrics_frame"]
 tags = ["biz:agent-metrics"]
 batch_size = 1024
 batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+file = "agent-metrics.jsonl"
+max_size = "100MB"
+max_rolls = 2
+roll_compress = "gzip"
+# 立即落盘：排查时 `tail -f` 要能看到当前批，缓冲住就失去意义。
+sync = true
 
 # 通用 VM sink：基于 http_sink，把 OML 产出的 VM JSON line（metric+value）按 ndjson POST 到 VM 导入端点。
 [[sink_group.sinks]]

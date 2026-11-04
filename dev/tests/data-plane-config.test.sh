@@ -76,19 +76,20 @@ for name in gateway-logs gateway-raw-logs agent-facts agent-dsnap agent-metrics 
   fi
 done
 
-# `agent-metrics` 分组**不得**再有本地 JSONL 兜底：`agent-metrics.jsonl` 全仓无消费者，
-# 每批写一条、从不清理（机器跑久就是白占磁盘）。连接器只能是 `vm_metrics_sink`。
-# 注：配置里的注释提到过这两个名字，所以先把注释剔掉再判。
+# `agent-metrics` 分组的两个 sink 都在位：
+#   1. 本地 JSONL 保底（排查窗口）—— 必须**带轮转**，否则文件无限长；
+#   2. `vm_metrics_sink` —— 自观测时序的唯一写入者，不能没。
+# 注意：轮转三键必须先出现在连接器的 `allow_override` 里，否则装载直接失败（exit 300）。
+# 注：配置里的注释也提到这些名字，所以先把注释剔掉再判。
 METRICS_SINK="${WORK}/topology/sinks/business.d/agent_metrics.toml"
 METRICS_CFG="$(sed 's/#.*//' "${METRICS_SINK}")"
-if [[ "${METRICS_CFG}" == *file_json_sink* || "${METRICS_CFG}" == *agent-metrics.jsonl* ]]; then
-  echo '[FAIL] agent-metrics 分组又出现了 file_json_sink / agent-metrics.jsonl（白写无人读）' >&2
-  exit 1
-fi
-if [[ "${METRICS_CFG}" != *'connect = "vm_metrics_sink"'* ]]; then
-  echo '[FAIL] agent-metrics 分组缺少 vm_metrics_sink（自观测就没有写入者了）' >&2
-  exit 1
-fi
+for need in 'connect = "file_json_sink"' 'connect = "vm_metrics_sink"' \
+            'max_size' 'max_rolls' 'roll_compress'; do
+  if [[ "${METRICS_CFG}" != *"${need}"* ]]; then
+    echo "[FAIL] agent-metrics 分组缺少 ${need}（文件 sink 无轮转会无限长 / VM sink 没了自观测就断了）" >&2
+    exit 1
+  fi
+done
 
 # 报告落点必须是**连接器默认目录**（`./data/out_dat`），即本分组不覆写 `base`：
 # 网关按 `report_dir`（stack 缺省 `data/out_dat`）读目录，两侧改一边就会让「主机 → 调查」页恒空。

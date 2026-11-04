@@ -3,6 +3,28 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.35-alpha] - 2026-11-04
+
+### 变更（指标帧 WPL 缩到最小）
+
+- `agent_uplink_metrics_frame` 的 WPL 现在只声明两个数组：
+
+  ```wpl
+  symbol(METRICS:),
+  json(
+      array@values,
+      array@timestamps,
+  )
+  ```
+
+- `json(...)` 是**原生反序列化**：标量与嵌套字段（`metric/*`）自动就位，OML 用
+  `read(metric/xxx)` 按路径取，不必在 WPL 里再列一遍；只有 `values` / `timestamps`
+  这类数组不会被自动绑定，必须显式声明。
+- 收益：**新增一个 label 只改 OML 一处**，不再有「WPL 与 OML 各维护一份字段集」的漂移面
+  （`mount`→`mountpoint` 那次静默丢失就是两处不同步造成的）。
+- 行为不变，实测覆盖：满字段帧 24 个 `metric` 键、扁平/嵌套取值一致、`values`/`timestamps`
+  数组、信封 `seq`、`tenant_id` 绑定。
+
 ## [0.8.34-alpha] - 2026-11-04
 
 ### 变更（agent-metrics 恢复本地 JSONL，带轮转）

@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.33-alpha] - 2026-11-04
+
+### 修复（数据面连接器白名单落后上游）
+
+- `06-file_json_sink` / `09-file_proto_text_sink` / `10-file_raw_sink` 的 `allow_override`
+  补上 `max_size` / `max_rolls` / `roll_compress`（与上游 `wp-infra-*` 对齐）。
+- 症状：sink 里写了这三个键，报错不是「忽略该键」，而是
+  `配置错误 / detail: load sink route confs`，**exit 300、整个 wparse 起不来**，所有 sink 一起失效。
+- 原因：`allow_override` 是白名单，白名单外的键会让**整份 sink 配置**被拒。上游三份
+  （alpha / beta / stable）早已放开，本栈种子没跟上 —— 于是「照着上游抄一份配置」必然撞墙，
+  而报错信息里完全看不出是白名单的问题。
+- 实测（wparse 0.35.3）：放开后装载通过；`max_size = "4KB"` 确实产生 `.1.gz` 归档。
+
+### 升级注意
+
+- 之前被这三个键挡住的现场配置，升级后可直接使用，不必再手工注释掉文件 sink。
+- 只改连接器白名单，默认部署的 sink 行为不变。
+
 ## [0.8.32-alpha] - 2026-11-04
 
 ### 清理（指标帧 WPL/OML）

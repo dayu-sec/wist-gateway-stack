@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.34-alpha] - 2026-11-04
+
+### 变更（agent-metrics 恢复本地 JSONL，带轮转）
+
+- `agent-metrics` 分组恢复 `file_json_sink` → `agent-metrics.jsonl`，与上游 `wp-infra-*` 一致。
+  **定位是排查窗口**：VM 里只有已规范化并成功导入的点，原始帧（被丢弃的、导入失败的、
+  选择层没生效的）只在本地留底。
+- 带轮转：`max_size = "100MB"` / `max_rolls = 2` / `roll_compress = "gzip"` → 占用上限
+  ≈ 300MB；`sync = true` 让 `tail -f` 能立刻看到当前批。
+- 0.8.30 删它的理由是「无限增长」（当时没有轮转）；0.8.33 把轮转三键加进连接器白名单后，
+  这个理由不成立，所以改回「开着 + 有界」。
+
+### 测试
+
+- `dev/tests/data-plane-config.test.sh`：原来的「agent-metrics 不得有 file sink」改为
+  「两个 sink 都在位，且文件 sink 必须带 `max_size` / `max_rolls` / `roll_compress`」——
+  开了却不带轮转才是真正要拦的。
+
+### 升级注意
+
+- 每台机器最多多占约 300MB（三个环境的 `data/out_dat/agent-metrics.jsonl*`）。
+- 不想要这块磁盘：删掉该分组里的 `json` sink 即可（VM 那条不受影响）。
+
 ## [0.8.33-alpha] - 2026-11-04
 
 ### 修复（数据面连接器白名单落后上游）

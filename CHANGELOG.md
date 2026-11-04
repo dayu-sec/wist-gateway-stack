@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.32-alpha] - 2026-11-04
+
+### 清理（指标帧 WPL/OML）
+
+- **指标帧 WPL 去掉全部 `:metric_xxx` 重命名**（`sys/data-plane/models/wpl/agent_uplink/parse.wpl`）：
+  `json()` 在没有 `:alias` 时按路径绑定，嵌套字段本来就能用 `read(metric/xxx)` 直接取，
+  那 26 个别名只是为「扁平字段」起的名字。
+- 配套把 OML 的读取改成路径形式（`read(metric/disk_role)` / `read(values)`）。
+- **行为不变**：输出字段与改名之前逐字一致（扁平 `metric_*` 与嵌套 `metric` 两套都保留）；
+  契约测试的「满字段帧 24 键逐键相等 + 扁平/嵌套一致」仍然全绿。
+
+### 升级注意
+
+- 纯模型内部重构，升级后行为无差异；先 `gops sys localize` 再 `gops run start`。
+
 ## [0.8.31-alpha] - 2026-11-04
 
 ### 组件跟版（前端 0.31.1）

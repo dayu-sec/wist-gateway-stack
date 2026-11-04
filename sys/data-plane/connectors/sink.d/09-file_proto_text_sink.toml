@@ -1,5 +1,5 @@
 [[connectors]]
-allow_override = ["base", "file", "sync", "protocol"]
+allow_override = ["base", "file", "sync", "protocol", "max_size", "max_rolls", "roll_compress"]
 id = "file_proto_text_sink"
 type = "file"
 

@@ -38,10 +38,30 @@ BIN="${ROOT}/bin/${triple}/wist-stackcheck"
 offline=0
 [ "${STACKCHECK_OFFLINE:-}" = "1" ] && offline=1
 
+# ── 本地门禁（仅在 `--gate` 时追加；stackcheck 本体之后跑）────────────────
+# 判据为什么在 shell 而不在 stackcheck core：见 scripts/lib/local-gates.sh 顶部注释
+# （它们读的是容器启动时间 / 端口归属 / 密钥属组 / ops-prj 的地址形态这类**部署事实**）。
+GATE_RENDER_FILES="configs/gateway/wist-gateway.toml configs/gwlinkd/gwlinkd.toml configs/web/nginx.conf identity/gwlinkd/gwlinkd-pub.toml"
+GATE_EXTRA_GATES="gate_ops_prj_addr"
+gate_mode=0
+for arg in "$@"; do [ "$arg" = "--gate" ] && gate_mode=1; done
+
 if [ -x "$BIN" ]; then
   # 预编译件可能是别的架构（手工拷错 / 平台包拿错）：先自报版本，
   # 失败就明确说架构问题，而不是让 `exec` 报 126/127 让人去猜。
   if "$BIN" --version >/dev/null 2>&1; then
+    if [ "$gate_mode" = 1 ]; then
+      rc=0
+      gs_out=$(mktemp)
+      if [ "$offline" = 1 ]; then "$BIN" --root "$ROOT" --offline "$@"; else "$BIN" --root "$ROOT" "$@"; fi >"$gs_out" 2>&1 || rc=$?
+      cat "$gs_out"
+      . "${ROOT}/scripts/lib/local-gates.sh"
+      GATE_STACKCHECK_OUT="$gs_out" run_local_gates "$ROOT"
+      rm -f "$gs_out"
+      [ "$GATE_FAIL" = 1 ] && exit 2
+      [ "$rc" = 0 ] && [ "$GATE_WARN" = 1 ] && exit 1
+      exit "$rc"
+    fi
     if [ "$offline" = 1 ]; then
       exec "$BIN" --root "$ROOT" --offline "$@"
     fi
@@ -56,6 +76,18 @@ fi
 # 开发态回落：仓里带源码就现编现跑（发布包里一定带预编译件，不会走到这里）。
 if [ -f "${ROOT}/tools/stackcheck/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
   echo "（bin/${triple}/wist-stackcheck 不存在，回落到 cargo run）" >&2
+  if [ "$gate_mode" = 1 ]; then
+    rc=0
+    gs_out=$(mktemp)
+    if [ "$offline" = 1 ]; then cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" --offline "$@"; else cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" "$@"; fi >"$gs_out" 2>&1 || rc=$?
+    cat "$gs_out"
+    . "${ROOT}/scripts/lib/local-gates.sh"
+    GATE_STACKCHECK_OUT="$gs_out" run_local_gates "$ROOT"
+    rm -f "$gs_out"
+    [ "$GATE_FAIL" = 1 ] && exit 2
+    [ "$rc" = 0 ] && [ "$GATE_WARN" = 1 ] && exit 1
+    exit "$rc"
+  fi
   if [ "$offline" = 1 ]; then
     exec cargo run --quiet --manifest-path "${ROOT}/tools/stackcheck/Cargo.toml" -- --root "$ROOT" --offline "$@"
   fi

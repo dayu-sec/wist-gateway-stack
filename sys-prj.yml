@@ -12,6 +12,26 @@ test_envs:
 #   allow_external:           # 允许对齐系统根之外的 bind source
 #     - /srv/shared/packages
 
+# 密钥文件：`gops sec list|get|run` 靠这段**定位**文件（不声明就回退旧约定 `.galaxy/sec_value.yml`，
+# 那里没有东西 —— 症状：`gops sec list` 报「未加载到任何密钥」）。
+#
+#   .wist/sec-value.yml（不入库、不进包）
+#     admin_token: "..."        # → SEC_ADMIN_TOKEN：网关管理面 Bearer（`wist-gateway.toml` 里的 `${SEC_ADMIN_TOKEN}`）
+#
+# mode 为甚么是 0640 而 0600：`.wist` 整目录以 **:ro** 挂进 gateway 容器，而容器以 999 运行、
+# 靠**属组**读——属主（部署账号/root）可读写、容器只读，两侧都不需要提权。
+# `gops sys perms` 也会按 compose 的 `user:` + ro 挂载把文件收敛到 0640（属组 = 容器 gid）。
+#
+# expose 故意为空：网关进程自己用 `WIST_GATEWAY_SEC_FILE=/secrets/sec-value.yml` 读文件解析
+# `${SEC_*}`，**不需要** gops 把 `SEC_*` 注进 compose 环境（注了反而在 `docker inspect` 里裸奔）。
+secrets:
+  file: .wist/sec-value.yml
+  format: yaml
+  mode: "0640"
+  expose:
+    run: []
+    localize: []
+
 # `gops sys package` 打包时排除的路径（glob，相对系统根；默认模式与 `--full` **都生效**）。
 #
 # 站点身份（CA / 证书 / 私钥 / 对外域名）**不在资源树里**，它们是**站点级、dev/prod 共用**的唯一一份，

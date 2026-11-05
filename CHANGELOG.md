@@ -17,6 +17,25 @@
   Docker 会把相邻宿主端口折叠成区间（`127.0.0.1:3102-3103->3102-3103/tcp`），旧解析只认单端口，
   于是 `gops prj upgrade` 在栈运行中跑 `--gate` 时误报并整工程回滚。
 
+## [0.8.37-alpha] - 2026-11-05
+
+### 新增：栈级本地门禁（`check-stack.sh --gate`）
+
+`--gate` 之前只有 stackcheck（Rust）的**配置语法**判断；2026-11-05 一天六次现场事故里
+5 次是**部署事实不一致**，而语法检查全绿。现在 `--gate` 额外跑 `scripts/lib/local-gates.sh`：
+
+- `secrets.declared` / `secrets.mode` / `secrets.group`：有 `.wist/sec-value.yml` 就必须声明
+  `secrets:`（否则 `gops sec` 静默回退旧路径、报「未加载到任何密钥」），且权限/属组要跟容器 gid 一致；
+- `render.applied`：渲染产物（gateway/web/gwlinkd 的配置）比容器启动时间新 → 提醒“改完配置没重载”；
+- `port.owner`：`port.available` 失败时直接列出**占用者容器名**；
+- `ops-prj.addr`：交付态 `ops-prj.yml` 的系统地址必须是可跟版的 `url`（带 `{version}`），
+  不能是 `path: /tmp/...` —— 否则 `gops prj upgrade -v X` 去死目录找包。
+
+### 升级注意
+
+- 网关栈升级后，老的部署副本可能被 `secrets.declared` 判红 —— 跟上栈版本即好；
+  手工现场可先 `gops sec fix` 把密钥文件权限收敛到 `secrets.mode`。
+
 ## [Unreleased]
 
 ### 变更

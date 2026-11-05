@@ -17,6 +17,13 @@
   Docker 会把相邻宿主端口折叠成区间（`127.0.0.1:3102-3103->3102-3103/tcp`），旧解析只认单端口，
   于是 `gops prj upgrade` 在栈运行中跑 `--gate` 时误报并整工程回滚。
 
+## [0.8.38-alpha] - 2026-11-05
+
+### 修复
+
+- `scripts/lib/local-gates.sh` 过 `dev/lint.sh` 的 shellcheck（SC2034 / SC2318 / 未用变量）——
+  0.8.37 的 Release 就是卡在这道门上（tag 已删，用本版）。
+
 ## [0.8.37-alpha] - 2026-11-05
 
 ### 新增：栈级本地门禁（`check-stack.sh --gate`）

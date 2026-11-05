@@ -417,9 +417,9 @@ dependencies = [
 
 [[package]]
 name = "wist-stackcheck-core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38aec81b623adda3b0d013c140c395f65d37e8b6bf205ac2c5a93c095d41427e"
+checksum = "34287bec1bdfebd9a984093afea4e369701d9b112b3adb10357b3e38c1e6b631"
 dependencies = [
  "serde_json",
  "toml",

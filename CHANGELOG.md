@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.41-alpha] - 2026-11-05
+
+### 变更（兼容声明）
+
+- `compat.json` 的 `supports` 跟上本栈实际固定/验证过的组件（**只告警、不阻止部署**）：
+  - `wist-gateway`：`>=0.26.0` → **`>=0.40.0`**。本栈自带的初始知识库 0.9.1 目录里有
+    `multiline = "container_cri"`，只有 ≥ 0.40.0 的网关（contracts ≥ 0.10.1）能载入；
+    更旧的网关跑得起栈，但知识库会在录入时被整包拒载。
+  - `wist-agentd`：`>=0.10.0` → **`>=0.25.0`**。容器 stdout 的多行合并需要 0.25.0 的
+    `container_cri` 折叠；旧 agent 上这条来源会被网关按能力清单裁掉，其余采集面不受影响。
+- 内容与 0.8.40-alpha 一致（组件 tag / 变量无变动），仅兼容声明与版本号变化。
+
 ## [0.8.40-alpha] - 2026-11-05
 
 ### 变更（跟版）

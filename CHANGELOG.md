@@ -3,6 +3,35 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.36-alpha] - 2026-11-05
+
+### 修复
+
+- **`gops sec list|get|run` 在本栈不可用**：`sys-prj.yml` 丢了 `secrets:` 声明（2026-11-03 `7592bb6`
+  随「控制台入口 basic auth」进来，24 分钟后那笔整包 revert 时被一并带走），于是 `gops sec`
+  回退到旧约定 `.galaxy/sec_value.yml` —— 那份不存在，症状是「未加载到任何密钥」。
+  已补回 `.wist/sec-value.yml`（`mode: "0640"`：容器以 999 只读挂载、按属组读；`expose` 留空：
+  网关自己用 `WIST_GATEWAY_SEC_FILE` 解析 `${SEC_*}`，不把密钥注进 compose 环境）。
+  现场文件若还是 0600，`gops sec fix` 收敛一次即可。
+- **`port.available` 不再把本栈自己的端口当成被占**（`wist-stackcheck-core` 0.1.4 → **0.1.5**）：
+  Docker 会把相邻宿主端口折叠成区间（`127.0.0.1:3102-3103->3102-3103/tcp`），旧解析只认单端口，
+  于是 `gops prj upgrade` 在栈运行中跑 `--gate` 时误报并整工程回滚。
+
+## [Unreleased]
+
+### 变更
+
+- **`gops` / `gx` 的落点默认就是系统目录**：`GWLINKD_UPGRADER_PROGRAM` 默认 `/usr/local/bin/gops`、
+  新增的 `GWLINKD_FLOW_PROGRAM` 默认 `/usr/local/bin/gx`（渲染进 `[[upgrade.component]]` 的 `binary`）。
+  现场**不需要**再单独设；想回退到 `$HOME/bin` 就显式覆盖成空。
+  为什么需要 `GWLINKD_FLOW_PROGRAM`：裸名 `gx` 在 `$HOME/bin` 有旧副本时会**先命中旧的**，
+  升级永远碰不到 `/usr/local/bin`。
+- `agent_uplink_metrics_frame` 的 OML 透传主机身份 label：`host_name` / `host_ip` / `os` /
+  `arch` / `kernel`（agentd `system_host_info`）。同属一帧的扁平 `metric_*` 与嵌套 `metric` 都写，
+  读不到就不写 —— 不补空串。
+- `dev/tests/agent-uplink-metric-labels.test.sh` 的契约表与满字段帧同步到新字段：漏搬任一维
+  都会变红。
+
 ## [0.8.35-alpha] - 2026-11-04
 
 ### 变更（指标帧 WPL 缩到最小）

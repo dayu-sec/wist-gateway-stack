@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.40-alpha] - 2026-11-05
+
+### 变更（跟版）
+
+- **网关 `v0.39.0-alpha` → `v0.40.0-alpha`**：第一个内置 `container_cri` 读法词表的构建
+  （依赖 `wist-contracts 0.10.1`）。旧网关会在校验知识库目录时把该读法当成未知值、**整包拒载**。
+- **初始知识库 `v0.8.1` → `v0.9.1`**（`KNOWLEDGE_PATH`）：容器 stdout 改 `container_cri` 多行合并；
+  包内 `compat.json` 声明 `requires: wist-gateway >=0.40.0` / `supports: wist-agentd >=0.25.0`。
+- 升级注意：`wist-agentd 0.25.0-alpha` 已发（才能折叠 CRI 多行）；旧 agent 上这条来源由网关按
+  能力清单裁掉，其余采集面不受影响。前端 `WEB_TAG` 不变（本次 web 只有注释变更、未发版）。
+
 ## [0.8.36-alpha] - 2026-11-05
 
 ### 修复

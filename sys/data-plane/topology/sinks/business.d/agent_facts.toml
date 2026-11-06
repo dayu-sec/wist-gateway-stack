@@ -1,6 +1,6 @@
 # Agent 事实（wist-agentd ` OBSFACT:` 帧）独立 sink 分组 —— 「统一走数据面」的那条通道。
 #
-# 与 business.d/parsed.toml（oml=["*"]，日志）并存：本分组的 OML 名精确命中，其余记录仍走日志分组。
+# 本分组按 OML 名精确命中；种子里不再有 `oml=["*"]` 的兜底分组，未命中任何分组的记录会被丢弃。
 # 信封字段（schema/agent/observed_at/seq）与正文 `body` 原样落盘：正文是契约对象
 # （ReportAgentFactSummary / ReportDiscoverySnapshot），订阅端按 wist-contracts 解析。
 #

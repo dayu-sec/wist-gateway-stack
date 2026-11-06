@@ -2,7 +2,9 @@
 #
 # **与平台无关**：Linux / macOS 的 agentd 发的是同一种帧（规则 `agent_uplink/agent_uplink_metrics_frame`），
 # 旧名 `macos-agent-metrics` 只是「只有 macOS agent」时期的遗留。
-# 本分组落本地 JSONL + 通用 VM sink 写入 VictoriaMetrics；日志走 business.d/parsed.toml。
+# 本分组落本地 JSONL + 两份 VictoriaMetrics：网关栈自己那份（`WPARSE_VM_ENDPOINT`，
+# 控制面观测页用）与计算区 console 栈那份（`CONSOLE_VM_ENDPOINT`，星象台用）。
+
 #
 # 本地 JSONL 的定位是**排查窗口**：VM 里只有已规范化并成功导入的点，原始帧（含被丢弃的、
 # 导入失败的、选择层还没生效的）只在这里留底。占用上限 = `max_size × (max_rolls + 1)`
@@ -39,3 +41,19 @@ tags = ["sink:vmetrics"]
 
 [sink_group.sinks.params]
 endpoint = "${WPARSE_VM_ENDPOINT}/api/v1/import"
+
+# 计算区（wist-console-stack）的 VictoriaMetrics：**同一批点再写一份**。
+# 两份存储互不聚合（console README：「谁写谁查」）：网关栈的 VM 只服务控制面观测页，
+# console 的 VM 只服务星象台。默认指向同宿主 console 的 `VM_HOST_PORT`（18428）。
+# `CONSOLE_VM_ENDPOINT` 定义在 `sys/setting/vars.yml`；数据面与 console 不同机时用
+# 工作根 `.env` / values 覆盖成 console 的内网地址。
+# 如果不想要这份镜像：删掉这一段即可（或在站点 values 里把 `CONSOLE_VM_ENDPOINT` 指到同一台）。
+# ⚠ 端点不可达时连接器会重试并最终落 rescue（每批一个文件），不是静默丢弃。
+[[sink_group.sinks]]
+name = "vm_metrics_console"
+connect = "vm_metrics_sink"
+
+[sink_group.sinks.params]
+endpoint = "${CONSOLE_VM_ENDPOINT:http://host.docker.internal:18428}/api/v1/import"
+batch_size = 64
+timeout_secs = 5

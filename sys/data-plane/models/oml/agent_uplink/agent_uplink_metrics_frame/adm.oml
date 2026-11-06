@@ -33,6 +33,13 @@ metric_mode = read(metric/mode);
 metric_state = read(metric/state);
 metric_target_kind = read(metric/target_kind);
 metric_outcome = read(metric/outcome);
+// 主机身份（`system_host_info`）：主机名 / 主 IP / 系统 / 架构 / 内核。
+// 读不到就不写 —— 这些值不存在时不补空串。
+metric_host_name = read(metric/host_name);
+metric_host_ip = read(metric/host_ip);
+metric_os = read(metric/os);
+metric_arch = read(metric/arch);
+metric_kernel = read(metric/kernel);
 // 选择类 label（`env` / `cluster` / `app` / `role` / `shard` / `tier` / `region` / `zone`）：
 // 由网关下发、**贴在全部序列**上（不是这条指标自己的属性）。读不到就不写 —— 不猜、不补默认。
 // 注意前缀：引擎自己会在顶层注入一个 `env`（部署环境），所以输出侧统一用 `metric_*` 区分。
@@ -67,6 +74,11 @@ metric = object {
     state = read(metric/state);
     target_kind = read(metric/target_kind);
     outcome = read(metric/outcome);
+    host_name = read(metric/host_name);
+    host_ip = read(metric/host_ip);
+    os = read(metric/os);
+    arch = read(metric/arch);
+    kernel = read(metric/kernel);
     // 选择类 label：规范 §3.4 要求它们出现在每条序列上（查询/告警靠它分组）。
     // 值为空时 Wparse 不写该键（不会出现 `env=""` 这种污染序列的空标签）。
     env = read(metric/env);

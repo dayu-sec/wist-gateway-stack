@@ -173,7 +173,7 @@ services:
         if [ -f "$$trust" ] && /usr/bin/grep -q 'BEGIN CERTIFICATE' "$$trust"; then
           :
         else
-          echo "info: 没有可用的中心信任锚（$$trust）—— 公网 CA 的中心或尚未接入中心时是正常态；本容器回落系统根" >&2
+          echo "info: 没有可用的中心信任锚（$${trust}）—— 公网 CA 的中心或尚未接入中心时是正常态；本容器回落系统根" >&2
           unset SSL_CERT_FILE GIT_SSL_CAINFO
         fi
         exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
@@ -187,6 +187,14 @@ services:
       # 数据面 sink（agent-facts / agent-logs）用的网关内部接入端点；
       # 与网关配置的 [ingest].listen_addr 对应（明文 HTTP，只走 compose 内网）。
       WPARSE_GATEWAY_ENDPOINT: http://gateway:3001
+      # 计算区（wist-console-stack）的两个写入端点：DSNAP → atlas、IVSREP → 证据。
+      # 变量定义在 `sys/setting/vars.yml`（ATLAS_SINK_URL / EVIDENCE_SINK_URL）。
+      # 这里用 `:-默认` 兜底：wparse 的 `${VAR:…}` **只在变量完全没设**时用默认值，
+      # 空串会被当成有效值（拼出 `/internal/atlas` 这种坏端点）。
+      ATLAS_SINK_URL: ${ATLAS_SINK_URL:-http://host.docker.internal:18801}
+      EVIDENCE_SINK_URL: ${EVIDENCE_SINK_URL:-http://host.docker.internal:18800}
+      # 采集指标镜像：console 栈那份 VictoriaMetrics（定义在 vars.yml）。
+      CONSOLE_VM_ENDPOINT: ${CONSOLE_VM_ENDPOINT:-http://host.docker.internal:18428}
       # project_remote 的两个仓库（Center Git Proxy，Gateway 不持有 CNB 凭据）。
       WPARSE_PROJECT_MODELS_REPO: ${WPARSE_PROJECT_MODELS_REPO}
       WPARSE_PROJECT_INFRA_REPO: ${WPARSE_PROJECT_INFRA_REPO}

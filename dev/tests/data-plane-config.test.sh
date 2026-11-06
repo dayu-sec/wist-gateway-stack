@@ -3,7 +3,7 @@
 #
 # 为什么单列一条（而不是并进 `agent-uplink-ivsrep.test.sh`）：
 #   * 那条测试只放**一份** sink（ivsrep），验的是「报告这条路能通」；
-#   * 站点拿到的却是 `sys/data-plane/` 整份 seed（7 个 sink 分组 + 全部模型）——
+#   * 站点拿到的却是 `sys/data-plane/` 整份 seed（6 个 sink 分组 + 全部模型）——
 #     任何一个参数写错（例如这个引擎不支持的 `max_size` / `roll_compress`），
 #     `load sink route confs` 会整体失败，表现是「引擎起来了但一条数据都没有」，比崩溃更难查。
 #
@@ -68,8 +68,8 @@ if grep -q 'ERROR' "${LOG}"; then
   exit 1
 fi
 
-# 每个 sink 分组都在位（少一个 = 某类数据会静默落兜底 sink 或直接丢）。
-for name in gateway-logs gateway-raw-logs agent-facts agent-dsnap agent-metrics agent-ivsrep ignore; do
+# 每个 sink 分组都在位（少一个 = 该类记录直接丢：种子里已没有 `oml=["*"]` 兜底分组）。
+for name in gateway-raw-logs agent-facts agent-dsnap agent-metrics agent-ivsrep ignore; do
   if ! grep -rqs "name = \"${name}\"" "${WORK}/topology/sinks"; then
     echo "[FAIL] 缺少 sink 分组：${name}" >&2
     exit 1

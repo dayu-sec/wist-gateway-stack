@@ -5,10 +5,8 @@
 #   - 原文快照一台几百 KB，消费者是 wist-atlas，不进网关库。
 #
 # 必须绑 DSNAP 的 OML（`agent_obs_dsnap`，来自 wp-rules：rule `agent_uplink/obs_dsnap`）。
-# 绑错/漏绑的后果：DSNAP 记录没有精确分组可命中，会落进兜底 sink `gateway-logs`
-# （parsed.toml，oml=["*"]），被网关日志接入点按
-# `not a data-plane log record: missing field raw` 400 拒掉 —— 现场表现就是「agentd 说发了、
-# 数据面一帧都看不到」。
+# 绑错/漏绑的后果：DSNAP 记录没有精确分组可命中 → **直接丢弃**（种子里已没有
+# `oml=["*"]` 的兜底分组 `gateway-logs`）—— 现场表现就是「agentd 说发了、数据面一帧都看不到」。
 #
 # 当前只落文件用于联调与回放；接上 atlas 的内部 ingest 后，再在同一分组加一个
 # http_sink（不要把快照投到 gateway_facts_sink / gateway_logs_sink）。

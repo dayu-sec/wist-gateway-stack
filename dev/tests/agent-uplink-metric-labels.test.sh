@@ -101,7 +101,7 @@ mkdir -p "${WORK}/data/in_dat"
 cat > "${WORK}/data/in_dat/gen.dat" <<'EOF'
 {"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":1} METRICS: {"metric":{"__name__":"system.filesystem.usage","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"percent","disk_role":"system","mountpoint":"/var","fstype":"xfs","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker"},"values":[95.0],"timestamps":[1760860800000]}
 {"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":2} METRICS: {"metric":{"__name__":"system.load_average.1m","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"1"},"values":[0.25],"timestamps":[1760860800000]}
-{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":3} METRICS: {"metric":{"__name__":"agent_memory_bytes","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"bytes","disk_role":"data","mountpoint":"/data","fstype":"ext4","device":"/dev/sdb1","cpu":"cpu0","mode":"rw","state":"up","target_kind":"disk","outcome":"succeeded","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker","shard":"3","tier":"hot","region":"cn-north","zone":"az-1"},"values":[1048576],"timestamps":[1760860800000]}
+{"schema":"agent_uplink","agent":"agent-001","ts":"2026-10-19T08:00:00Z","seq":3} METRICS: {"metric":{"__name__":"agent_memory_bytes","agent":"agent-001","instance":"host-1:host","kind":"host_metrics","target_ref":"host-1:host","resource_ref":"host-1","unit":"bytes","disk_role":"data","mountpoint":"/data","fstype":"ext4","device":"/dev/sdb1","cpu":"cpu0","mode":"rw","state":"up","target_kind":"disk","outcome":"succeeded","host_name":"web-01","host_ip":"10.0.0.5","os":"linux","arch":"x86_64","kernel":"6.8.0","env":"prod","cluster":"kafka-prod","app":"kafka","role":"broker","shard":"3","tier":"hot","region":"cn-north","zone":"az-1"},"values":[1048576],"timestamps":[1760860800000]}
 EOF
 
 "${WPARSE}" batch --work-root "${WORK}" >/dev/null
@@ -130,6 +130,8 @@ has '"mountpoint":"/var"' "${fs_line}" "文件系统指标带 mountpoint 标签"
 has '"fstype":"xfs"' "${fs_line}" "文件系统指标带 fstype 标签"
 hasnt '"mountpoint"' "${load_line}" "非文件系统指标不写空 mountpoint"
 hasnt '"fstype"' "${load_line}" "非文件系统指标不写空 fstype"
+hasnt '"host_ip"' "${load_line}" "非 info 指标不写空 host_ip"
+hasnt '"host_name"' "${load_line}" "非 info 指标不写空 host_name"
 # 旧名 `mount` 是历史误写（agentd 发的是 `mountpoint`）：改名后不得再出现，否则同一份数据会有两种 key。
 hasnt '"mount"' "${fs_metric}" "不再产出旧名 mount"
 
@@ -159,6 +161,7 @@ CANON = [
     "__name__", "agent", "instance", "kind", "target_ref", "resource_ref", "unit",
     "disk_role", "mountpoint", "fstype", "device", "cpu", "mode", "state",
     "target_kind", "outcome",
+    "host_name", "host_ip", "os", "arch", "kernel",
     "env", "cluster", "app", "role", "shard", "tier", "region", "zone",
 ]
 

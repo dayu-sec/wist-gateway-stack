@@ -191,9 +191,8 @@ if [[ -w "${DEST_DIR}" ]]; then SUDO=""; else SUDO="sudo"; fi
 # 通常只有 root 能写）。不单独判的话会出现：bin 已换上、定义重写失败、服务没重启 ——
 # 脚本在中途报错，跑的还是旧二进制。
 if [[ -w "$(dirname -- "${DEFINITION}")" ]]; then SERVICE_SUDO=""; else SERVICE_SUDO="sudo"; fi
-# 服务的运行身份：以**部署用户**跑，别用 root（gwlinkd 会回写配置 / 落身份 / 驱动 gops 升级，
-# 那些都该是部署用户的属主）。这与中心安装脚本的 `--run-as <部署用户>` 同口径。
-RUN_AS_ARGS=(--run-as "$(id -un)")
+# 服务固定以 **root** 运行（system 作用域不再支持 `--run-as`）：gwlinkd 要写栈文件、
+# `chown` 挂载点、自更新覆盖二进制。
 
 # ---------------------------------------------------------------- 解析「服务现有定义」里的配置路径
 # 用户要的是「沿用**现有的发布态**」——不靠猜：直接从已装的 plist / unit 里读它当年写进去的
@@ -223,7 +222,7 @@ PUB="${WIST_GWLINKD_DEV_PUB_CONFIG:-${DEFINITION_PUB:-${RELEASE_PUB}}}"
 
 # ---------------------------------------------------------------- 服务状态（只读）
 service_status_raw() {
-  "${SERVICE_BIN}" service status --system "${RUN_AS_ARGS[@]}" \
+  "${SERVICE_BIN}" service status --system \
     --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}"
 }
 
@@ -369,10 +368,10 @@ install_service() {
   echo "== 重写服务定义并重启（service install --force）=="
   if [[ "${DRY_RUN}" == "1" && -x "${SRC_BIN}" ]]; then
     note "将写入的服务定义（service print 渲染）："
-    "${SRC_BIN}" service print --system "${RUN_AS_ARGS[@]}" \
+    "${SRC_BIN}" service print --system \
       --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}" 2>&1 | sed 's/^/    /' || true
   fi
-  run ${SERVICE_SUDO} "${SERVICE_BIN}" service install --force --system "${RUN_AS_ARGS[@]}" \
+  run ${SERVICE_SUDO} "${SERVICE_BIN}" service install --force --system \
     --bin "${SERVICE_BIN}" --config "${CONF}" --pub-config "${PUB}"
 }
 
@@ -440,15 +439,16 @@ preflight() {
   note "platform=${PLATFORM} scope=system uid=$(id -u) mode=${MODE} dry_run=${DRY_RUN} profile=${PROFILE}"
   note "产物     ${SRC_BIN}"
   note "服务 bin $(short "${SERVICE_BIN}")$([[ "${DEST_BIN}" == "${SERVICE_BIN}" ]] || printf ' → %s' "$(short "${DEST_BIN}")")"
+  # 服务（system 作用域）以 **root** 运行，自更新只要真身目录对 root 可写即可。
   if [[ -w "${DEST_DIR}" ]]; then
     note "自更新   $(short "${DEST_DIR}") 对 $(id -un) 可写"
   else
-    note "自更新   $(short "${DEST_DIR}") 对 $(id -un) **不可写** → 中心推送的 gwlinkd 升级会失败（重跑中心「只装 gwlinkd」可修）"
+    note "自更新   $(short "${DEST_DIR}") 对 $(id -un) 不可写（服务以 root 运行，root 可写即可）"
   fi
   note "主配置   $(short "${CONF}")$([[ "${DEFINITION_CONF}" == "${CONF}" ]] && printf '（取自服务现有定义）')"
   note "现场态   $(short "${PUB}")$([[ "${DEFINITION_PUB}" == "${PUB}" ]] && printf '（取自服务现有定义）')"
   note "服务定义 ${DEFINITION}"
-  note "运行身份 --run-as $(id -un)"
+  note "运行身份 root（system 作用域固定）"
   if [[ ! -f "${DEFINITION}" ]]; then
     note "服务定义不存在：这是一次**首次安装**（换二进制 + 注册服务，不写配置、不碰注册）"
   fi

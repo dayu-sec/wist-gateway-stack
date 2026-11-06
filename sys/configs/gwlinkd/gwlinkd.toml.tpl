@@ -91,10 +91,17 @@ name = "galaxy-ops"
 install = "tool-copy"
 binary = "gops"
 {{/if}}
+{{#if flow_program}}
+[[upgrade.component]]
+name = "galaxy-flow"
+install = "tool-copy"
+binary = "{{flow_program}}"
+{{else}}
 [[upgrade.component]]
 name = "galaxy-flow"
 install = "tool-copy"
 binary = "gx"
+{{/if}}
 
 # ── WarpParse 管理面中继（WarpStation 发布链路）──
 # Center 的 wparse-proxy 把发布/状态请求写入命令队列；gwlinkd 轮询取命令，

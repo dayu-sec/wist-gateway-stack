@@ -305,7 +305,7 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 ## 把本机编译的 gwlinkd 发布到系统服务（`install-gwlinkd-dev.sh`）
 
 发布态把 gwlinkd 装成**系统服务**常驻（中心下发的安装脚本调：`wist-gwlinkd service install --system
---run-as <部署用户> --bin /usr/local/bin/wist-gwlinkd --config <栈根>/configs/gwlinkd/gwlinkd.toml
+--bin /usr/local/bin/wist-gwlinkd --config <栈根>/configs/gwlinkd/gwlinkd.toml
 --pub-config <栈根>/identity/gwlinkd/gwlinkd-pub.toml`）。你在改 gwlinkd 源码，想让**这个服务跑的就是你刚编出来的那份**，用 `./dev/install-gwlinkd-dev.sh`：
 
 ```bash
@@ -327,11 +327,15 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
   入口是**符号链接**，真身在 `/usr/local/lib/wist-gwlinkd/wist-gwlinkd`（目录与文件都归运行用户）；
   本脚本会顺链接换**真身**，不会把链接改成普通文件。覆盖前先 `cp -p` 备份成 `*.bak-<时间戳>`，
   换完用 sha256 校验（不一致即报错），`--rollback` 换回最近一次。
-- **换完还体检自更新布局**：gwlinkd 的自更新要在进程内“同目录写临时文件 + rename”覆盖真身，**目录**必须对
-  运行用户可写。落在 `/usr/local/bin`（root 拥有）时会 `[warn] 自更新会失败`，并提示重跑中心「只装 gwlinkd」——
-  别把链接换成 root 的普通文件，那正是这条警告的成因。
-- **运行身份仍是部署用户**（`--run-as $(id -un)`）：别让服务以 root 跑 —— gwlinkd 会回写配置、落身份、驱动
-  `gops` 升级，那些都该是部署用户的属主（与中心安装脚本同一口径）。
+- **自更新布局**：gwlinkd 在进程内“同目录写临时文件 + rename”覆盖真身，要求**目录**对运行身份
+  （system 作用域 = root）可写 —— `/usr/local/bin` 默认满足；中心布局是 `/usr/local/lib/wist-gwlinkd`
+  真身 + `/usr/local/bin/wist-gwlinkd` 符号链接，也别把链接换成 root 的普通文件。
+- **运行身份是 root**（system 作用域固定，gwlinkd 已不提供 `--run-as`）：gwlinkd 要写栈文件、
+  `chown` 挂载点（`gops sys perms`）、自更新覆盖二进制 —— 这些都要 root。注意它在 dev 栈里写出的
+  `state/` 等运行态会是 root 属主；要改回来就 `sudo chown -R $(id -u) ...`。
+  - 开发机如果在 `sys_value.yml` 里覆盖了 `GWLINKD_UPGRADER_PROGRAM`（典型指 `~/bin/gops`），**也请
+    一并覆盖 `GWLINKD_FLOW_PROGRAM`**（如 `~/bin/gx`）—— 两者默认都是 `/usr/local/bin/...`，
+    不覆盖就会把 dev 的 `gx` 装到系统目录。
 - **gwlinkd 只归这一个服务**：`svc.sh` 已不管它（不构建、不起、不停）。本脚本装服务前只兜底清掉
   「老的 nohup 形态」残留进程 —— 它不归服务管理器管，却占着同一个 state 目录的 `flock`，留着服务起不来。
 - **要停 / 卸载**：`sudo /usr/local/bin/wist-gwlinkd service uninstall --system`（停用并删定义）。

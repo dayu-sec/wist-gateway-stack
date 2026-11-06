@@ -23,6 +23,7 @@
 #   GWLINKD_AGENT_PACKAGE_CONTAINER_DIR  该目录在网关容器里的路径（缺省 /packages，与 compose 挂载一致）
 #                                  渲染给 gwlinkd 时自动补 `/agents`（即 `/packages/agents`）
 #   GWLINKD_UPGRADER_PROGRAM       升级执行器程序（空 = 不渲染，用 gwlinkd 缺省 gops）
+#   GWLINKD_FLOW_PROGRAM           galaxy-flow（gx）的落点（空 = 渲染裸名 `gx`，按 $HOME/bin → PATH）
 #   GWLINKD_UPGRADE_PROJECT_DIR    gops 工程根（含 ops-prj.yml；空 = 不渲染；**绝对路径**）
 #
 # 注意：**现场选择**（GWLINKD_CENTER_ENDPOINT / GWLINKD_GATEWAY_ID / GWLINKD_TRUST_BUNDLE）**不经过本脚本**
@@ -59,13 +60,14 @@ python3 - "$VALUE_JSON" \
   "${PACKAGE_DIR:-./packages}" \
   "${GWLINKD_AGENT_PACKAGE_CONTAINER_DIR:-/packages}" \
   "${GWLINKD_UPGRADER_PROGRAM:-}" \
+  "${GWLINKD_FLOW_PROGRAM:-}" \
   "${GWLINKD_UPGRADE_PROJECT_DIR:-}" \
   "${STACK_ROOT}" \
   "${WPARSE_ADMIN_PORT:-19090}" <<'PY'
 import json, os, sys, tempfile
 
 path = sys.argv[1]
-state, identity, self_ep, self_ca, drop_raw, container, upgrader, upgrade_dir, stack_root, admin_port = sys.argv[2:12]
+state, identity, self_ep, self_ca, drop_raw, container, upgrader, flow, upgrade_dir, stack_root, admin_port = sys.argv[2:13]
 # 投放目录给 gwlinkd 用：空 = 不启用（不渲染）；相对路径 → **绝对**（gwlinkd 的 cwd 不定）。
 # ② 的交付区独占一个子目录：`packages/` 同时放知识库包与人工投放的安装包，而 gwlinkd 交付后
 # 按 mtime 只保留最新 N 份（`prune_drop_dir` **不区分类型**）—— 混放会把知识库包连带清掉。
@@ -85,6 +87,7 @@ value = {
     "agent_package_drop_dir": drop,
     "agent_package_container_dir": container,
     "upgrader_program": upgrader,
+    "flow_program": flow,
     "upgrade_project_dir": upgrade_dir,
     # WarpParse 管理面中继（WarpStation 发布链路）。gwlinkd 实现 [wparse_relay] 后生效。
     "wparse_relay_enabled": "true",

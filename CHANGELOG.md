@@ -3,6 +3,45 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.9.0-alpha] - 2026-11-06
+
+### 新增
+
+- **数据面可写入计算区（wist-console-stack）**：新增三个变量 ——
+  `ATLAS_SINK_URL`（默认 `http://host.docker.internal:18801`）、
+  `EVIDENCE_SINK_URL`（默认 `http://host.docker.internal:18800`）、
+  `CONSOLE_VM_ENDPOINT`（默认 `http://host.docker.internal:18428`）。
+  采集指标在原有「网关栈自己那份 VictoriaMetrics」之外，**再写一份到计算区**（星象台查那份）。
+- **Agent 指标帧带主机身份**：`host_name` / `host_ip` / `os` / `arch` / `kernel` 作为 label 下发，
+  控制面可以按主机维度出指标；读不到就不写（不补空串、不污染序列）。
+
+### 变更（跟版）
+
+- **网关 `v0.40.0-alpha` → `v0.40.1-alpha`**：macOS 主机的安装命令改为校验安装脚本自身的 sha256，
+  不再钉网关证书 —— 网关前面有终止 TLS 的代理/负载均衡、或网关换过证书时不再失效。
+  已发出的 macOS 安装命令需要重新复制一次。
+
+### 变更（升级注意）
+
+- **兜底 sink 分组 `gateway-logs`（`oml = ["*"]`）已删除**：未命中任何 sink 分组的记录现在会被
+  **直接丢弃**，不再落 `data/out_dat/gateway.json`。自建 / 覆盖 sink 时务必让 OML 名精确命中
+  （或显式写 `*/<名>`），否则现场表现为「agentd 说发了、数据面一帧都看不到」。
+- **没有部署计算区的现场要显式处理 `CONSOLE_VM_ENDPOINT`**：指标的双写端点不可达时，连接器会重试并
+  最终落 rescue 文件（每批一个），不是静默丢弃 —— 会在磁盘上持续积累。没有 console 的现场，把
+  `CONSOLE_VM_ENDPOINT` 覆盖成网关栈自己那份 VM 的地址，或在 `sys/data-plane/topology/sinks/business.d/agent_metrics.toml`
+  里删掉 `vm_metrics_console` 段。
+- **gwlinkd 的升级执行器改为默认绝对路径**：`GWLINKD_UPGRADER_PROGRAM=/usr/local/bin/gops`，
+  新增 `GWLINKD_FLOW_PROGRAM=/usr/local/bin/gx`（模板里多一个 `flow_program` 位）。`tool-copy` 升级是
+  就地 rename，目录需可写、且系统作用域下可见；升级前确认这两个程序就在 `/usr/local/bin`，
+  否则升级计划会 spawn 报 ENOENT。若现场在 `values/` 里覆盖了 `GWLINKD_UPGRADER_PROGRAM`
+  （典型指向 `~/bin/gops`），**请一并覆盖 `GWLINKD_FLOW_PROGRAM`**，否则 `gx` 会被装到系统目录。
+- **gwlinkd 系统服务固定以 root 运行**（不再支持 `--run-as`）：它要写栈文件、`chown` 挂载点
+  （`gops sys perms`）、自更新覆盖二进制。升级后 `state/` 等运行态会是 root 属主；需要改回部署
+  用户就 `sudo chown -R <用户> …`（`dev/install-gwlinkd-dev.sh` 已同步这一口径）。
+- **`host.docker.internal` 只在 Docker Desktop（macOS / Windows）可用**：Linux 宿主需要把上面三个
+  计算区地址覆盖成 console 机器的内网地址，并把对方的 `EVIDENCE_SINK_BIND_IP` / `ATLAS_INGEST_BIND_IP` /
+  `VM_BIND_IP` 从回环改掉。
+
 ## [0.8.41-alpha] - 2026-11-05
 
 ### 变更（兼容声明）

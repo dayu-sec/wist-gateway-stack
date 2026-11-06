@@ -6,7 +6,7 @@ system:
 - name: VM_SPC
   value: quay.io/victoriametrics
 - name: GATEWAY_TAG
-  value: v0.40.0-alpha
+  value: v0.40.1-alpha
 - name: WEB_TAG
   value: v0.31.1-alpha
 - name: VM_TAG
@@ -25,6 +25,12 @@ system:
   value: 9000
 - name: WPARSE_ADMIN_PORT
   value: 19090
+- name: ATLAS_SINK_URL
+  value: http://host.docker.internal:18801
+- name: EVIDENCE_SINK_URL
+  value: http://host.docker.internal:18800
+- name: CONSOLE_VM_ENDPOINT
+  value: http://host.docker.internal:18428
 - name: RETENTION_PERIOD
   value: 6
 - name: TZ
@@ -78,6 +84,8 @@ system:
 - name: GATEWAY_SELF_CA
   value: ''
 - name: GWLINKD_UPGRADER_PROGRAM
-  value: ''
+  value: /usr/local/bin/gops
+- name: GWLINKD_FLOW_PROGRAM
+  value: /usr/local/bin/gx
 - name: GWLINKD_UPGRADE_PROJECT_DIR
   value: ''

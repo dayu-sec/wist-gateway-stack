@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.5-alpha] - 2026-11-08
+
+### 修复
+
+- **`allowed_maturity` 渲染成了 HTML 转义形式**（`&quot;`），网关启动直接 TOML 解析失败、
+  容器重启循环（症状：`Parsing /config/wist-gateway.toml: string values must be quoted`）。
+  `gx.tpl` 默认对 `{{var}}` 做 HTML 转义，含引号的值必须用三花括号 `{{{var}}}`。
+  0.10.4 只影响**重新 localize 过**的站点（未重渲的站点配置里没有这个键，不受影响）。
+
 ## [0.10.4-alpha] - 2026-11-08
 
 ### 新增

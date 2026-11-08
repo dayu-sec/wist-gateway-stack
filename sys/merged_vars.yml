@@ -69,6 +69,8 @@ system:
   value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
 - name: KNOWLEDGE_PATH
   value: v0.9.3-alpha/wist-knowledge-0.9.3-alpha.tar.gz
+- name: KNOWLEDGE_ALLOWED_MATURITY
+  value: stable,unknown
 - name: GWLINKD_CENTER_ENDPOINT
   value: ''
 - name: GWLINKD_GATEWAY_ID

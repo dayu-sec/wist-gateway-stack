@@ -81,6 +81,30 @@ VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
 # 一次性调查报告目录：与数据面 sink 的落点同一份路径（相对 wparse 工作根）。
 # 写进渲染值是为了让网关可覆盖，而不是在模板里再写一份字面量。
 REPORT_DIR_VALUE="${INVESTIGATION_REPORT_DIR:-data/out_dat}"
+# 允许录入/激活的知识包**成熟度**（网关 `[knowledge] allowed_maturity`，逗号分隔）。
+# 打包侧按 tag 通道写 `manifest.maturity`：`-alpha`=experimental / `-beta`=preview / 无后缀=stable。
+# 默认只认 `stable` + `unknown`（`unknown` 给没有该字段的旧包）；测试站要装 `-alpha` 包时
+# 把 `experimental` 加进来。写错值就地报错，别拖到网关启动才拒。
+MATURITY_RAW="${KNOWLEDGE_ALLOWED_MATURITY:-stable,unknown}"
+MATURITY_TOML="$(python3 - "$MATURITY_RAW" <<'PY'
+import sys
+
+allowed = {"stable", "preview", "experimental", "unknown"}
+items = [item.strip() for item in sys.argv[1].split(",") if item.strip()]
+if not items:
+    print("KNOWLEDGE_ALLOWED_MATURITY 不能为空（至少 stable）", file=sys.stderr)
+    raise SystemExit(2)
+bad = [item for item in items if item not in allowed]
+if bad:
+    print(
+        f"KNOWLEDGE_ALLOWED_MATURITY 里有不认识的值：{bad}"
+        "（只认 stable / preview / experimental / unknown）",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+print(", ".join(f'"{item}"' for item in items))
+PY
+)"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
 # python3 也是硬依赖（admin token / 值文件都用它）：早说清楚，别等到第 226 行才以 127 死掉。
@@ -263,7 +287,8 @@ if [[ ! -f "$VALUE_JSON" ]]; then
 {
   "public_base_url": "https://${domain}",
   "victoria_metrics_url": "${VM_URL}",
-  "investigation_report_dir": "${REPORT_DIR_VALUE}"
+  "investigation_report_dir": "${REPORT_DIR_VALUE}",
+  "knowledge_allowed_maturity": "${MATURITY_TOML}"
 }
 EOF
   chmod 600 "$VALUE_JSON"
@@ -273,14 +298,15 @@ else
     echo "需要 python3 才能更新 ${VALUE_JSON}" >&2
     exit 1
   }
-  python3 - "$VALUE_JSON" "$VM_URL" "$domain" "$REPORT_DIR_VALUE" <<'PY'
+  python3 - "$VALUE_JSON" "$VM_URL" "$domain" "$REPORT_DIR_VALUE" "$MATURITY_TOML" <<'PY'
 import json, os, sys, tempfile
 
-path, vm_url, domain, report_dir = (
+path, vm_url, domain, report_dir, maturity = (
     sys.argv[1],
     sys.argv[2],
     sys.argv[3].strip(),
     sys.argv[4].strip(),
+    sys.argv[5].strip(),
 )
 with open(path) as handle:
     value = json.load(handle)
@@ -293,6 +319,10 @@ if value.get("victoria_metrics_url", "") != vm_url:
 # 报告目录也是**派生值**（随变量 / 现场配置），每轮对齐 —— 否则改了变量仍旧渲染旧路径。
 if report_dir and value.get("investigation_report_dir") != report_dir:
     value["investigation_report_dir"] = report_dir
+    changed = True
+# 知识包成熟度白名单：同样是派生值，每轮对齐（否则改了变量后网关还按旧的白名单拒包）。
+if maturity and value.get("knowledge_allowed_maturity") != maturity:
+    value["knowledge_allowed_maturity"] = maturity
     changed = True
 # public_base_url 同样是**派生值**（host = WEB_DOMAIN）：显式给了 WEB_DOMAIN 就对齐。
 # 以前只在新建时写，域名一改就永远停在旧值 —— 典型症状是脚本拿着 `gw.example.com`

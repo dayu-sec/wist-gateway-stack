@@ -1,0 +1,81 @@
+# 计算区「数据场（wist-field）」的三个写入端点 —— 做成**可复用连接器**。
+#
+# 任何 sink 分组只要写 `connect = "wist-field-<端点>"`，就复用了这里的
+# 端点 / 报文格式 / 批量 / 超时；sink 文件里**不再重复**这些参数（也不该重复）。
+# 站点换地址只改环境变量，不碰配置：
+#
+#   FIELD_EVIDENCE_URL    证据写入（默认 http://host.docker.internal:18800）
+#   FIELD_ATLAS_URL       资产拓扑写入（默认 http://host.docker.internal:18801）
+#   FIELD_METRICS_URL     运行时指标镜像（默认 http://host.docker.internal:18428）
+#
+# 变量名与连接器一一对应（`wist-field-evidence` ↔ `FIELD_EVIDENCE_URL` …）。
+# 旧名 `EVIDENCE_SINK_URL` / `ATLAS_SINK_URL` / `CONSOLE_VM_ENDPOINT` 已移除，
+# 这里只认新名 —— 要么改现场变量，要么用缺省地址。
+#
+# 三个端点的形状各不相同，下面每个连接器各自钉死 —— 改错的表现不是「报错」，
+# 而是「投出去被 400 / 静默丢」，所以理由写在参数旁边。
+#
+# ⚠ `host.docker.internal` 是 Docker Desktop 的宿主别名。数据面与 field 不同机、
+#   或 Linux 宿主（没有该域名）时，用工作根 `.env` / compose environment 覆盖，
+#   **不要改缺省值**（改了就等于把「本机联调」的默认体验弄坏）。
+
+# 证据服务：POST /internal/evidence，三字段 `{cust_id, cmd_id, content}`。
+# `batch_size = 1`：一条记录就是一份独立产物（证据服务按 `cust_id` + `cmd_id` 建索引）；
+# 合并批量后单条失败会把整批带进 rescue，也无法按单条重投。
+[[connectors]]
+allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
+id = "wist-field-evidence"
+type = "http"
+
+[connectors.params]
+endpoint = "${FIELD_EVIDENCE_URL:http://host.docker.internal:18800}/internal/evidence"
+method = "POST"
+# `json` 发的是**数组**（batch_size=1 也是 `[{...}]`），证据服务两种都收。
+fmt = "json"
+batch_size = 1
+timeout_secs = 5
+compression = "none"
+
+[connectors.params.headers]
+Content-Type = "application/json"
+
+# 资产拓扑：POST /internal/atlas，两字段 `{cust_id, content}`。
+[[connectors]]
+allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
+id = "wist-field-atlas"
+type = "http"
+
+[connectors.params]
+endpoint = "${FIELD_ATLAS_URL:http://host.docker.internal:18801}/internal/atlas"
+method = "POST"
+# **ndjson，不是 json**：atlas 只把 body 解成**单个对象**（数组只允许在 `content` 里），
+# `json` 的数组会被回 400 `invalid type: sequence`，随后整条落 rescue。
+# ndjson 在 batch_size=1 时就是「一行对象 + 换行」，正是 atlas 要的形状。
+fmt = "ndjson"
+# 一行 DSNAP 几百 KB ~ 数 MB：批量会顶爆 atlas 的请求上限，超时也要比其它端点宽。
+batch_size = 1
+timeout_secs = 10
+compression = "none"
+
+[connectors.params.headers]
+Content-Type = "application/json"
+
+# 运行时指标：POST <VM>/api/v1/import（VictoriaMetrics 的 import 口）。
+# 与 `vm_metrics_sink`（21）同形，只是默认指向**计算区**那份 VM：
+# 两份 VM 互不聚合（谁写谁查），网关栈那份服务控制面观测页，这份服务 field。
+[[connectors]]
+allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
+id = "wist-field-metrics"
+type = "http"
+
+[connectors.params]
+endpoint = "${FIELD_METRICS_URL:http://host.docker.internal:18428}/api/v1/import"
+method = "POST"
+# 采样点是行式 JSON（metric + value），VM 的 import 口按 ndjson 逐行吃。
+fmt = "ndjson"
+batch_size = 64
+timeout_secs = 5
+compression = "none"
+
+[connectors.params.headers]
+Content-Type = "application/json"

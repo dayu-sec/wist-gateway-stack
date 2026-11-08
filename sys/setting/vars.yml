@@ -60,25 +60,30 @@ system:
   - name: WPARSE_ADMIN_PORT
     value: 19090
 
-  # 数据面 → 计算区（wist-console-stack）的两个**写入端点**（sink 用，不是网关自己的观测后端）。
-  # 缺省值假设：数据面容器与 console 在同一台 Docker Desktop 宿主上 ——
-  # 容器用 `host.docker.internal` 访问宿主回环（console 默认只绑 127.0.0.1:18800/18801）。
+  # 数据面 → 计算区数据场（wist-field）的三个**写入端点**（sink 用，不是网关自己的观测后端）。
+  # 三个端点各由一个连接器持有（`connectors/sink.d/24-wist-field_sinks.toml`）：
+  #   `wist-field-atlas` / `wist-field-evidence` / `wist-field-metrics`，
+  # sink 分组只写 `connect = "wist-field-*"`。换地址只改这里，不用逐份改 sink。
+  # 缺省值假设：数据面容器与 field 在同一台 Docker Desktop 宿主上 ——
+  # 容器用 `host.docker.internal` 访问宿主回环（field 默认只绑 127.0.0.1:18800/18801）。
   # **Linux 宿主**没有这个域名：要么把 wparse 的 `host.docker.internal` 指到宿主
-  # （extra_hosts host-gateway），要么在这里 / `values/` 覆盖成 console 机器的内网地址，
+  # （extra_hosts host-gateway），要么在这里 / `values/` 覆盖成 field 机器的内网地址，
   # 同时把对方栈的 `EVIDENCE_SINK_BIND_IP` / `ATLAS_INGEST_BIND_IP` 从 127.0.0.1 改掉。
   #
-  # ⚠ sink 文件里写的是 `${ATLAS_SINK_URL:…}`：wparse **只在变量完全没设**时用默认值，
+  # ⚠ 连接器里写的是 `${FIELD_ATLAS_URL:…}`：wparse **只在变量完全没设**时用默认值，
   #   **空串会被当成有效值**（实测：空串会拼出 `/internal/atlas`）。所以 compose 里
   #   用 `${VAR:-默认}` 兜底，不要把它映射成空串。
-  - name: ATLAS_SINK_URL
+  # 旧名（`ATLAS_SINK_URL` / `EVIDENCE_SINK_URL` / `CONSOLE_VM_ENDPOINT`）已移除：
+  # 现场 `.env` / `values/` 如果还写着旧名，要一并改（新名没设时走默认地址，不报错）。
+  - name: FIELD_ATLAS_URL
     value: http://host.docker.internal:18801
-  - name: EVIDENCE_SINK_URL
+  - name: FIELD_EVIDENCE_URL
     value: http://host.docker.internal:18800
-  # 计算区那份 VictoriaMetrics（console 栈 `metrics` 服务的 `/api/v1/import`）。
+  # 计算区数据场那份 VictoriaMetrics（`metrics` 服务的 `/api/v1/import`）。
   # 数据面把**同一批采集指标**再写一份到这里（网关栈那份仍写 `WPARSE_VM_ENDPOINT`）。
-  # 缺省 = 同宿主 console 的 `VM_BIND_IP:VM_HOST_PORT`（127.0.0.1:18428）；
-  # 不同机 / Linux 宿主同上：覆盖成 console 的内网地址，并放开那边 `VM_BIND_IP`。
-  - name: CONSOLE_VM_ENDPOINT
+  # 缺省 = 同宿主 field 的 `VM_BIND_IP:VM_HOST_PORT`（127.0.0.1:18428）；
+  # 不同机 / Linux 宿主同上：覆盖成 field 的内网地址，并放开那边 `VM_BIND_IP`。
+  - name: FIELD_METRICS_URL
     value: http://host.docker.internal:18428
 
   # 指标保留期（月）与时区

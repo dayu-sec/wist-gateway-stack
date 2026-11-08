@@ -25,11 +25,11 @@ system:
   value: 9000
 - name: WPARSE_ADMIN_PORT
   value: 19090
-- name: ATLAS_SINK_URL
+- name: FIELD_ATLAS_URL
   value: http://host.docker.internal:18801
-- name: EVIDENCE_SINK_URL
+- name: FIELD_EVIDENCE_URL
   value: http://host.docker.internal:18800
-- name: CONSOLE_VM_ENDPOINT
+- name: FIELD_METRICS_URL
   value: http://host.docker.internal:18428
 - name: RETENTION_PERIOD
   value: 6

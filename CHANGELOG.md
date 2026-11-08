@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.0-alpha] - 2026-11-08
+
+### 变更（破坏性）
+
+- **计算区写入端点改成可复用连接器**：新增 `sys/data-plane/connectors/sink.d/24-wist-field_sinks.toml`，
+  定义 `wist-field-evidence` / `wist-field-atlas` / `wist-field-metrics` 三个连接器；
+  sink 分组只写 `connect = "wist-field-*"`，端点 / 报文形状 / 批量 / 超时收在一处，
+  `agent_metrics` 不再重复这些参数。
+- **变量改名，旧名移除**：`ATLAS_SINK_URL` → `FIELD_ATLAS_URL`、
+  `EVIDENCE_SINK_URL` → `FIELD_EVIDENCE_URL`、`CONSOLE_VM_ENDPOINT` → `FIELD_METRICS_URL`。
+  计算区在文档与注释里统一改称「数据场（wist-field）」，地址语义不变。
+
+### 升级注意
+
+- 现场 `.env` / `values/` 里若述写着**旧变量名**，升级前改掉，或跑 `gops sys localize` 重新生成。
+  **新名没设时不报错**，会静默落到缺省地址（`host.docker.internal`）——
+  「数据面与计算区不同机」的现场会因此写错端点且没有任何提示。
+
+### 新增
+
+- `dev/tests/wist-field-connectors.test.sh`：起本地 stub，验三个连接器的端点路径、
+  报文格式（证据 `json` 数组 / atlas `ndjson` 单对象 / VM ndjson 单行）与幂等键 `cmd_id`。
+
 ## [0.9.0-alpha] - 2026-11-06
 
 ### 新增

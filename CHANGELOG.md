@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.8-alpha] - 2026-11-08
+
+### 修复
+
+- **网关跟版 `v0.40.10-alpha`（原 0.40.9）**：0.40.9 的运行镜像用了 `distroless/base-debian13`，
+  而 Rust 产物动态链接了 `libgcc_s.so.1`（panic 展开），base 变体不含它 ——
+  容器**退出码 127、无限重启**，日志只有一句
+  `error while loading shared libraries: libgcc_s.so.1`。
+  0.40.10 改用 `cc` 变体（只大 1.1MB，压缩后 20.3 vs 19.2MB）。
+  - 升级到本版前先确认镜像已就绪：`docker manifest inspect ${WIST_SPC}/wist-gateway:v0.40.10-alpha`。
+  - 若已误升 0.40.9，回退方式是 `GATEWAY_TAG=v0.40.8-alpha gops run start`。
+
 ## [0.10.7-alpha] - 2026-11-08
 
 ### 变更

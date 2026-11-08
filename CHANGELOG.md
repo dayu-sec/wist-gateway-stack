@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.11-alpha] - 2026-11-08
+
+### 变更
+
+- **前端跟版 `v0.32.0-alpha`**：导航按任务阶段重组为「观测 / 采集 / Agent管理」；
+  「Kafka 接入」改名「采集指南」并迁到 `/collection-guide`（旧路径 `/kafka-access` 保留重定向）。
+- **知识库跟版 `0.9.5-alpha`**：PostgreSQL / MySQL / Doris 指标单元转为 `active`，
+  `DatabaseMetrics` 从此可派单（目录抬到 v22）。
+
+### 升级注意
+
+- 需要重新录入并**激活** `0.9.5-alpha` 知识包，`DatabaseMetrics` 才会出现在可授权列表；
+  已激活的旧包不会被自动改写。
+
 ## [0.10.10-alpha] - 2026-11-08
 
 ### 变更

@@ -99,11 +99,32 @@ services:
   # 开发态脚本（dev/svc.sh）用同一把锁，所以容器与宿主也不会同时跑。
   # 这层包装是绕过：引擎自身应当持锁 —— 已提上游 wp-labs/warp-parse#365，
   # 上游实现后这里的 entrypoint 可以直接去掉。
+  # 命名卷的**根目录属主**只能由 root 改（`wparse-run-init` 已以 999 跑，改不了自己所在的卷根）。
+  # 这一步放在 compose 里、由 `up` 触发，**不在 localize 里做**：
+  #   · 下载镜像归 `gops run download`（compose pull）——只有那里能统一换源 / 加速；
+  #   · localize 只做本地化，出现容器 / 网络操作就是把职责搞混了，而且卡住时没有任何进度。
+  wparse-volume-init:
+    container_name: wist-gateway-stack-wparse-volume-init
+    image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        chown 999:999 /run
+        chmod 2770 /run
+    volumes:
+      - wparse-run:/run
+
   wparse-run-init:
     container_name: wist-gateway-stack-wparse-run-init
     image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
     user: "999:999"
     restart: "no"
+    depends_on:
+      wparse-volume-init:
+        condition: service_completed_successfully
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |

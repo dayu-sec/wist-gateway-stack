@@ -7,12 +7,31 @@
 
 ### 变更
 
-- 网关跟版 `v0.40.8-alpha`：镜像构建不再走 QEMU（发布流水线 docker job 从 ~14 分钟
-  降到 2~4 分钟），镜像运行身份改成数值 `999`（与 compose 的 `user: "999:999"` 同值，
-  不再多建一个没人用的 `wist` 系统用户）。
-- 前端跟版 `v0.31.2-alpha`：采集面全景默认不列**没有采集单元**的面（目前就是已废弃的
+- **网关跟版 `v0.40.9-alpha`**：运行镜像从 `ubuntu:24.04` 换成 `distroless/base-debian13:nonroot`
+  （压缩后 38.2 MB → 19.2 MB），发布流水线拆成「每架构一个 job + `imagetools create` 合并
+  manifest」。实测发布耗时（docker 阶段）13m19s → **10m50s**：剩下的时间几乎全在
+  **跨境外推 TCR**（`pushing layers` 542/610s，约 35 KB/s），不是构建。
+  - 0.40.8 已经把 QEMU 去掉了（`apt-get` 那层 136s）；0.40.9 把镜像里最后一个 `RUN` 也去掉了。
+  - **镜像里没有 shell**了：直接 `docker exec … sh` 会失败。排障脚本
+    （`show-wparse-state.sh` / `diagnose-wparse-drift.sh`）都是 `exec` 到 wparse 容器，不受影响。
+- **前端跟版 `v0.31.2-alpha`**：采集面全景默认不列**没有采集单元**的面（目前就是已废弃的
   `KafkaMetrics` / `PostgresMetrics` / `MysqlMetrics` / `DorisMetrics`）。顶部会提示“另有 N 个面
   无采集单元”，点“仅定义”仍可看到 —— 新面已入词表但还没配单元时也走这条口子。
+- **WarpParse 升到 `0.36.0-alpha`**（原 `0.35.3-alpha`）。上游改动都不破坏现有配置：
+  新增 WPL `xml(...)` 结构化类型（纯新增）、修复 `{*(key=)}` 分隔符模式、指标新增
+  `tenant_id` 标签（缺失取空串，旧看板仍可用）。
+
+### 修复
+
+- **`localize` 不再下载镜像**：`scripts/init-wparse-admin.sh` 原来用
+  `docker run <目标镜像> … chown` 给命名卷改属主，该镜像不在本地时会在 **localize 里
+  隐式拉 300MB**（输出还被 `>/dev/null` 吞掉）——现场现象就是 `localize` **无声卡十几分钟**。
+  现在：
+  - localize 只做本地化（目录 / token / 证书投影），**完全不碰镜像与容器**；
+  - 命名卷属主改由 compose 新增的 `wparse-volume-init`（`user: 0:0`，`up` 时运行）负责，
+    `wparse-run-init` 以 `service_completed_successfully` 依赖它；
+  - 下载归 `gops run download`（compose pull）——只有那里能统一换源/加速。
+  实测：`localize` 从卡十几分钟变成 **6.2 秒**。
 
 ## [0.10.6-alpha] - 2026-11-08
 

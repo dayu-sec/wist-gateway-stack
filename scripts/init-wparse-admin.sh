@@ -26,18 +26,6 @@ STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUN_DIR="${STACK_ROOT}/data-plane-run"
 TOKEN_HOST="${RUN_DIR}/.run/admin_api.token.host"
 LEGACY_TOKEN="${RUN_DIR}/.run/admin_api.token"
-VOLUME="${WPARSE_RUN_VOLUME:-wist-gateway-stack-wparse-run}"
-IMAGE="${WARP_SPC:-ghcr.io/wp-labs}/warp-parse:${WPARSE_TAG:-0.32.1-alpha}"
-
-# 显式按**宿主架构**钉平台：镜像源里可能只有单一架构（如从 Apple Silicon 用 push-images.sh
-# 的 pull 方式推成 arm64-only），本地也可能缓存了异架构的同名 tag。此时 `docker run` 直接
-# `exec format error`，报错完全不指向「镜像架构不对」这个真正原因。
-HOST_PLATFORM=""
-case "$(uname -m)" in
-  x86_64 | amd64) HOST_PLATFORM="linux/amd64" ;;
-  aarch64 | arm64) HOST_PLATFORM="linux/arm64" ;;
-esac
-PLATFORM_ARG="${HOST_PLATFORM:+--platform ${HOST_PLATFORM}}"
 
 note() { echo "  $*"; }
 warn() { echo "  ⚠ $*" >&2; }
@@ -250,25 +238,12 @@ else
   note "已生成 admin API token（宿主侧）：${TOKEN_HOST}"
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  warn "找不到 docker：跳过运行态命名卷初始化（首次 start 前需手动执行）"
-  exit 0
-fi
-
-if ! docker volume inspect "${VOLUME}" >/dev/null 2>&1; then
-  docker volume create "${VOLUME}" >/dev/null
-  note "已创建运行态命名卷：${VOLUME}"
-fi
-
-# 命名卷默认 root:root；wparse 以 999 运行，需要可写。
-if ! docker run --rm -u 0:0 ${PLATFORM_ARG} -v "${VOLUME}:/run" --entrypoint /bin/sh "${IMAGE}" \
-  -c 'chown 999:999 /run && chmod 2770 /run' >/dev/null; then
-  warn "运行态命名卷初始化失败：${IMAGE}（宿主平台 ${HOST_PLATFORM:-未知}）"
-  warn "常见原因：该 tag 在镜像源里缺宿主架构（arm64-only 镜像跑在 amd64 宿主）——"
-  warn "  用 ./dev/push-images.sh 重新同步（buildx imagetools 保留多架构），或把 WARP_SPC 指回 ghcr.io/wp-labs"
-  exit 1
-fi
-note "运行态命名卷已对齐 999:999 / 2770：${VOLUME}"
+note "WarpParse 管理面：容器 0.0.0.0:${WPARSE_ADMIN_PORT:-19090} + TLS；宿主仅 127.0.0.1:${WPARSE_ADMIN_PORT:-19090}"
+note "gwlinkd 读取的 token：${TOKEN_HOST}（0600）"
+# 本脚本**不碰镜像 / 不碰容器**：命名卷的属主由 compose 的 `wparse-volume-init`（root）在
+# `up` 时对齐。下载归 `gops run download`（compose pull）——只有那里能统一换源/加速；
+# localize 里出现 `docker pull` 就会把下载渠道打散到两处，而且卡住时没有任何进度。
+note "运行态命名卷的属主由 wparse-volume-init 在 gops run start 时对齐（无需在这里处理）"
 
 note "WarpParse 管理面：容器 0.0.0.0:19090 + TLS；宿主仅 127.0.0.1:${WPARSE_ADMIN_PORT:-19090}"
 note "gwlinkd 读取的 token：${TOKEN_HOST}（0600）"

@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.2-alpha] - 2026-11-08
+
+### 修复
+
+- **网关跟版 `v0.40.5-alpha`**（原 `v0.40.4-alpha`）：0.40.5 新增知识包**成熟度闸门**
+  （`[knowledge] allowed_maturity`）—— 录入时校验包内 `manifest.json` 的 `maturity`，
+  不在允许列表回 409 `package_maturity_not_allowed`。缺省允许 `stable` + `unknown`，
+  旧包（无该字段）照旧能录入。
+
 ## [0.10.1-alpha] - 2026-11-08
 
 ### 修复

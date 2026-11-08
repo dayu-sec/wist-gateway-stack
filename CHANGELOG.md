@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.10-alpha] - 2026-11-08
+
+### 变更
+
+- **网关跟版 `v0.40.11-alpha`**：接受并透传 agentd 上报的采集结果字段；采集面闭集删除
+  四个已废弃指标面（`KafkaMetrics` / `PostgresMetrics` / `MysqlMetrics` / `DorisMetrics`）。
+- **前端跟版 `v0.31.4-alpha`**：「Agent 工作」页显示每个采集面的采集结果
+  （正常 / 部分失败 / 失败 / 尚未观测 / 暂停 + 原因），摘要区新增「采集异常」计数。
+- **知识库跟版 `0.9.4-alpha`**：采集面词表从 26 个收敛到 22 个，删除四个已废弃指标面。
+
+### 升级注意
+
+- 知识包删除了已生效的面：现有知识状态需重新录入/激活；旧包会被网关的追加式校验拒绝。
+- 采集结果需要新版 agentd 上报；旧 agentd 下页面不显示该字段（不影响其它内容）。
+
 ## [0.10.9-alpha] - 2026-11-08
 
 ### 修复

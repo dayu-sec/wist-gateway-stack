@@ -95,7 +95,8 @@ source_dir = "knowledge/initial"
 # 测试站要装 `-alpha` 包，就把它加进去；生产站保持默认。
 # 缺这个渲染值时不渲染该键 —— 网关自己按 `["stable", "unknown"]` 默认。
 {{#if knowledge_allowed_maturity}}
-allowed_maturity = [{{knowledge_allowed_maturity}}]
+# 注意三花括号：`gx.tpl` 默认做 HTML 转义，`"` 会变成 `&quot;`，把 TOML 写坏。
+allowed_maturity = [{{{knowledge_allowed_maturity}}}]
 {{/if}}
 
 # 一次性调查（`investigate`）的**网关侧授权与额度** —— 与采集面完全分开的一道授权轴。

@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.7-alpha] - 2026-11-08
+
+### 变更
+
+- 网关跟版 `v0.40.8-alpha`：镜像构建不再走 QEMU（发布流水线 docker job 从 ~14 分钟
+  降到 2~4 分钟），镜像运行身份改成数值 `999`（与 compose 的 `user: "999:999"` 同值，
+  不再多建一个没人用的 `wist` 系统用户）。
+- 前端跟版 `v0.31.2-alpha`：采集面全景默认不列**没有采集单元**的面（目前就是已废弃的
+  `KafkaMetrics` / `PostgresMetrics` / `MysqlMetrics` / `DorisMetrics`）。顶部会提示“另有 N 个面
+  无采集单元”，点“仅定义”仍可看到 —— 新面已入词表但还没配单元时也走这条口子。
+
 ## [0.10.6-alpha] - 2026-11-08
 
 ### 修复

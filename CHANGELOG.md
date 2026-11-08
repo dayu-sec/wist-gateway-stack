@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.9-alpha] - 2026-11-08
+
+### 修复
+
+- **前端跟版 `v0.31.3-alpha`（原 0.31.2）**：「采集授权」页（`/collection-grants`）也
+  不再列没有采集单元的面。0.31.2 只改了「采集面全景」，授权页仍全量渲染 26 个面，
+  已废弃的 `KafkaMetrics` / `PostgresMetrics` / `MysqlMetrics` / `DorisMetrics` 又冒出来了。
+  两处现在用同一判据（面有没有单元），与「是否真的能派活」一致。
+
 ## [0.10.8-alpha] - 2026-11-08
 
 ### 修复

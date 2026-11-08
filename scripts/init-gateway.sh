@@ -105,6 +105,8 @@ if bad:
 print(", ".join(f'"{item}"' for item in items))
 PY
 )"
+# JSON 写法需要的是**转义后的字符串**（TOML 片段里本身带双引号，直接塞进 JSON 会写坏值文件）。
+MATURITY_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MATURITY_TOML")"
 
 command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl，无法生成密钥/证书" >&2; exit 1; }
 # python3 也是硬依赖（admin token / 值文件都用它）：早说清楚，别等到第 226 行才以 127 死掉。
@@ -288,7 +290,7 @@ if [[ ! -f "$VALUE_JSON" ]]; then
   "public_base_url": "https://${domain}",
   "victoria_metrics_url": "${VM_URL}",
   "investigation_report_dir": "${REPORT_DIR_VALUE}",
-  "knowledge_allowed_maturity": "${MATURITY_TOML}"
+  "knowledge_allowed_maturity": ${MATURITY_JSON}
 }
 EOF
   chmod 600 "$VALUE_JSON"

@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.1-alpha] - 2026-11-08
+
+### 修复
+
+- **网关跟版 `v0.40.4-alpha`**（原 `v0.40.1-alpha`）。`wist-knowledge 0.9.2-alpha` 的
+  `linux-kafka-metrics` 单元用的是 `KafkaCluster` 来源类型，而网关要到 **0.40.2** 才认识它 ——
+  旧网关导入该知识包一律 **HTTP 422 `package_content_invalid`**
+  （`unit linux-kafka-metrics: unknown source kind "KafkaCluster"`）。
+
+### 升级注意
+
+- 站点若在 `.env` / `values/` 里本地覆盖过 `GATEWAY_TAG`，本次产品默认不会生效 ——
+  要一并改成 `v0.40.4-alpha`（或删掉覆盖后 `gops sys localize`），再 `gops run start` 重建网关容器。
+
 ## [0.10.0-alpha] - 2026-11-08
 
 ### 变更（破坏性）

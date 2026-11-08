@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.4-alpha] - 2026-11-08
+
+### 新增
+
+- **知识包成熟度白名单可配置**（`KNOWLEDGE_ALLOWED_MATURITY`，逗号分隔，默认 `stable,unknown`）。
+  网关从 0.40.5 起会校验包内 `manifest.json` 的 `maturity`，默认只收 `stable` / `unknown`；
+  测试站要装 `-alpha` 知识包，就在 `values/sys_value.yml` 覆盖成
+  `stable,unknown,experimental`，再 `gops sys localize` + `gops run start`。
+  写错值会在 localize 就报错，不会拖到网关启动才拒。
+- 渲染结果写进网关配置的 `[knowledge] allowed_maturity`（缺渲染值时整键不渲染，走网关默认）。
+
 ## [0.10.3-alpha] - 2026-11-08
 
 ### 变更

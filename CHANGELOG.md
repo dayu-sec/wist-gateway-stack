@@ -3,6 +3,15 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.12-alpha] - 2026-11-08
+
+### 修复
+
+- **前端跟版 `v0.32.1-alpha`**：采集授权页的主机行状态叠**预检事实**，不再把
+  `DatabaseService` 这类带 `match` 条件的面报成「可授权」再让网关回 409；
+  预检读不到 / 未探过 / 没上报事实的情况也各有明确原因与「预检」入口。
+  详见 `wist-gateway-web` 的 0.32.1 变更。
+
 ## [0.10.11-alpha] - 2026-11-08
 
 ### 变更

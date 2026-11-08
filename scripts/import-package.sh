@@ -161,8 +161,14 @@ while IFS= read -r file; do
     echo "[dry-run] cp ${file} → ${PACKAGE_DIR}/${name}"
   else
     mkdir -p "${PACKAGE_DIR}"
-    cp -f "${file}" "${PACKAGE_DIR}/${name}"
-    echo "已导入：${PACKAGE_DIR}/${name}"
+    # 源已经在投放目录里时**不要**再 cp：BSD/GNU 的 cp 对「同一个文件」返回 1，
+    # `set -e` 会把脚本静默干掉（`--set` 连一次 API 都发不出去）。
+    if [[ "${file}" -ef "${PACKAGE_DIR}/${name}" ]]; then
+      echo "已在投放目录：${PACKAGE_DIR}/${name}"
+    else
+      cp -f "${file}" "${PACKAGE_DIR}/${name}"
+      echo "已导入：${PACKAGE_DIR}/${name}"
+    fi
   fi
   echo "  平台：${platform}"
   echo "  界面「本地来源」填：${container_path}"

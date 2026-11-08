@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.6-alpha] - 2026-11-08
+
+### 修复
+
+- **包已在投放目录里时，两个导入脚本会静默中止**：`scripts/import-knowledge.sh` /
+  `scripts/import-package.sh` 无条件 `cp -f`，源与目标指向**同一个文件**时 cp 返回 1
+  （`are identical, not copied`），`set -e` 直接把脚本干掉 —— 症状是「命令跑完但什么都没发生」，
+  `--set` 连一次 API 都没发出去。现场触发就是 `packages/` 里已有 0.9.3-alpha 包、
+  再跑 `import-knowledge.sh packages/… --set`。现在同文件只打印「已在投放目录」并继续。
+- `scripts/lib/local-gates.sh` 的 `secrets.mode` 闸门只在 Linux 上判：macOS 桌面版的挂载
+  不映射 uid/gid，`gops sec` 写 0600 而栈声明 0640，两边永远对不上，而 mode 在 mac 上
+  根本不影响容器能不能读（与旁边那道属组检查同口径）。
+
+### 变更
+
+- 网关跟版 `v0.40.7-alpha`（原 `v0.40.6-alpha`）：预发布知识包的 `compat.json` 版本不再误报
+  「身份不一致」，录入后 `compatibility` 是 `ok` 而不是一条恒定的 `warn`。
+
 ## [0.10.5-alpha] - 2026-11-08
 
 ### 修复

@@ -83,7 +83,10 @@ gate_secrets() {
   declared=$(awk '/^secrets:/{f=1;next} f&&/^[^[:space:]]/{exit} f&&/^[[:space:]]+mode:/{print;exit}' "$prj" \
     | sed -E 's/.*mode:[[:space:]]*"?([0-7]{3,4})"?.*/\1/')
   actual=$(gate_stat_mode "$sec")
-  if [ -n "$declared" ] && [ -n "$actual" ] && [ "${actual#0}" != "${declared#0}" ]; then
+  # mode 只在 Linux 上是**部署事实**（compose 里 `user: 999:999` + `:ro` 挂载 → 容器靠属组读，
+  # 所以声明 0640）；macOS 桌面版的挂载不映射 uid/gid，`gops sec` 会把它写成 0600 ——
+  # 两边永远对不上，而 mode 在 mac 上根本不影响容器能不能读。所以与下一道 group 同口径：只在 Linux 判。
+  if [ "$(uname -s)" = "Linux" ] && [ -n "$declared" ] && [ -n "$actual" ] && [ "${actual#0}" != "${declared#0}" ]; then
     gate_fail "secrets.mode" \
       "密钥文件权限 ${actual} 与 sys-prj.yml 声明的 ${declared} 不一致（gops sec 会直接拒绝）" \
       "gops sec fix --dry-run 看清计划后跑 gops sec fix"

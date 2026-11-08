@@ -97,13 +97,23 @@ if [[ "$DRY_RUN" == 1 ]]; then
   fi
 else
   mkdir -p "$PACKAGE_DIR"
-  cp -f "$file" "${PACKAGE_DIR}/${name}"
-  echo "已导入：${PACKAGE_DIR}/${name}"
+  # 源已经在投放目录里时**不要**再 cp：BSD/GNU 的 cp 对「同一个文件」返回 1，
+  # `set -e` 会把脚本静默干掉（`--set` 连一次 API 都发不出去）。
+  if [[ "$file" -ef "${PACKAGE_DIR}/${name}" ]]; then
+    echo "已在投放目录：${PACKAGE_DIR}/${name}"
+  else
+    cp -f "$file" "${PACKAGE_DIR}/${name}"
+    echo "已导入：${PACKAGE_DIR}/${name}"
+  fi
   # 签名旁文件（发布侧同名 + `.sig`）**一起带走**：验签公钥随栈交付，配了就只收签过的包；
   # 只拷 tarball 会让管理面录入报 422 `package_signature_invalid`。
   if [[ -f "${file}.sig" ]]; then
-    cp -f "${file}.sig" "${PACKAGE_DIR}/${name}.sig"
-    echo "已导入：${PACKAGE_DIR}/${name}.sig"
+    if [[ "${file}.sig" -ef "${PACKAGE_DIR}/${name}.sig" ]]; then
+      echo "已在投放目录：${PACKAGE_DIR}/${name}.sig"
+    else
+      cp -f "${file}.sig" "${PACKAGE_DIR}/${name}.sig"
+      echo "已导入：${PACKAGE_DIR}/${name}.sig"
+    fi
   else
     echo "[告警] 源目录没有 ${name}.sig；配了验签公钥的网关会拒收这个包（package_signature_invalid）。" >&2
     echo "        签名由发布侧产出（wist-knowledge 的 CI），只拷 tarball 不算完整制品。" >&2

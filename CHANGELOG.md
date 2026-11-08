@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.3-alpha] - 2026-11-08
+
+### 变更
+
+- **网关跟版 `v0.40.6-alpha`**（原 `v0.40.5-alpha`）：0.40.6 的词表认识两个新面
+  `DatabaseMetrics` / `MessageQueueMetrics`（对应知识库 0.9.3 的指标面收敛）。
+- **初始知识库包跟到 `v0.9.3-alpha`**（原 `v0.9.1`）：`catalog_version` 20，
+  采集面 26 个（22 在用 + 4 已废弃），数据库 / 消息队列指标单元从基线包移出。
+
+### 升级注意
+
+- 知识库面收敛后，**纯业务机（`LinuxHost`）不再展开数据库 / 消息队列指标面**；
+  需要这些指标的机器要先被归类为 `LinuxData`（或后续通过“单机叠加包”手动加成）。
+- 已授权的工作锁在旧 `catalog_version`，不会被自动改写；要让新归属生效需重新授权。
+
 ## [0.10.2-alpha] - 2026-11-08
 
 ### 修复

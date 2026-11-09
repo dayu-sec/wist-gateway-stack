@@ -3,6 +3,35 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.13-alpha] - 2026-11-09
+
+### 修复
+
+- **整栈升级不再被自己的门禁误判回滚**（2026-11-08 事故的两个独立根因）：
+  - **本地门禁不再自己推导容器 gid**：`secrets.mode` / 属组判据从 `scripts/lib/local-gates.sh` 移除，
+    只保留 `secrets.declared`（配置形状）。容器身份只能由 gops 从 `docker compose config` 派生 ——
+    旧写法（`grep 'user:' | head -1`）在 compose 新增 `user: "0:0"` 的卷初始化服务后把 gid 算成 0，
+    把 `0640 / :999` 这个**正确**状态判成 FAIL。
+  - **`scripts/check-stack.sh` 的 `--only <前缀>` 现在也传给本地门禁**：`flow localize` 在 ⓿ 用
+    `--gate --only prereq`，那一刻权限状态还没由第 ⑥ 步 `perms --apply` 生产，全量门禁在这里跑必然误报。
+- **`scripts/init-gateway.sh` 不再写死 `chmod 600` 密钥文件**：改调 `gops sec fix`（`secrets.mode` 的
+  唯一实现，Linux 上还会对齐属组）。写死 0600 会让每次 localize 先把已对齐的文件降级、再靠第 ⑥ 步修回去。
+
+### 新增
+
+- **`prereq.gops_version` 门禁：本栈要求 `gops ≥ 2.10.13`**。门禁不再自己推导 gid 之后，
+  旧 gops 会让「密钥属组没对齐」成为静默故障（0640 落在部署账号的组，容器读不到 → 网关起不来），
+  所以必须在 ⓿ 就拦住。
+- **`dev/verify-on-linux.sh`**：发版前在 Linux 预演机把「上一版 → 当前包」升级一遍，
+  覆盖 ⓿/⑥/⑦ 三层（开发机与 CI 都到不了）。用法与前置见 `dev/README.md`。
+- `dev/tests/local-gates.test.sh`：钉住上述职责边界 + `--only` 过滤 + gops 版本下限（正反用例）。
+- `dev/check-compose-perms.sh` + CI job：compose 的 `user:` 与挂载权限契约静态检查（无 gops 时 SKIP）。
+
+### 升级注意
+
+- **先把 gops 升到 ≥ 2.10.13，再升本包**。0.10.13 去掉了门禁里的 gid 推导，
+  而属组对齐藏在 `gops sec fix` 里 —— 旧 gops 不会报错，但容器会读不到密钥。
+
 ## [0.10.12-alpha] - 2026-11-08
 
 ### 修复

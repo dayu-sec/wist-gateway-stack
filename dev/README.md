@@ -62,6 +62,7 @@ x-topology/wist/                  <- $WIST
 | 把本机网关接入本机中心 | 网关页「链接上级」提交接入链接；gwlinkd 在跑（系统服务）时会自动拉取（见「接入上级」一节） |
 | 断开与中心的连接（回到未接入） | `./dev/unlink-center.sh`（停 gwlinkd 服务 → 调 `wist-gwlinkd unlink` → **再起回**；可 `--dry-run`／`--no-restart`；加 `--forget-center` 连中心 CA 也清） |
 | 让**系统服务**跑我刚编的 gwlinkd（发布态已装服务时） | `./dev/install-gwlinkd-dev.sh`（先 `--dry-run` 看计划；详见「把本机编译的 gwlinkd 发布到系统服务」一节） |
+| 查「gwlinkd 的运行身份（root）能不能跑 `docker compose`」 | `./dev/check-gwlinkd-compose.sh`（读不到 `/var/root` 时会说「无法确认」，用 `sudo` 跑一次最准；坏了加 `--fix` 或按它打印的两条命令修） |
 | 跑一次 gwlinkd 的子命令（`diagnose` / `version` / `service status`…） | `wist-gwlinkd diagnose` 单独就够（`--conf` 缺省时回落已装服务定义）；要**本地构建**或看落点用 `./dev/gwlinkd.sh --paths` |
 | 把 compose 里非 wist\* 的上游镜像（VM / wparse）同步到 TCR | `./dev/push-images.sh`（先 `--dry-run` 看计划；详见「上游镜像同步到 TCR」一节） |
 | 只把一个 tag 同步到 TCR（多架构、digest 校验） | `./dev/sync-to-tcr.sh <src> [<dest>]`（详见同一节） |

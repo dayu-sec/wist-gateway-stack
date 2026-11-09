@@ -125,25 +125,34 @@ run_gates "${root}" ""
 [ "${GATE_FAIL}" -eq 1 ] || fail "未声明 secrets 时全量门禁必须 FAIL：${GATE_OUT}"
 grep -q 'secrets\.declared' <<<"${GATE_OUT}" || fail "没有报出 secrets.declared：${GATE_OUT}"
 
-# 5) gops 太旧：⓿（`--only prereq`）就要 FAIL（旧 gops 下密钥属组没人对齐）
+# 5) gops 低于硬下限（2.9）：⓿ 就要 FAIL（密钥属组没人对齐）
 root="${TMP}/ok"
-use_gops 2.10.12
+use_gops 2.8.0
 run_gates "${root}" "prereq"
-[ "${GATE_FAIL}" -eq 1 ] || fail "gops 2.10.12 应在 ⓿ 被拦（< 2.10.13）：${GATE_OUT}"
+[ "${GATE_FAIL}" -eq 1 ] || fail "gops 2.8.0 应在 ⓿ 被拦（< 2.9）：${GATE_OUT}"
 grep -q 'prereq\.gops_version' <<<"${GATE_OUT}" || fail "没有报出 prereq.gops_version：${GATE_OUT}"
-grep -q '2\.10\.13' <<<"${GATE_OUT}" || fail "报错没说清升到哪个版本：${GATE_OUT}"
+grep -q '2\.9' <<<"${GATE_OUT}" || fail "报错没说清硬下限：${GATE_OUT}"
 
-# 6) 版本刚好达标 / 更高的预发布形态：不拦
+# 6) 硬下限与建议版之间：只 WARN，不能拦（2.9 起 perms --apply 会 chgrp 密钥）
+for v in 2.9.0 2.10.0 2.10.12; do
+  use_gops "${v}"
+  run_gates "${root}" "prereq"
+  [ "${GATE_FAIL}" -eq 0 ] || fail "gops ${v} 不该被阻断：${GATE_OUT}"
+  grep -q '\[WARN\].*prereq\.gops_version' <<<"${GATE_OUT}" || fail "gops ${v} 应给出升级建议：${GATE_OUT}"
+done
+
+# 7) 达标 / 更新 / 预发布形态：既不拦也不告警
 for v in 2.10.13 2.10.14 2.11.0 2.10.13-alpha 3.0.0; do
   use_gops "${v}"
   run_gates "${root}" "prereq"
   [ "${GATE_FAIL}" -eq 0 ] || fail "gops ${v} 不该被拦：${GATE_OUT}"
+  grep -q 'prereq\.gops_version' <<<"${GATE_OUT}" && fail "gops ${v} 不该再告警：${GATE_OUT}"
 done
 
-# 7) 没有 gops（CI / 开发机直跑 check-stack.sh）：不拦
+# 8) 没有 gops（CI / 开发机直跑 check-stack.sh）：不拦
 use_gops "" missing
 run_gates "${root}" "prereq"
 [ "${GATE_FAIL}" -eq 0 ] || fail "没有 gops 时不该拦（只在 localize 里有意义）：${GATE_OUT}"
 use_gops 2.10.13
 
-echo "PASS：本地门禁职责边界 + --only 过滤 + gops 版本下限"
+echo "PASS：本地门禁职责边界 + --only 过滤 + gops 版本分档"

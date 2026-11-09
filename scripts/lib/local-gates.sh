@@ -150,26 +150,39 @@ gate_port_owners() {
   return 0
 }
 
-# ⑤ gops 版本下限：本栈唯一能在这里卡住的**外部依赖**。
+# ⑤ gops 版本：本栈唯一能在这里卡住的**外部依赖**。分两档，别一刀切。
 #
-#    `secrets.mode` 的落地与**密钥属组对齐**只存在于 gops ≥ 2.10.12 的 `gops sec fix` 里；
-#    2.10.13 又修了 `perms --apply` 对**连带新建的祖先目录**的收敛。
+#    **硬下限 2.9**：密钥与容器共享只能靠属组（属主必须是部署账号、不提权），
+#    `secrets.mode` 的属组对齐从 2.9 的「per-service identity / group-shared secrets」
+#    才进 `gops sys perms --apply`（第 ⑥ 步）。再早的 gops 会把 0640 密钥留在部署账号的组里，
+#    容器（999:999）读不到 —— 现场表现是网关/中心起不来，而不是升级被门禁拦住。
 #
-#    为什么必须在这里拦：2026-11-08 之后本文件不再自己推导容器 gid（那条歧路已删），
-#    于是旧 gops 不再有任何地方报错 —— 密钥 0640 的属组停在部署账号的组，
-#    容器（999:999）读不到，现场表现是网关起不来，而不是升级被门禁拦住。
-#    宁可升前就 FAIL，也不要升级“成功”之后起不来。
+#    **建议 2.10.13**：只告警不拦。2.10.12 修了软链部署目录下的密钥路径规范化，
+#    2.10.13 修了 `perms --apply` 对连带新建祖先目录的收敛（否则 ⑥ 报“全部对齐”、
+#    下一次 `--check` 又是 pending）。
+#
+#    背景：本条判据以前是 `gate_secrets` 里自己推导容器 gid 的写法（2026-11-08 事故），
+#    删掉那份推导之后，旧 gops 的后果已经没人在门禁里报 —— 所以补这一条。
 gate_gops_version() {
-  local need="2.10.13" v lowest
+  local hard="2.9.0" soft="2.10.13" v lowest
   # 独立跑（CI、开发机没装 gops）时不拦：版本这条只在 localize 里才有意义。
   command -v gops >/dev/null 2>&1 || return 0
   v=$(gops --version 2>/dev/null | sed -n '1s/.*[[:space:]]\([0-9][0-9.]*\).*/\1/p') || true
   [ -n "$v" ] || return 0 # 解析不出来就不猜，交给 gops 自己报
-  lowest=$(printf '%s\n%s\n' "$need" "$v" | sort -V | sed -n 1p)
-  if [ "$lowest" != "$need" ]; then
+
+  lowest=$(printf '%s\n%s\n' "$hard" "$v" | sort -V | sed -n 1p)
+  if [ "$lowest" != "$hard" ]; then
     gate_fail "prereq.gops_version" \
-      "gops ${v} 太旧（需要 ≥ ${need}）" \
-      "升级 gops：2.10.12 起 \`gops sec fix\` 会把密钥（0640）属组对齐到容器 gid，2.10.13 修了 apply/check 幂等 —— 缺了它们容器读不到密钥"
+      "gops ${v} 太旧（需要 ≥ ${hard}）" \
+      "升级 gops：${hard} 起 \`gops sys perms --apply\` 才会把密钥（0640）的属组对齐到容器 gid —— 缺了它容器读不到密钥"
+    return 0
+  fi
+
+  lowest=$(printf '%s\n%s\n' "$soft" "$v" | sort -V | sed -n 1p)
+  if [ "$lowest" != "$soft" ]; then
+    gate_warn "prereq.gops_version" \
+      "gops ${v} 可用，但建议 ≥ ${soft}" \
+      "2.10.12 修了软链部署目录的密钥属组派生，2.10.13 修了 perms --apply 幂等；\`gops self update --channel alpha\`"
   fi
   return 0
 }

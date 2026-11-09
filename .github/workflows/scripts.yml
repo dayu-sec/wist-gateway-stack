@@ -36,6 +36,40 @@ jobs:
         run: command -v shellcheck >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y shellcheck)
       - run: ./dev/lint.sh
 
+  # bind 挂载身份契约（只读）：同一挂载源被两种容器身份挂载、`0600` 配非 root 容器
+  # 这类**配置错误**，必须在合并前拦住。
+  #
+  # 为什么不能直接用 `gops sys perms --check`：
+  #   · 它在 macOS 上整段跳过（平台门禁）；
+  #   · 完整 `--check` 还会报“挂载源不存在 / 模式没对齐” —— 那是**部署事实**，
+  #     干净 checkout 上必然不满足，拿它做 CI 门槛任务永远红。
+  #   `--config-only` 只做 compose 派生（不 stat、不 chmod），与平台无关。
+  #   本任务需要一个带 `--config-only` 的 gops（从公开仓按 `GOPS_REF` 构建）。
+  #   `GOPS_REF` 默认跟 `alpha`：契约检查的价值就在“上游一变就早知道”；
+  #   要确定性可改成固定 tag（改动本文件即可）。
+  compose-perms:
+    name: Bind identity contract
+    runs-on: ubuntu-24.04
+    env:
+      GOPS_REF: alpha
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build gops (${{ env.GOPS_REF }})
+        run: |
+          set -eu
+          git clone --depth 1 --branch "${GOPS_REF}" \
+            https://github.com/galaxio-labs/galaxy-ops /tmp/gops-src
+          cargo build --release --locked \
+            --manifest-path /tmp/gops-src/Cargo.toml --bin gops
+          echo "/tmp/gops-src/target/release" >> "${GITHUB_PATH}"
+      # `.env` 由 localize 生成（离线、不跑 gx 流程）；没有它 compose 里的 ${VAR}
+      # 会展开成空串，派生出来的是空路径。
+      - name: Render .env (offline)
+        run: gops sys localize --no-flow --only --no-perms-check
+      - name: Validate bind identity contract
+        run: ./dev/check-compose-perms.sh
+
   shell-tests:
     name: Shell regression (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

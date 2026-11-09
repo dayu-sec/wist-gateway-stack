@@ -16,6 +16,17 @@
 # 调用方约定（在 check-stack.sh 里设置）：
 #   GATE_RENDER_FILES  渲染产物清单（相对栈根），用于 `render.applied`
 #   GATE_EXTRA_GATES   可选的额外函数名，跑完通用门禁后调用（如 `gate_ops_prj_addr`）
+#   `run_local_gates <root> <only>`：`<only>` 只让该**前缀**的门禁生效（对应 `check-stack.sh
+#   --only <前缀>`）。`flow localize` 在⓿ 用 `--gate --only prereq`：那一刻包刚换完、还没重渲，
+#   也还没跑 `gops sys perms --apply`——任何读部署事实的门禁都会误报（2026-11-08 升级回滚
+#   就是 secrets.group 在这个位置漏跑导致的，见该函数注释）。
+#
+# 职责边界：**容器身份（gid）只能由 gops 推导**。`gops sys perms` 按服务从
+#   `docker compose config` 派生，会跳过以 root 运行的服务；这里再写一份
+#   （典型写法：`grep 'user:' | head -1`）必然会在 compose 新增 root 初始化服务时分叉。
+#   所以本文件只留“gops 推不出来的事实”（渲染时间 / 端口归属 / ops-prj 地址形态），
+#   以及**配置形状**（`secrets.declared`）——后者的诊断价值不在权限，而在
+#   `gops sec` 会静默回退到 `.galaxy` 报“未加载到任何密钥”。
 
 # 这两个标志由 check-stack.sh source 之后读取（本文件只写不读）
 # shellcheck disable=SC2034
@@ -24,23 +35,27 @@ GATE_FAIL=0
 GATE_WARN=0
 
 gate_fail() {
+  gate_selected "$1" || return 0
   printf '\033[31m[FAIL]\033[0m %-18s %s\n        → %s\n' "$1" "$2" "$3"
   GATE_FAIL=1
 }
 gate_warn() {
+  gate_selected "$1" || return 0
   printf '\033[33m[WARN]\033[0m %-18s %s\n        → %s\n' "$1" "$2" "$3"
   GATE_WARN=1
 }
 gate_info() { printf '  [INFO] %s\n' "$*"; }
 
-# 文件权限（十进制字符串，去掉前导 0）
-gate_stat_mode() {
-  local m
-  m=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || true)
-  printf '%s' "${m#0}"
+# `--only <前缀>` 的过滤：只影响**上报**（门禁本身只读，算一遍不花钱）。
+# 前缀按 `.` 边界匹配：`--only prereq` 不会放行 `prereq_xxx`。
+gate_selected() {
+  [ -z "${GATE_ONLY:-}" ] && return 0
+  [ "$1" = "${GATE_ONLY}" ] && return 0
+  case "$1" in "${GATE_ONLY}".*) return 0 ;; esac
+  return 1
 }
 
-gate_stat_gid() { stat -c %g "$1" 2>/dev/null || stat -f %g "$1" 2>/dev/null || true; }
+# 文件 mtime（epoch 秒）
 gate_stat_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || true; }
 
 # RFC3339(Nano) → epoch 秒；解析不了就输出空（调用方据此跳过，不误报）
@@ -68,6 +83,12 @@ gate_project_name() {
 
 # ① 密钥文件 ↔ sys-prj.yml 声明（这就是 2026-11-05「gops sec 找不到密钥」的结构性根因：
 #    横切配置和功能挤在一个提交里，revert 把它带走了，而没有任何检查发现）
+#
+#    **只查“声明形状”，不查 mode / 属组**：那是 `gops sec fix`（secrets.mode）和
+#    `gops sys perms --apply`（容器 gid）的职责，二者都以 compose 为唯一来源。
+#    2026-11-08 升级整栈回滚就是个教训：这里曾用 `grep 'user:' | head -1` 自己推导容器 gid，
+#    而 0.10.12 的 compose 把 `user: "0:0"` 的卷初始化服务排在了业务服务前面——推导出 0，
+#    于是 0640/:999 的正确状态被判成不一致。**同一事实的第二个实现就是 bug。**
 gate_secrets() {
   local root="$1"
   local prj="$root/sys-prj.yml" sec="$root/.wist/sec-value.yml"
@@ -76,32 +97,6 @@ gate_secrets() {
     gate_fail "secrets.declared" \
       "有 .wist/sec-value.yml，但 sys-prj.yml 没声明 secrets:" \
       "补 secrets: {file: .wist/sec-value.yml, mode: \"0640\"}；否则 gops sec list/get 会回退旧路径（.galaxy/sec_value.yml）报「未加载到任何密钥」"
-    return 0
-  fi
-
-  local declared actual
-  declared=$(awk '/^secrets:/{f=1;next} f&&/^[^[:space:]]/{exit} f&&/^[[:space:]]+mode:/{print;exit}' "$prj" \
-    | sed -E 's/.*mode:[[:space:]]*"?([0-7]{3,4})"?.*/\1/')
-  actual=$(gate_stat_mode "$sec")
-  # mode 只在 Linux 上是**部署事实**（compose 里 `user: 999:999` + `:ro` 挂载 → 容器靠属组读，
-  # 所以声明 0640）；macOS 桌面版的挂载不映射 uid/gid，`gops sec` 会把它写成 0600 ——
-  # 两边永远对不上，而 mode 在 mac 上根本不影响容器能不能读。所以与下一道 group 同口径：只在 Linux 判。
-  if [ "$(uname -s)" = "Linux" ] && [ -n "$declared" ] && [ -n "$actual" ] && [ "${actual#0}" != "${declared#0}" ]; then
-    gate_fail "secrets.mode" \
-      "密钥文件权限 ${actual} 与 sys-prj.yml 声明的 ${declared} 不一致（gops sec 会直接拒绝）" \
-      "gops sec fix --dry-run 看清计划后跑 gops sec fix"
-  fi
-
-  # 容器按**属组**读（compose 里 user: "999:999" + :ro 挂载）；macOS 桌面版不映射 uid/gid，跳过
-  if [ "$(uname -s)" = "Linux" ]; then
-    local gid
-    gid=$(grep -oE 'user:[[:space:]]*"?[0-9]+:[0-9]+"?' "$root/sys/docker-compose.yml" 2>/dev/null \
-      | head -1 | sed -E 's/.*:([0-9]+)"?/\1/')
-    if [ -n "$gid" ] && [ "$(gate_stat_gid "$sec")" != "$gid" ]; then
-      gate_fail "secrets.group" \
-        "密钥文件属组不是容器 gid(${gid}) —— 容器读不到（症状：token 解析不到 / 启动即失败）" \
-        "gops sys perms --apply（或 chgrp ${gid} .wist/sec-value.yml）"
-    fi
   fi
 }
 
@@ -155,9 +150,36 @@ gate_port_owners() {
   return 0
 }
 
+# ⑤ gops 版本下限：本栈唯一能在这里卡住的**外部依赖**。
+#
+#    `secrets.mode` 的落地与**密钥属组对齐**只存在于 gops ≥ 2.10.12 的 `gops sec fix` 里；
+#    2.10.13 又修了 `perms --apply` 对**连带新建的祖先目录**的收敛。
+#
+#    为什么必须在这里拦：2026-11-08 之后本文件不再自己推导容器 gid（那条歧路已删），
+#    于是旧 gops 不再有任何地方报错 —— 密钥 0640 的属组停在部署账号的组，
+#    容器（999:999）读不到，现场表现是网关起不来，而不是升级被门禁拦住。
+#    宁可升前就 FAIL，也不要升级“成功”之后起不来。
+gate_gops_version() {
+  local need="2.10.13" v lowest
+  # 独立跑（CI、开发机没装 gops）时不拦：版本这条只在 localize 里才有意义。
+  command -v gops >/dev/null 2>&1 || return 0
+  v=$(gops --version 2>/dev/null | sed -n '1s/.*[[:space:]]\([0-9][0-9.]*\).*/\1/p') || true
+  [ -n "$v" ] || return 0 # 解析不出来就不猜，交给 gops 自己报
+  lowest=$(printf '%s\n%s\n' "$need" "$v" | sort -V | sed -n 1p)
+  if [ "$lowest" != "$need" ]; then
+    gate_fail "prereq.gops_version" \
+      "gops ${v} 太旧（需要 ≥ ${need}）" \
+      "升级 gops：2.10.12 起 \`gops sec fix\` 会把密钥（0640）属组对齐到容器 gid，2.10.13 修了 apply/check 幂等 —— 缺了它们容器读不到密钥"
+  fi
+  return 0
+}
+
 # 汇总：调用方按 GATE_FAIL/GATE_WARN 决定退出码
 run_local_gates() {
   local root="$1"
+  # 第二个参数是 `--only <前缀>` 的产物：只影响上报，不影响判据计算。
+  GATE_ONLY="${2:-}"
+  gate_gops_version "$root"
   gate_secrets "$root"
   # shellcheck disable=SC2086  # 清单里有空格分隔的多个路径，故意的
   gate_render_applied "$root" ${GATE_RENDER_FILES:-}

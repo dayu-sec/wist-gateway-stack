@@ -65,6 +65,7 @@ x-topology/wist/                  <- $WIST
 | 跑一次 gwlinkd 的子命令（`diagnose` / `version` / `service status`…） | `wist-gwlinkd diagnose` 单独就够（`--conf` 缺省时回落已装服务定义）；要**本地构建**或看落点用 `./dev/gwlinkd.sh --paths` |
 | 把 compose 里非 wist\* 的上游镜像（VM / wparse）同步到 TCR | `./dev/push-images.sh`（先 `--dry-run` 看计划；详见「上游镜像同步到 TCR」一节） |
 | 只把一个 tag 同步到 TCR（多架构、digest 校验） | `./dev/sync-to-tcr.sh <src> [<dest>]`（详见同一节） |
+| **发版前**：验证新包自己的门禁不拦自己 | `./dev/verify-on-linux.sh`（**必须在 Linux 预演机跑**；详见「发版前预演」一节） |
 
 > **不要**再去找 `start-web.sh` / `stop-vm.sh` / `re-enroll.sh` 之类的单组件或重注册脚本 —— 前者已并入
 > `svc.sh`。**本机 agentd 的重新注册不需要脚本**：网关库丢了 / 换域名时，持有效客户端证书的 agent 会
@@ -345,6 +346,61 @@ unlink 只删**注册态那几个文件**，**不整目录清空** —— 所以
 
 > 日志：macOS `sudo tail -f /var/log/wist-gwlinkd/gwlinkd.err`；Linux `journalctl -u wist-gwlinkd -f`。
 
+## 发版前预演：升级一遍自己（`verify-on-linux.sh`）
+
+**为什么必须跑**：发版包里 `scripts/lib/local-gates.sh` 的本地门禁在 `gops sys localize` 的
+⓿/⑥/⑦ 三层执行，而这三层**在开发机（macOS）和 CI 上都到不了**：
+
+| 层 | 做什么 | 为什么别处覆盖不了 |
+|---|---|---|
+| ⓿ | 权限前置判据 + `--only` 过滤 | 要真实 `gops sys localize` 流程 |
+| ⑥ | `gops sys perms --apply` 收敛宿主属主/属组 | 非 Linux 直接 SKIP |
+| ⑦ | 全量门禁（含 `secrets.*` / `addr.*` / `render.placeholder`） | 要已渲染的现场 |
+
+`--config-only` 只能查「compose 自相矛盾」，CI 的契约检查只能查脚本静态行为，真实机器上的
+`perms --check` 只能查「已经装好的那份」。**能回答「新包会不会把自己的升级拦下来」的只有这里** ——
+2026-11-08 那次整栈回滚就是这样漏掉的（0.10.12 新加的 `user: "0:0"` 服务让门禁自己推导错了容器 gid）。
+
+### 用法
+
+```bash
+# 在 Linux 预演机上（rootful docker + compose v2 + gops + gx）
+./dev/verify-on-linux.sh --baseline v0.8.41-alpha        # 基线取 git tag
+./dev/verify-on-linux.sh --baseline ~/pkg/base.tar.gz \
+                         --candidate ~/pkg/cand.tar.gz   # 或用现成包
+./dev/verify-on-linux.sh --skip-start                   # 只验 localize，不拉镜像/不起容器
+./dev/verify-on-linux.sh --clean                        # 通过后自动清场
+```
+
+脚本会：打基线包 → `gops prj new` + `prj import` → 写站点值（`WEB_DOMAIN` + 错开端口）→
+基线 `gops sys localize`（+ `gops run start`）→ `gops prj upgrade --to <候选包>` → 断言。
+
+### 断言（失败即 exit 1）
+
+- ⓿ **只跑 prereq 判据** —— 日志里出现 `secrets.*` / `ops-prj.*` 说明 `--only` 漏传给了本地门禁
+- ⑥ `perms` 收敛到「全部对齐」
+- ⑦ 全量门禁**无 FAIL**
+- `upgrade.json` `status=succeeded`、部署版本 = 候选版本
+- 升级后 `gops sys perms --check` 通过、密钥是 `640 <user>:<容器gid>`、容器在跑
+
+### 前置（缺一条就白跑，脚本会先自检）
+
+1. **Linux 主机**，可随意清空，**不要用生产机**
+2. **rootful** docker（rootless 下容器里的 999 映射成 subuid，属主模型与生产不一致 → 脚本直接拒绝）
+3. **`gx`（galaxy-flow）** —— localize 的流程引擎，缺了 `regenerate` 阶段必失败
+4. 部署账号**在容器 gid 组里**（本栈 999：`sudo usermod -aG 999 $USER` 后重新登录）。
+   注意 `groupadd -g 999` 在 Ubuntu 上会撞 `systemd-journal`，别建组，直接加成员
+5. 本机架构的 `bin/<triple>/wist-stackcheck`（包里没有会 `[WARN]` 并回落 `cargo run`，预演机上没 Rust 就会失败）
+
+### 脚本已内建的坑
+
+- `addr.path` 会写进 `ops-prj.yml` 且被 ⓿ 拦住 → 自动改成 `url:`
+- 必须设 `WEB_DOMAIN`，否则 `render.placeholder`（`example.com`）拦
+- 本栈**容器名是固定字面量**（一宿主只能一套）→ 已有 `wist-gateway-stack-*` 在跑时直接拒绝，并给出停止命令
+- 旧工程里有容器身份写的只读目录（`2755 <uid>:999`）→ 普通 `rm -rf` 删不掉，脚本自动回退 `sudo -n rm -rf`
+
+> `--only <前缀>` 只认**空格**形式；`--only=prereq` 会让 `wist-stackcheck` exit 2。
+
 ## 上游镜像同步到 TCR（`push-images.sh` / `sync-to-tcr.sh`）
 
 两个脚本分工不同，别混用：
@@ -453,9 +509,12 @@ dev/
   install-gwlinkd-dev.sh        # 按需：把**本机编译的** gwlinkd 发布到系统服务（换二进制 + 重写定义 + 重启）
   gwlinkd.sh                    # 按需：在**服务那份配置**上跑 gwlinkd 子命令（省掉三串长路径；--paths 看落点）
   push-images.sh                # 按需：把 compose 里非 wist* 的上游镜像（VM / wparse）同步到腾讯云 TCR
+  verify-on-linux.sh            # 发版前：在 Linux 预演机把「上一版 → 当前工作树」升级一遍，验 ⓿/⑥/⑦ 门禁
   forward-443.py                # `forward` 组件的纯 TCP 转发器（443 → 网关监听端口）
   tests/                        # 回归测试（开发态工具；knowledge 纯本地）
     install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位
+    local-gates.test.sh         #  local-gates.sh 的契约：不推导容器 gid / --only 前缀过滤
+  check-compose-perms.sh        # CI 薄封装：compose 里 user: 与挂载权限契约（无 gops 时 SKIP）
   bin/                          # wparse 等本地二进制（不入 git）
 
 ../sys/data-plane/              # wparse 工程（开发态与发布态共用的只读种子，属 sys/）

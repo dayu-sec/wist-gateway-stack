@@ -29,9 +29,11 @@
 # 注意：**不生成** wist-gateway.toml —— 它由 localize 阶段流程从
 #   sys/configs/gateway/wist-gateway.toml.tpl 渲染（gx.tpl）。
 #
-# 权限/属主：本脚本按最小权限创建（私钥与值文件都是 600）。**属组和「放给容器的读权限」不在这里做**
+# 权限/属主：本脚本自己创建的东西按最小权限（私钥与值文件都是 600）；**放给容器的权限不在这里做**
 #   —— 由 `gops sys perms --apply`（gops ≥ 2.7）统一对齐：属主=部署账号、属组=容器 gid 999、
 #   读写挂载 0660/2770、只读挂载 0640/2750。单独跑本脚本后，记得再跑一次对齐，否则容器读不到私钥。
+#   例外是 **密钥文件**：它的模式是 `sys-prj.yml: secrets.mode` 声明的（本栈 0640，容器靠属组读），
+#   本脚本按声明写，**不猜容器 gid**（那是 `gops sys perms` / `gops sec fix` 的活）。
 #
 # 可覆盖 env：
 #   WEB_DOMAIN          对外域名：证书 SAN 与 public_base_url 的 host（缺省时依次从已有 value.json、
@@ -274,7 +276,18 @@ with open(path, "w") as handle:
     handle.write(text)
 print("  已在密钥文件写入 admin_token：", path)
 PY
-chmod 600 "$SEC_FILE"
+# 密钥文件的模式是**声明值**（`sys-prj.yml: secrets.mode`，本栈 0640），不是这里拍的数字：
+# 写死 0600 会让每次 localize 先把已对齐的文件降级、再靠第 ⑥ 步的 `gops sys perms --apply`
+# 修回去；中途失败就留下“容器读不到 token”的状态。
+#
+# **声明怎么落地不在这里实现**：`gops sec fix` 是 `secrets.mode` 的唯一实现（并且是
+# `sys-prj.yml` 的唯一解析方，Linux 上还会顺带对齐属组）。在 shell 里 awk/sed 解析 YAML
+# 是另一份推导 —— 格式一变就静默回退到 0600。
+# 拿不到 gops（或它拒绝执行，如部署账号不在容器组）就回退到**最保守**的 0600：
+# 宁可暂时让容器读不到，也不放宽权限；第 ⑥ 步会把模式收敛回去。
+if ! ( cd "$ROOT" && gops sec fix >/dev/null 2>&1 ); then
+  chmod 600 "$SEC_FILE"
+fi
 
 # ④ 渲染值文件（public_base_url / victoria_metrics_url / report_dir / 验签公钥）——**不含 admin token**。
 #    victoria_metrics_url 随运行形态（发布态容器 / 开发态宿主进程）而变、public_base_url

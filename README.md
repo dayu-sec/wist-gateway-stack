@@ -501,6 +501,11 @@ wist-gateway-stack-<tag>.tar.gz
 
 用 `git archive` 出包，只收 git 跟踪的内容 —— `dev/bin/`（约 92M 二进制）、`data-plane-run/`（发布态与开发态运行根）、`_gal/.report`、以及 gops 生成物（`.env`、`values/`）都没入 git，天然不入包。
 
+> **发版前请在 Linux 预演机跑一次 `./dev/verify-on-linux.sh`**（上一版 → 当前工作树）。
+> 包里 `scripts/lib/local-gates.sh` 的本地门禁跑在 `gops sys localize` 的 ⓿/⑥/⑦ 层，
+> 这三层**开发机（macOS）与 CI 都到不了**；`lint.sh` / `tests/*.test.sh` / `perms --check --config-only`
+> 只能证明脚本自身正确，证不了「新包会不会把自己的升级拦下来」。用法与坑见 [dev/README.md](dev/README.md#发版前预演升级一遍自己verify-on-linuxsh)。
+
 包里**含 `sys/configs/web/nginx.conf.tpl`**（前端站点配置随仓走）**但不含任何私钥/证书**：站点身份（`identity/gateway/`、`identity/web/`）与运行配置（`configs/gateway/`、`configs/web/`）都在目标机现场生成。下载解压后跑一次 `gops sys update && gops sys localize` 即可（备料 + 渲染 + 页面证书一步到位，见「发布态 A」）。
 
 ## 环境接线

@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.11.0-alpha] - 2026-11-09
+
+### 变更
+
+- **镜像与内容版本跟进**：网关 `v0.41.0-alpha`、知识包 `v0.10.0-alpha`。
+  - 网关新增 `container:` 匹配条件：macOS 上跑在 Docker / OrbStack 里的数据库可以按容器名门控；
+    知识包（catalog_version 23）随之加上三个 macOS 数据库指标单元。
+  - **升级顺序**：本栈已把两者钉在一起；单独升级现场时**先升网关、再激活知识包** ——
+    0.40.x 网关不认识 `container:`，会以 `package_content_invalid` 拒收新包（见网关 0.41.0 的
+    CHANGELOG）。
+- **`KNOWLEDGE_ALLOWED_MATURITY` 认发布通道名**（`alpha` / `beta`）：`scripts/init-gateway.sh`
+  渲染前统一归一成 `experimental` / `preview` 并去重，所以 `stable,unknown,beta,alpha`
+  与 `stable,unknown,preview,experimental` 等价，现场不用再手动翻译。归一只做在渲染侧，
+  所以**升级网关镜像之前**的栈也能用。
+
 ## [0.10.13-alpha] - 2026-11-09
 
 ### 修复

@@ -26,7 +26,7 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.40.11-alpha
+    value: v0.41.0-alpha
   - name: WEB_TAG
     value: v0.32.1-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
@@ -197,17 +197,19 @@ system:
   - name: ARTIFACT_HOME
     value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
   - name: KNOWLEDGE_PATH
-    value: v0.9.5-alpha/wist-knowledge-0.9.5-alpha.tar.gz
+    value: v0.10.0-alpha/wist-knowledge-0.10.0-alpha.tar.gz
   # 允许录入/激活的知识包**成熟度**（网关 `[knowledge] allowed_maturity`，逗号分隔）。
-  # 打包侧按 tag 通道写：`-alpha`=experimental / `-beta`=preview / 无后缀=stable；
+  # 两种写法等价，localize 渲染时统一归一成规范值：
+  #   规范值 `stable` / `preview` / `experimental` / `unknown`；
+  #   通道名 `beta`→preview、`alpha`→experimental（打包侧按 tag 写 `manifest.maturity`）。
   # `unknown` 给没有该字段的旧包（0.9.2 及更早）。
-  # **生产站保持默认**；测试站要装 `-alpha` 包，在 `values/sys_value.yml` 里覆盖成
-  #   stable,unknown,experimental
+  # **生产站保持默认**；测试站要装 `-alpha` / `-beta` 包，在 `values/sys_value.yml` 里覆盖成
+  #   stable,unknown,beta,alpha
   - name: KNOWLEDGE_ALLOWED_MATURITY
     value: stable,unknown
   # 换源示例（**只改上一段**；COS 上必须已放好同相对路径的包）：
   #   ARTIFACT_HOME: https://github.com/dayu-sec/wist-knowledge/releases/download
-  #   KNOWLEDGE_PATH 保持 v0.9.5-alpha/wist-knowledge-0.9.5-alpha.tar.gz 不变
+  #   KNOWLEDGE_PATH 保持 v0.10.0-alpha/wist-knowledge-0.10.0-alpha.tar.gz 不变
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
   #    **分两份**（与网关的 impl/pub 同口径）：

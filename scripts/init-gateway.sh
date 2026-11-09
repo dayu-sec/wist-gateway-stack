@@ -84,27 +84,43 @@ VM_URL="${VICTORIA_METRICS_URL:-http://victoria-metrics:8428}"
 # 写进渲染值是为了让网关可覆盖，而不是在模板里再写一份字面量。
 REPORT_DIR_VALUE="${INVESTIGATION_REPORT_DIR:-data/out_dat}"
 # 允许录入/激活的知识包**成熟度**（网关 `[knowledge] allowed_maturity`，逗号分隔）。
-# 打包侧按 tag 通道写 `manifest.maturity`：`-alpha`=experimental / `-beta`=preview / 无后缀=stable。
+# 两种写法都认，渲染前统一归一成 manifest 的规范值：
+#   规范值 `stable` / `preview` / `experimental` / `unknown`；
+#   通道名  `beta` = preview、`alpha` = experimental（打包侧 `-beta` / `-alpha` tag）。
 # 默认只认 `stable` + `unknown`（`unknown` 给没有该字段的旧包）；测试站要装 `-alpha` 包时
-# 把 `experimental` 加进来。写错值就地报错，别拖到网关启动才拒。
+# 把 `experimental`（或 `alpha`）加进来。写错值就地报错，别拖到网关启动才拒。
 MATURITY_RAW="${KNOWLEDGE_ALLOWED_MATURITY:-stable,unknown}"
 MATURITY_TOML="$(python3 - "$MATURITY_RAW" <<'PY'
 import sys
 
-allowed = {"stable", "preview", "experimental", "unknown"}
+# 归一只做在渲染侧：网关老版本不认 `alpha` / `beta`，写进 value.json 的永远是规范值。
+canonical = {
+    "stable": "stable",
+    "preview": "preview",
+    "experimental": "experimental",
+    "unknown": "unknown",
+    "beta": "preview",
+    "alpha": "experimental",
+}
 items = [item.strip() for item in sys.argv[1].split(",") if item.strip()]
 if not items:
     print("KNOWLEDGE_ALLOWED_MATURITY 不能为空（至少 stable）", file=sys.stderr)
     raise SystemExit(2)
-bad = [item for item in items if item not in allowed]
+bad = [item for item in items if item not in canonical]
 if bad:
     print(
         f"KNOWLEDGE_ALLOWED_MATURITY 里有不认识的值：{bad}"
-        "（只认 stable / preview / experimental / unknown）",
+        "（只认 stable / preview（或 beta）/ experimental（或 alpha）/ unknown）",
         file=sys.stderr,
     )
     raise SystemExit(2)
-print(", ".join(f'"{item}"' for item in items))
+# 别名与规范名可能混写（`beta,preview`），归一后去重。
+seen = []
+for item in items:
+    value = canonical[item]
+    if value not in seen:
+        seen.append(value)
+print(", ".join(f'"{item}"' for item in seen))
 PY
 )"
 # JSON 写法需要的是**转义后的字符串**（TOML 片段里本身带双引号，直接塞进 JSON 会写坏值文件）。

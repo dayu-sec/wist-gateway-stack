@@ -91,8 +91,9 @@ signing_public_key_file = "{{knowledge_signing_pubkey}}"
 {{/if}}
 source_dir = "knowledge/initial"
 # 允许录入 / 激活的知识包**成熟度**（渲染自 `KNOWLEDGE_ALLOWED_MATURITY`，默认 `stable, unknown`）。
-# 打包侧按 tag 通道写：`-alpha`=experimental / `-beta`=preview / 无后缀=stable。
-# 测试站要装 `-alpha` 包，就把它加进去；生产站保持默认。
+# 两种写法等价：规范值 `stable` / `preview` / `experimental` / `unknown`，通道名 `beta` / `alpha`
+# （ `scripts/init-gateway.sh` 渲染前会归一，这里写通道名也可以）。
+# 测试站要装 `-alpha` / `-beta` 包，就把它加进去；生产站保持默认。
 # 缺这个渲染值时不渲染该键 —— 网关自己按 `["stable", "unknown"]` 默认。
 {{#if knowledge_allowed_maturity}}
 # 注意三花括号：`gx.tpl` 默认做 HTML 转义，`"` 会变成 `&quot;`，把 TOML 写坏。

@@ -3,6 +3,19 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.0-alpha] - 2026-11-09
+
+### 变更
+
+- 网关镜像钉到 `v0.42.0-alpha`：Agent 明细带数据清单（采集授权 + 调查数据）。
+- 新能力需要宿主侧 gwlinkd ≥ 0.21.0（由中心发布/升级计划分发）：清单转报与 `report-agents`
+  按需刷新；旧 gwlinkd 仍可运行，只是看不到清单、刷新会 409/400。
+
+### 兼容性
+
+- 旧 gwlinkd 仍可运行（周期清单不可见、按需刷新 409/400）；建议按
+  `center → gwlinkd → gateway` 顺序升级。
+
 ## [0.11.1-alpha] - 2026-11-09
 
 ### 修复（多行日志上送不再被切碎：数据面 `tcp_src` 用 `len`）

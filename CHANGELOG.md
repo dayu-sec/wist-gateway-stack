@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.11.1-alpha] - 2026-11-09
+
+### 修复（多行日志上送不再被切碎：数据面 `tcp_src` 用 `len`）
+
+- **入向 `framing`: `auto` → `len`**（`connectors/source.d/07-tcp_src.toml` 与
+  `topology/sources/tcp_1.toml`）。`auto` 的实现是「先试长度前缀，不行再回退按行」，而回退判定
+  不看「长度前缀是否还在读取中」：agentd 的 `len` 帧在 read 边界被切成两半时，前半段
+  `1234 {"schema"...` 会先被当成一条行记录交付，后半段再按行切 —— 现场表现就是数据面收到
+  半条 JSON / 一行里混着帧头（issue `dayu-sec/wist-agentd#43`）。多行正文（`container_cri`
+  的堆栈、缩进续行）必现，单行日志靠 `tcp_recv_bytes` 恰好装得下才“看起来正常”。
+- 与 agentd **0.30.1+** 成对：agentd 上送已固定 `len`（`{字节长度} {帧内容}`），数据面按长度收帧。
+- `connectors/sink.d/18-tcp_sink.toml` 的 `framing = "line"` **不在此次修改内**：那是数据面
+  回写给 gwlinkd 的**出向**分帧，与入向无关。
+
+### 升级提示（有顺序）
+
+- **先升级 agentd 到 ≥ 0.30.1，再升本栈**。`len` 分帧的接收端不接受行分帧：仍在上报
+  `line` 的旧 agentd（≤ 0.30.0）升级本栈后**日志/指标帧会被整批丢弃**，直到 agentd 也跟着升。
+  `compat.json` 的 `supports.wist-agentd` 相应提到 `>=0.30.1`。
+- 手改过这两个 toml 的现场：确认 `tcp_src` 与 `tcp_1` 两边都是 `framing = "len"`（`tcp_1`
+  覆盖 `tcp_src` 的参数，只改一边不生效）。
+- 若暂时不能升级 agentd，请把这两个 toml 改回 `auto` —— 能跑，但多行正文仍会被切碎。
+
 ## [0.11.0-alpha] - 2026-11-09
 
 ### 变更

@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.3-alpha] - 2026-11-10
+
+### 变更
+
+- 网关镜像钉到 `v0.45.0-alpha`、前端到 `v0.34.0-alpha`：采集结果改**多字段正交模型**
+  （`prerequisites` / `result` / `reasons`），页面把「缺 `smartctl` 这类前置条件未满足」
+  显示成「待就绪」而不是红色失败，并原样列出结构化原因。
+
+### 升级注意
+
+- 网关必须**先于 agentd 0.32.0** 生效：那个版本的采集状态新字段会让旧网关整份拒收
+  （HTTP 422，不打业务日志），表现为「机器在线但网关一直显示离线」——
+  只能看到 `/agent/log-sources` 还在成功，`last_seen_at` 却不再前进。
+- **agentd 0.32.1 起不再是硬约束**：上报被拒时 agentd 会自动降级重发旧形状，机器不会离线，
+  只是新字段（`prerequisites` / `result` / `reasons`）要等网关升级后才看得见。
+- 中心（`wist-control 0.22` / `wist-center 0.35.3` / `wist-center-web 0.29.0`）可以晚一步：
+  旧中心对未知字段是**忽略**而非拒收，只是页面仍显示旧的三态。
+
 ## [0.12.2-alpha] - 2026-11-10
 
 ### 变更

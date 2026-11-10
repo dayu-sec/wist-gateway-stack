@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.1-alpha] - 2026-11-10
+
+### 变更
+
+- 网关镜像钉到 `v0.44.0-alpha`：
+  - **命令队列只读口**（agentd 要执行的一次性命令，含中心下发）：
+    `GET /api/v1/admin/agents/{id}/commands`（单机）与
+    `GET /api/v1/admin/agent-commands`（全机队），状态闭集 `queued/claimed/acked/expired/superseded/all`；
+  - 主机指标在注册表画像为空时回落到数据面 `system_host_info`（不再返回空主机名 / 空 IP）。
+- 前端镜像钉到 `v0.33.0-alpha`：新增「Agent管理 → 任务队列」（`/commands`），
+  看调查 / 重采 / 刷新谁在等、谁在跑、谁回了什么，并标出是否是中心下发的。
+
+### 升级注意
+
+- 需要宿主侧 **gwlinkd ≥ 0.22.0** 才能把中心的调查命令转发到网关（由中心发布/升级计划分发）。
+  旧 gwlinkd 仍可运行，只是中心下发调查会 409（`agent_investigate_unsupported`）。
+- 报告正文在计算区证据库；中心是否展示由 **center 栈**的 `[evidence]` 决定，与本栈无关。
+- 旧网关（< 0.44）不会挂队列路由：前端这一页会提示「网关很可能是旧构建」，其余页面不受影响。
+
 ## [0.12.0-alpha] - 2026-11-09
 
 ### 变更

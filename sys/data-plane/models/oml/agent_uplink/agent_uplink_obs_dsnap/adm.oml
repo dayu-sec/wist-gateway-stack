@@ -14,3 +14,15 @@ dev_type = read(dev_type);
 log_type = read(log_type);
 log_desc = read(log_desc);
 body = read(body);
+// 计算区资产库（atlas）需要 `{cust_id, content}`，且格式有两个硬约束（均实测）：
+//
+// 1. `cust_id` 是 atlas **内部租户 UUID**，不是客户号（传客户号会 `400 ... is not a UUID`）。
+//    本站点由客户号 `1000000000000000001` 确定性派生：
+//    `uuid5(NAMESPACE_OID, "1000000000000000001") = 40a59f7d-df92-5958-adef-61def418d257`
+//    ⚠ 换客户必须同步改这里 —— OML 不能读环境变量，模型是共享的。
+// 2. `content` 是对象，且 atlas 要求其中的 `body` 是**快照原文（字符串）**，不能是对象：
+//    `{"cust_id": <uuid>, "content": {"body": "<原文>"}}` → 200 accepted。
+//
+// 顶层 `body` 保留不动：本地 JSONL 与网关仍按它读。
+cust_id = chars("40a59f7d-df92-5958-adef-61def418d257");
+content : obj = object { body = read(body); };

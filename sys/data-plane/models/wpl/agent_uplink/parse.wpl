@@ -55,6 +55,12 @@ package agent_uplink {
     // 一次性调查的完整报告（agentd `investigate` 的 ` IVSREP: ` 帧）。
     // 正文是 `Report::to_uplink_body` 的对象（带 `command_id`，与 ack 靠它 join），
     // 这里**不拆字段**：与事实/快照同一条纪律 —— 数据面只搬契约对象，结构由消费者解析。
+    //
+    // `opt(chars)@command_id`：证据服务要的幂等键（`cmd_id`）无法从 `chars:body` 里取
+    // （OML 不能解 JSON，也没有子串/正则提取），所以由 agentd 在**信封**里多带一份
+    // `command_id`（`opt` = 旧 agentd 不带这个键时整条规则照常命中）。
+    // 另：不能用 `json(...)` 解正文 —— 那样 `body` 原文就没了，网关「主机 → 调查」页
+    // 读的正是 `body`。
     #[tag(dev_type: "调查报告", log_desc: "Agent 一次性调查报告", log_type: "agent_uplink_ivsrep_frame")]
     rule agent_uplink_ivsrep {
         (
@@ -63,6 +69,7 @@ package agent_uplink {
                 chars@agent,
                 chars@ts,
                 digit@seq,
+                opt(chars)@command_id,
             ),
             symbol(IVSREP:),
             chars:body\0

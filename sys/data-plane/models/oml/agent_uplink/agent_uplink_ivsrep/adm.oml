@@ -16,3 +16,17 @@ log_desc = read(log_desc);
 // 报告正文保持**原样字符串**（与事实/快照同一口径）：网关按 wist-contracts / 报告自带
 // `report_schema` 解析，数据面不做字段建模 —— 否则加一个调查题目就要改一次 WPL/OML。
 body = read(body);
+// 命令 id：优先用帧**信封**里那份（agentd 从这个版本起在 ` IVSREP: ` 帧的信封带上）。
+// 不从正文里取：`body` 是原样字符串，OML 不能解 JSON；而 WPL 的 `json(...)` 会把
+// `body` 原文拆掉，网关「主机 → 调查」页读的正是 `body`。
+// `option:[...]` 是**过渡兼容**：旧 agentd 的帧没有信封字段时回退到事件 id（不为空）。
+// ⚠ 回退值每帧递增（实测同一行重放会得到不同的 event_id），所以**旧 agentd 的重投
+//   不会去重** —— 幂等只在新 agentd 的 `command_id` 上成立。
+// 计算区的证据 sink 直接把它当 `cmd_id`（幂等键）用。
+cmd_id = read(option:[command_id, event_id]);
+// 证据服务的另外两个必填字段（实测缺任一都是 `400 evidence_record_invalid`）：
+//   `cust_id` = 租户（= 客户），数据面已按租户绑定注入 `tenant_id`；
+//   `content` = 正文。证据服务的 `content` 允许字符串，所以直接给 `body` 原文，
+//   不需要把报告拆成字段（`body` 本身也要保留给网关读）。
+cust_id = read(tenant_id) { _ : chars("unknown") };
+content = read(body);

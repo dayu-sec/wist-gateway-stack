@@ -32,9 +32,5 @@ tags = ["sink:json"]
 
 [sink_group.sinks.params]
 file = "agent-ivsrep.jsonl"
-# 立即落盘（`sync = true`）：报告是**按命令的一次性产物**，管理面每 3s 轮询一次目录，
-# 缓冲住会让页面停在「报告未到」——那是出事时最误导人的状态。
-# 刻意**不**开轮转（`max_size` / `max_rolls`）：轮转后文件名带 `.gz` 或序号，网关只认
-# `.json/.jsonl/.ndjson`，历史报告会从视图里消失；报告本身很小（一条几 KB），
-# 网关读取端已按「读尾部」有界，长文件不会把页面拖死。
-sync = true
+max_rolls = 1
+roll_compress = "gzip"

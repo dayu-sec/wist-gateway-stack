@@ -6,7 +6,7 @@
 [sink_group]
 name = "host-metrics"
 oml = ["agent_uplink_metrics_frame"]
-tags = ["biz:agent-metrics"]
+tags = ["biz:host-metrics"]
 batch_size = 1024
 batch_timeout_ms = 300
 

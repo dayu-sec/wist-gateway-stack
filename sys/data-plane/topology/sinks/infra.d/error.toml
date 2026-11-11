@@ -9,6 +9,9 @@ connect = "file_json_sink"
 
 [sink_group.sinks.params]
 file = "error.dat"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"
 
 [sink_group.sinks.expect]
 ratio = 0.01

@@ -9,13 +9,16 @@ connect = "file_proto_text_sink"
 
 [sink_group.sinks.params]
 file = "monitor.dat"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"
 
 [sink_group.sinks.expect]
 max = 1.0
 
 # 统计指标镜像到 VictoriaMetrics（endpoint 由 WPARSE_VM_ENDPOINT 环境变量注入）
 [[sink_group.sinks]]
-name = "metrics_vmetrics_sink"
+name = "vm_gateway"
 connect = "victoriametrics_sink"
 tags = ["sink:vmetrics"]
 

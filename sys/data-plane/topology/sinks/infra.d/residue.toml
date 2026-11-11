@@ -9,3 +9,6 @@ connect = "file_json_sink"
 
 [sink_group.sinks.params]
 file = "residue.dat"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"

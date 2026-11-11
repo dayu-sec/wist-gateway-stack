@@ -1,0 +1,14 @@
+[sink_group]
+name = "log-raw"
+oml = ["raw_log"]
+
+[[sink_group.sinks]]
+name = "json-file"
+connect = "file_json_sink"
+tags = []
+
+[sink_group.sinks.params]
+file = "raw_log.json"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"

@@ -1,0 +1,16 @@
+[sink_group]
+name = "log_confused"
+oml = ["container_workload/container"]
+wp_meta_disable = ["wp_oml_name"]
+
+
+[[sink_group.sinks]]
+name = "json-file"
+connect = "file_json_sink"
+tags = []
+
+[sink_group.sinks.params]
+file = "log_record.json"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"

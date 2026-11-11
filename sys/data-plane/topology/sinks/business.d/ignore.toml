@@ -1,9 +1,13 @@
 [sink_group]
 name = "ignore"
-oml = ["*/ignore"]
+oml = ["host/ignore", "container_workload/ignore", "kernel_system_host/ignore"]
+
 [[sink_group.sinks]]
-name = "ignore_file"
+name = "ignore-file"
 connect = "file_json_sink"
 [sink_group.sinks.params]
 base = "./data/out_dat"
 file = "ignore.json"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"

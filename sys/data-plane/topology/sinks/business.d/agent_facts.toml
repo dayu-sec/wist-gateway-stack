@@ -1,6 +1,6 @@
 # Agent 事实（wist-agentd ` OBSFACT:` 帧）独立 sink 分组 —— 「统一走数据面」的那条通道。
 #
-# 本分组按 OML 名精确命中；种子里不再有 `oml=["*"]` 的兜底分组，未命中任何分组的记录会被丢弃。
+# 与 business.d/log_std.toml（oml=["*"]，日志）并存：本分组的 OML 名精确命中，其余记录仍走日志分组。
 # 信封字段（schema/agent/observed_at/seq）与正文 `body` 原样落盘：正文是契约对象
 # （ReportAgentFactSummary / ReportDiscoverySnapshot），订阅端按 wist-contracts 解析。
 #
@@ -16,18 +16,23 @@ batch_size = 1
 batch_timeout_ms = 300
 
 [[sink_group.sinks]]
-name = "json"
+name = "json-file"
 connect = "file_json_sink"
 tags = ["sink:json"]
 
 [sink_group.sinks.params]
 file = "agent-facts.jsonl"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"
 
 # 网关订阅：同一批 OML 记录 POST 到网关内部端点。
-# 种子保持**出厂可用**：这里默认开启（站点从 wp-infra 同步时以那边为准）。
+# `drop_when_error = true`：网关不可达 / 5xx 时不落 rescue（facts 是摘要，agentd 下次心跳会重发并覆盖；
+# rescue 一旦堆起来很快把盘吃完）。
 [[sink_group.sinks]]
-name = "gateway"
+name = "http-gateway"
 connect = "gateway_facts_sink"
+drop_when_error = true
 tags = ["sink:gateway"]
 
 [sink_group.sinks.params]

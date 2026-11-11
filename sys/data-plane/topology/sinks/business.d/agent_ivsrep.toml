@@ -7,11 +7,12 @@
 #   wparse 工作根 ./data/out_dat/agent-ivsrep.jsonl（连接器默认 base，本分组**不覆写**）
 #     → 宿主 data-plane-run/data/out_dat/
 #     → 网关容器 /data-plane/data/out_dat/（compose 只读挂载整棵 data/）
-#     → 网关 `[investigations] report_dir`（stack：`INVESTIGATION_REPORT_DIR`）= `data/out_dat`
+#     → 网关 `[investigations] report_dir`（相对 `[data_plane] work_dir`）：**必须**配成 `data/out_dat`
 #
-# ⚠ 两侧必须同步：sink 改落点，网关的 `report_dir` 也要改；对不上时引擎照常出数、
+# ⚠ `base` 是刻意省的（早期版本写 `./data/ivsrep/`）：改落点一定要同步改网关的
+#   `report_dir`（或 stack 的 `INVESTIGATION_REPORT_DIR`），两侧对不上时引擎照常出数、
 #   但「主机 → 调查」页永远是空的。`out_dat` 是混放目录（raw / parsed / ignore 等日志 JSON
-#   也在里面），网关读取端按「报告文件优先」排序（网关 ≥ 0.34.1-alpha）。
+#   也在里面），网关读取端按「报告文件优先」排序，否则报告会被文件数/字节预算挤出。
 #
 # 一行 = 一条记录：帧信封（schema/agent/ts/seq）+ `body`（报告对象原样字符串，带 `command_id`）。
 # 网关按 `command_id` 去重、按**信封里的 `agent`** 归属（与内部接入端点同一条纪律）。
@@ -25,7 +26,7 @@ batch_size = 1
 batch_timeout_ms = 300
 
 [[sink_group.sinks]]
-name = "json"
+name = "json-file"
 connect = "file_json_sink"
 tags = ["sink:json"]
 

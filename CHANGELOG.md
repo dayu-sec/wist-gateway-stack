@@ -3,6 +3,39 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.13.0-alpha] - 2026-11-12
+
+### 新增
+
+- 数据面新增 **syslog 采集入口（TCP + UDP，容器内同号 `1514`）**：
+  宿主 `${WPARSE_SYSLOG_TCP_PORT}:1514/tcp` 与 `${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（默认均 `1514`，
+  标准口 `514` 可在 `values/` 覆盖）。UDP 由新增的
+  `sys/data-plane/topology/sources/syslog_udp_1.toml`（连接器 `syslog_udp_src`）监听，并显式
+  `header_mode = "keep"` 保留 RFC5424 头，裸 syslog 规则才匹配得上；TCP 源同时改名为
+  `syslog_tcp_1.toml`（`key = "syslog_tcp_1"`，原来叫 `syslog_1`）。
+  **只发布端口不配 source 不会出数**。
+- 新增门禁 `dev/tests/sinks-no-field-delivery.test.sh`：种子 sink 不得向计算区数据场（wist-field）
+  投递；`wist-field-*` 连接器定义保留为“能力”，真正投递归站点 infra 仓。
+
+### 变更
+
+- `container_workload` 模型改为 `container_workload/container`，字段对齐 K8s 工作负载
+  （`node_name` / `namespace` / `pod_name` / `pod_uid` / `service` / `log_path`），
+  修掉 `log_confused` sink 的悬空引用。
+- `agent_ivsrep` 报告 sink 改为**不轮转**（`max_rolls = 0`）：网关按文件名读 `data/out_dat`，
+  轮转后名字带序号/`.gz`，「主机 → 调查」页恒空。
+- `ignore` sink 改为按后缀收 `*/ignore`：上游规则目录改名（`host/*` → `kernel_system_host/*` 等）
+  不再打断忽略规则收集。
+- `data-plane-config` 门禁同步到 2026-11-11 的 sink 命名（`host_*` / `log_*`），
+  并断言 `agent_ivsrep` 不轮转。
+
+### 升级注意
+
+- 源 key 从 `syslog_1` 改为 `syslog_tcp_1`；工作根是 `cp --update=none`（只补缺失、不删旧），
+  升级前要手工删掉运行态旧文件，否则新旧两份会同时监听 `1514/tcp`：
+  `rm -f data-plane-run/work/topology/sources/syslog_1.toml`。
+- 新增宿主端口 `1514/tcp`、`1514/udp`（syslog 采集），需在安全组/防火墙按现场放行。
+
 ## [0.12.3-alpha] - 2026-11-10
 
 ### 变更

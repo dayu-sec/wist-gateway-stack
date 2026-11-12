@@ -5,8 +5,10 @@
 #   web              ${WEB_PORT}:443         前端入口（静态托管 + /api 反代；默认 8443）
 #   victoria-metrics ${VM_PORT}:8428         指标（默认 18429）
 #   wparse           ${WPARSE_PORT}:9000     数据面入口（agent 上送，明文 TCP；默认 9000）
+#                    ${WPARSE_SYSLOG_TCP_PORT}:1514/tcp  syslog 采集入口（裸 TCP；默认 1514）
+#                    ${WPARSE_SYSLOG_UDP_PORT}:1514/udp  syslog 采集入口（裸 UDP；默认 1514）
 #
-# 容器内端口是**应用契约**，写死（3000/443/8428/9000）；宿主端口才是变量 —— 两边不要写混。
+# 容器内端口是**应用契约**，写死（3000/443/8428/9000/1514）；宿主端口才是变量 —— 两边不要写混。
 #
 # 值来源（gops 系统约定）：
 #   - 随环境/客户变化的量（镜像源与 tag、宿主端口、保留期、时区、挂载路径）统一用
@@ -248,6 +250,17 @@ services:
       # agent 数据面入口（wparse source tcp_1）。明文，需对 agent 可达；
       # 管控面 agent 上送地址由网关下发（/api/v1/admin/agent/uplink），要与这里一致。
       - "${WPARSE_PORT}:9000"
+      # syslog TCP 采集入口（裸 RFC3164/5424 / rsyslog 转发）：宿主 1514/tcp → 容器 1514/tcp。
+      # 容器侧由 source `syslog_tcp_1`（connect = syslog_tcp_src）监听；与 UDP 同号、协议不同不冲突。
+      # **注意**：本端口只有容器内有监听，设备的 syslog 目的地要显式带端口（1514）。
+      - "${WPARSE_SYSLOG_TCP_PORT}:1514/tcp"
+      # syslog UDP 采集入口（裸 RFC3164/5424，不经过 agent 信封）：宿主 1514/udp → 容器 1514/udp。
+      # 容器侧监听由数据面 source `syslog_udp_1` 提供（connect = syslog_udp_src）；
+      # **只发布端口不配 source 不会出数**，两者必须一起改。
+      # 为什么不是标准 514：容器里 wparse 以 999 运行、绑不了 <1024；宿主 514 也常被 rsyslog
+      # 占用，且 rootless Docker 发布不了特权端口。设备只能发 514 时，把宿主端口改成 514 即可
+      # （容器内仍 1514），前提是 daemon 能以 root 绑定且该端口空闲。
+      - "${WPARSE_SYSLOG_UDP_PORT}:1514/udp"
       # 管理面只发布回环：gwlinkd 是本机宿主进程；**不要**写成 0.0.0.0。
       - "127.0.0.1:${WPARSE_ADMIN_PORT}:19090"
     extra_hosts:

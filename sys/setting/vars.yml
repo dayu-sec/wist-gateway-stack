@@ -55,6 +55,14 @@ system:
   # 数据面入口端口：agentd 往这台上送日志/遥测（容器内是 wparse 的 source tcp_1:9000）
   - name: WPARSE_PORT
     value: 9000
+  # syslog 采集入口（裸 syslog，不走 agent 信封）：设备/中间件直接往这里发 RFC3164/5424。
+  # 容器内 source `syslog_tcp_1` / `syslog_udp_1` 固定绑 1514（TCP / UDP 同号、互不冲突）；
+  # 这两个只改**宿主**端口。标准口是 514，但宿主 514 常被 rsyslog 占用、rootless Docker
+  # 也发布不了特权端口，所以默认用非特权的 1514；设备不能改端口时，在 values/ 里覆盖成 514。
+  - name: WPARSE_SYSLOG_TCP_PORT
+    value: 1514
+  - name: WPARSE_SYSLOG_UDP_PORT
+    value: 1514
   # wparse 管理面（WarpStation 发布链路）：容器内绑 0.0.0.0:19090 + TLS，
   # 宿主**只发布回环** `127.0.0.1:${WPARSE_ADMIN_PORT}`，由本机 gwlinkd 访问。
   - name: WPARSE_ADMIN_PORT

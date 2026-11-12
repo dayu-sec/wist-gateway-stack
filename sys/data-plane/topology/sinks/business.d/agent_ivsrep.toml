@@ -31,10 +31,10 @@ connect = "file_json_sink"
 tags = ["sink:json"]
 
 [sink_group.sinks.params]
-# 本地 JSONL 只是**缓存**（报告的正本在网关那侧），所以开轮转、丢历史没关系。
-# ⚠ 三个轮转键是一组：`max_size` 是唯一的切分阈值，只写 `max_rolls` / `roll_compress`
-#   会被判成非法配置（`load sink route confs` + exit 300，整个 wparse 起不来）。
 file = "agent-ivsrep.jsonl"
+# `max_rolls = 0`：**不轮转**。网关直接从 `data/out_dat` 读报告文件，轮转后名字会带
+# `.gz`/序号，「主机 → 调查」页就永远空（踩过）。
+# `max_size` 仍要给：轮转键按「成组」校验，只写 `max_rolls = 0` 不写阈值会被判非法配置
+# （`load sink route confs` + exit 300，整个 wparse 起不来）。
 max_size = "100MB"
-max_rolls = 1
-roll_compress = "gzip"
+max_rolls = 0

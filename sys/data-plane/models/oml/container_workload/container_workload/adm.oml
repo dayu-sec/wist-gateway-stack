@@ -1,4 +1,4 @@
-name : container_workload
+name : container_workload/container
 rule : container_workload/*
 ---
 schema = read(schema);
@@ -8,6 +8,12 @@ occur_time = pipe read(ts) | Time::to_ts_zone(0, ms);
 seq = read(seq);
 family = read(family);
 unit = read(unit);
+node_name = read(node_name);
+namespace = read(namespace);
+pod_name = read(pod_name);
+pod_uid = read(pod_uid);
+service = read(service);
+log_path = read(log_path);
 event_id = read(wp_event_id);
 now = Now::time() | Time::to_ts_ms;
 dev_ip = read(wp_src_ip);
@@ -21,4 +27,5 @@ container_image = read(container_image);
 container_id = read(container_id);
 log = read(log);
 stream = read(stream);
+cri_flag = read(cri_flag);
 time = read(time);

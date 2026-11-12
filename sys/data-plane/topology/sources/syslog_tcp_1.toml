@@ -1,4 +1,4 @@
-key = "syslog_1"
+key = "syslog_tcp_1"
 enable = true
 connect = "syslog_tcp_src"
 tags = []

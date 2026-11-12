@@ -39,7 +39,7 @@
 |---|---|---|---|
 | `gateway` | 控制面后端（HTTPS API，rustls） | `${GATEWAY_PORT}:3000` | `dy-sec.tencentcloudcr.com/cloud/wist-gateway` |
 | `web` | 前端入口（nginx：TLS + 静态 + `/api` 反代） | `${WEB_PORT}:443`（HTTPS） | `dy-sec.tencentcloudcr.com/cloud/wist-gateway-web` |
-| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口）<br>`127.0.0.1:${WPARSE_ADMIN_PORT}:19090`（本机管理面） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
+| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口）<br>`${WPARSE_SYSLOG_TCP_PORT}:1514/tcp`（syslog TCP 采集）<br>`${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（syslog UDP 采集）<br>`127.0.0.1:${WPARSE_ADMIN_PORT}:19090`（本机管理面） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
 | `victoria-metrics` | 指标存储 | `${VM_PORT}:8428` | `victoriametrics/victoria-metrics` |
 
 > **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量：改**产品默认**改 `sys/setting/vars.yml`（默认 TCR），改**本环境用什么**改 `values/value.yml`（推荐，一条命令生效，见「变量与本地化」）。
@@ -98,6 +98,11 @@
 > **端口口径**：网关那侧 **HTTPS**（宿主 `443` → 容器 `3000`，**agentd 直连**，不经代理）；前端那侧 `8443:443`，nginx **自己终止 TLS**（证书是**页面自己的**，`scripts/init-web-tls.sh` 生成），入口 `https://<host>:8443`。两个入口各自独立：页面 nginx 只把浏览器的 `/api` 反代回网关，agentd 直接走网关端口。
 >
 > **数据面入口**：agent 上送日志/遥测是打到 **wparse 的 `9000`**（`${WPARSE_PORT}:9000`，明文 TCP，需对 agent 网络可达）——和控制面 `443` 是两条独立的通道；agent 用的上送地址由网关管理面下发（`/api/v1/admin/agent/uplink`），要与这个对外端口一致。
+>
+> **syslog 采集入口**：设备/中间件直接发的裸 syslog（RFC3164/5424）可用 **TCP 与 UDP 两种传输**，容器内都监听 `1514`（协议不同、同号不冲突）：
+> `TCP` → `${WPARSE_SYSLOG_TCP_PORT}:1514/tcp`（source `syslog_tcp_1`），`UDP` → `${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（source `syslog_udp_1`），宿主默认都是 `1514`。**只发布端口不配 source 不会出数**。
+> 为什么不用标准 `514`：容器里 wparse 以 `999` 运行、绑不了 <1024，宿主 `514` 也常被 rsyslog 占用、rootless Docker 更发布不了特权端口。设备只能发 `514` 时，在 `values/value.yml` 把对应宿主端口改成 `514`（容器内仍 `1514`；要求宿主端口空闲、daemon 能绑）。
+> 其余常见替代口：`5514`、`5140`（避冲突时用），`6514/tcp` 是 syslog over TLS（非裸 TCP）。
 
 ## 规则发布（WarpStation / Center）
 
@@ -190,7 +195,7 @@ wist-gateway-stack/
 | gx | **≥ 0.14**（`localize` 阶段流程；缺失时 `localize` 只写 `.env`，权限 `--apply` 也不会执行） | `gx -V` |
 | 执行账号 | 普通账号 + **已加入 `docker` 组**（等价于本机高权限，按安全要求评估）；部署目录由它拥有 | `id -nG`（输出里应含 `docker`） |
 | 容器组 | 部署账号**已在容器 gid（`999`）组里** —— `gops sys perms --apply` 只 `chmod`/`chgrp`、不改属主、不提权，不在组里会整片挂载一起报 `Operation not permitted`（见「权限与运行身份」） | `id -G`（输出里应含 `999`）；或 `./scripts/check-stack.sh --only prereq`（`prereq.container_gid`） |
-| 端口 | 宿主 `443`（网关，agentd 直连）、`8443`（页面）、`9000`（数据面）、`18429`（指标） | 见 `sys/setting/vars.yml` |
+| 端口 | 宿主 `443`（网关，agentd 直连）、`8443`（页面）、`9000`（数据面 TCP）、`1514/tcp` + `1514/udp`（syslog 采集）、`18429`（指标） | 见 `sys/setting/vars.yml` |
 
 > 为什么必须 Compose V2：`gops run` 固定发 `docker compose …`，**没有 v1 回退**。缺插件时报的是
 > `unknown shorthand flag: 'f' in -f`（docker 认不出 `compose`，就继续把后面的 `-f` 当自己的全局选项），

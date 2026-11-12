@@ -1,6 +1,8 @@
 [sink_group]
 name = "ignore"
-oml = ["host/ignore", "container_workload/ignore", "kernel_system_host/ignore"]
+# 按**后缀**收：`kernel_system_host/ignore`（现值）+ `container_workload/ignore`（wp-rules 拆出容器忽略规则后）。
+# 钉死目录前缀会被上游改名打断（`host/*` → `kernel_system_host/*` 已踩过一次），所以写通配。
+oml = ["*/ignore"]
 
 [[sink_group.sinks]]
 name = "ignore-file"

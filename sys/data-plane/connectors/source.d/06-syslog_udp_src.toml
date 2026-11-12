@@ -1,6 +1,6 @@
 [[connectors]]
 allow_override = ["addr", "port", "protocol", "tcp_recv_bytes", "udp_recv_buffer", "header_mode", "fast_strip", "instances"]
-id = "syslog_src"
+id = "syslog_udp_src"
 type = "syslog"
 
 [connectors.params]

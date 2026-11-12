@@ -23,6 +23,10 @@ system:
   value: http://victoria-metrics:8428
 - name: WPARSE_PORT
   value: 9000
+- name: WPARSE_SYSLOG_TCP_PORT
+  value: 1514
+- name: WPARSE_SYSLOG_UDP_PORT
+  value: 1514
 - name: WPARSE_ADMIN_PORT
   value: 19090
 - name: FIELD_ATLAS_URL

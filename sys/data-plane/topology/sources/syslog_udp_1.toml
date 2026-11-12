@@ -1,0 +1,14 @@
+# 裸 syslog UDP 入口（设备/中间件直接发 RFC3164/5424，不带 Wist Agent 信封）。
+# header_mode 必须是 keep：连接器默认 skip 会剥掉 RFC5424 头，
+# 裸 syslog 规则（wp-rules，如 chaitin_safeline 的 `_:pri<<,>>`）就匹配不上，
+# 整条包会掉进 raw_log。TCP 入口（syslog_tcp_1）走 agent/rsyslog 信封，保持连接器默认 skip。
+key = "syslog_udp_1"
+enable = true
+connect = "syslog_udp_src"
+tags = []
+
+[params]
+addr = "0.0.0.0"
+port = 1514
+protocol = "udp"
+header_mode = "keep"

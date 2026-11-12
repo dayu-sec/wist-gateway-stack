@@ -95,3 +95,23 @@ system:
   value: /usr/local/bin/gx
 - name: GWLINKD_UPGRADE_PROJECT_DIR
   value: ''
+- name: HARVEST_TAG
+  value: v0.1.0-alpha
+- name: HARVEST_CONFIG_DIR
+  value: ./configs/harvest
+- name: HARVEST_RUN_DIR
+  value: ./harvest-run
+- name: HARVEST_SOURCE_CODE
+  value: tencent-cloud-prod
+- name: HARVEST_TENANT_ID
+  value: ''
+- name: HARVEST_ENV_REF
+  value: prod
+- name: HARVEST_REGIONS
+  value: auto
+- name: HARVEST_RUN_AT
+  value: 00:30
+- name: HARVEST_JITTER_SECONDS
+  value: '300'
+- name: COMPOSE_PROFILES
+  value: ''

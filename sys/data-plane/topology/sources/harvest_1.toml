@@ -1,0 +1,18 @@
+# 云账号事实采集（wist-harvest）的独立入口。
+#
+# 为什么另开一条而不复用 tcp_1：tcp_1 是 agentd 上送的入口，两者是**不同的生产者**，
+# 它们的失败与限速互不相干；混在一条 source 上，排查时无法区分「谁没来」。
+#
+# 端口 9001 是**容器内应用契约**，与 sys/docker-compose.yml 里 harvest 的
+# `[sink] endpoint = "wparse:9001"` 成对。**不要**把 9001 暴露到宿主：
+# 只有同栈的 harvest 容器连它。
+key = "harvest_1"
+enable = true
+connect = "tcp_src"
+tags = []
+
+[params]
+addr = "0.0.0.0"
+port = 9001
+framing = "len"
+data_format = "ndjson"

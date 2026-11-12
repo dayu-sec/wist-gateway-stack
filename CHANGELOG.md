@@ -3,6 +3,39 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **可选服务 `wist-harvest`（云账号事实采集）**：compose `profiles: [harvest]`，**默认不启**。
+  只出网到云 API、出站到同栈 wparse 新增的 `harvest_1` source（容器内 9001，`framing = "len"`）；
+  **不暴露任何宿主端口**。
+  数据源身份（`source_code` / `tenant_id` / `env_ref` / 地域）走 `sys/setting/vars.yml` → `values/` 覆盖；
+  `HARVEST_TENANT_ID` 为空时**不渲染数据源**（采集不启用，也不会拿空租户去采）。
+  凭据复用平台密钥文件 `.wist/sec-value.yml`（键 `tencent_secret_id` / `tencent_secret_key`，
+  由 `gops sec` 维护），`.wist` 目录 `:ro` 挂进容器 `/secrets` —— **不进 compose 环境**，
+  避免 `docker inspect` 裸奔（与网关 admin token 同一口径）。
+  为此 `wist-harvest` 做了两处配合：凭据文件模式校验从「只认 0600」放宽为
+  「0600 或 0640（仅属组可读）」，并支持**扁平 YAML**（仅 `key: value`；遇到嵌套直接报错，不猜）。
+  渲染与宿主目录创建由 `scripts/init-harvest.sh` 完成（有条件渲染，不走 gx.tpl）。
+
+### 变更
+
+- **`models/knowledge/` 改由 `wp-rules` 发布**：栈种子不再带这 5 个文件
+  （`knowdb.toml` / `semantic_dict.toml` / `example/`）。引擎对 `models/` 是**整目录替换**
+  （`[project_remote]` 的 mirror 语义），两个发布者共用一个目录就会出现「谁同步谁删掉对方的文件」；
+  现在 `models/` 只归 wp-rules，knowledge 随它发版。
+  数据库本体仍不在 `models/`：运行时 `authority.sqlite` 在 `<work>/.run/`，`knowdb.toml` 的
+  `[provider]` 可指向外部 PostgreSQL —— 这里只有配置与知识数据，可整份替换。
+- 新增门禁：`data-plane-config.test.sh` 断言种子里不再出现 `models/knowledge`。
+
+### 升级注意
+
+- 老站点的 `data-plane-run/work/models/knowledge/` 会在下一次（拉到带 knowledge 的）`wp-rules`
+  同步时被整份镜像替换；同步之前那份旧文件不影响运行。
+- 离线站点（未接 Center、不跑 `[project_remote]`）会**没有** `models/knowledge`，引擎回落内置知识
+  （wparse 0.36 实测可正常装载）—— 需要现场自定义表时用 `knowdb.toml` 手动放回去。
+
 ## [0.13.0-alpha] - 2026-11-12
 
 ### 新增

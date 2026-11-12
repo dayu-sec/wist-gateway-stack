@@ -270,3 +270,35 @@ system:
   # **用绝对路径**：gwlinkd 作为系统服务运行时 cwd 不确定。
   - name: GWLINKD_UPGRADE_PROJECT_DIR
     value: ""
+
+  # ── wist-harvest（云账号事实采集；**可选服务**，compose `profiles: [harvest]`，默认不启）──
+  #    一个云账号一个数据源；采集器**无任何入站端口**：只出网到云 API、出站到同栈 wparse。
+  #    凭据读 `.wist/sec-value.yml`（与网关同一份；键名 `tencent_secret_id` / `tencent_secret_key`），
+  #    以 :ro 挂进容器 —— **不进 compose 环境**，免得在 `docker inspect` 里裸奔。
+  - name: HARVEST_TAG
+    value: v0.1.0-alpha
+  # 采集配置根（渲染物）：harvest.toml + sources.d/<source_code>.toml
+  - name: HARVEST_CONFIG_DIR
+    value: ./configs/harvest
+  # 运行态：spool（收齐之前不发送）与 state（租约、运行报告）
+  - name: HARVEST_RUN_DIR
+    value: ./harvest-run
+  # 数据源身份：**现场值**。source_code 换实现（Java → Rust）**不能换**（下游按它做匹配与作用域隔离）。
+  # tenant_id 为空时 localize **不渲染数据源**（采集不启用），不会拿空租户去采。
+  - name: HARVEST_SOURCE_CODE
+    value: tencent-cloud-prod
+  - name: HARVEST_TENANT_ID
+    value: ""
+  - name: HARVEST_ENV_REF
+    value: prod
+  # auto = 运行时用 DescribeRegions 解析（只取 AVAILABLE）；也可写逗号分隔的固定列表
+  - name: HARVEST_REGIONS
+    value: auto
+  # 每日定点（Asia/Shanghai）+ 随机抖动秒数（多站点错峰，避免同时打云 API）
+  - name: HARVEST_RUN_AT
+    value: "00:30"
+  - name: HARVEST_JITTER_SECONDS
+    value: "300"
+  # 启用哪些 compose profile（逗号分隔；空 = 不启用任何可选服务）。目前只有 `harvest`。
+  - name: COMPOSE_PROFILES
+    value: ""

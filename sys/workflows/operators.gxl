@@ -116,6 +116,11 @@ mod operators {
     //     复制到栈内 + 容器用 `TZ=:<file>` 读 —— 两边的坑都绕开。
     //     必须在 perms 之前：新建目录要跟其它 bind 源一起对齐（属主=部署账号、属组=999）。
     gx.cmd ( "./scripts/init-timezone.sh" );
+    // ⑤b 云账号采集（**可选服务**）：渲染 configs/harvest/ 并创建 harvest-run/{spool,state}。
+    //     必须在 ⑥ perms 之前 —— 新建的 bind 源目录要跟其它目录一起对齐，
+    //     否则 docker 会先建成 root:root，容器（999）写不动。
+    //     HARVEST_TENANT_ID 为空时**不生成数据源**（采集不启用），绝不拿空租户去采。
+    gx.cmd ( "./scripts/init-harvest.sh configs/harvest" );
     // ⑥ 宿主侧属主/权限对齐（Linux 专有；macOS/OrbStack 直接跳过）：
     //     网关与数据面**固定以 999:999 运行**（compose 里显式钉死），而 Linux 的 bind 挂载
     //     **不改属主** —— 未对齐会稳定地造成：wparse 写不出 /data/.run 的锁（以 75 无限重启）、

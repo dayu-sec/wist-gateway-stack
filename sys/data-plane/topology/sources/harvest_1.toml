@@ -9,7 +9,8 @@
 key = "harvest_1"
 enable = true
 connect = "tcp_src"
-tags = []
+# 记录级 `tenant_id`：OML 的 `cust_id` 从它取（客户号，不是租户 UUID）。
+tags = ["tenant_id:${WIST_TENANT_ID:unbound}"]
 
 [params]
 addr = "0.0.0.0"

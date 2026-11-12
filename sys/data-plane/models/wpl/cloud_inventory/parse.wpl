@@ -1,0 +1,27 @@
+// 云账号资产快照（wist-harvest）。
+//
+// 线上形态与 agentd 的 DSNAP 帧**完全一致**：`{JSON 头} CLOUDINV: {正文}`，
+// 帧边界由 tcp source 的 `framing = "len"`（`{十进制字节数} {帧}`）决定。
+//
+// 两条实测约束（2026-11-12 对真实 wparse 0.36 验证）：
+//   1. **正文末尾不要补 `\0`** —— 引擎会把 NUL 一起收进 `body`，下游拿到
+//      `{...}\x00` 解不开 JSON；
+//   2. 包级 `copy_event_parse` **不能省** —— 缺了它记录不会产生 wp event，
+//      解析结果不会进 sink 分组（现象：pick_stat 有计数、输出文件为空）。
+#[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Harvest", dev_name: "Wist Harvest")]
+package cloud_inventory {
+
+    #[tag(dev_type: "云资产", log_desc: "云账号资产快照", log_type: "cloud_inventory_snapshot")]
+    rule cloud_inventory_obs_snapshot {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+            ),
+            symbol(CLOUDINV:),
+            chars:body
+        )
+    }
+}

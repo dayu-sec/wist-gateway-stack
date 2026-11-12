@@ -3,11 +3,14 @@
 // 线上形态与 agentd 的 DSNAP 帧**完全一致**：`{JSON 头} CLOUDINV: {正文}`，
 // 帧边界由 tcp source 的 `framing = "len"`（`{十进制字节数} {帧}`）决定。
 //
-// 两条实测约束（2026-11-12 对真实 wparse 0.36 验证）：
-//   1. **正文末尾不要补 `\0`** —— 引擎会把 NUL 一起收进 `body`，下游拿到
-//      `{...}\x00` 解不开 JSON；
-//   2. 包级 `copy_event_parse` **不能省** —— 缺了它记录不会产生 wp event，
-//      解析结果不会进 sink 分组（现象：pick_stat 有计数、输出文件为空）。
+// 实测约束（2026-11-12 对真实 wparse 0.36 验证）：
+//   **正文末尾不要补 `\0`** —— 引擎会把 NUL 一起收进 `body`，下游拿到
+//   `{...}\x00` 解不开 JSON。帧边界由 `framing = "len"` 决定，不需要终结符。
+//
+// 包级 `copy_event_parse(raw_log/raw_log)` 只是**跟既有包保持一致**（agent_uplink 等
+// 都带），**不是本规则工作的必要条件**：A/B 实测去掉它同样能正常解析并落盘。
+// 上游较新的规则已把它去掉（见 CHANGELOG「WPL 随上游变化」），将来跟着上游对齐时
+// 可以一并删。
 #[copy_event_parse(rule: "raw_log/raw_log"), tag(dev_vendor: "Wist Harvest", dev_name: "Wist Harvest")]
 package cloud_inventory {
 

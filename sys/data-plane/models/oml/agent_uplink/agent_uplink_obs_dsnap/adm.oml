@@ -14,15 +14,16 @@ dev_type = read(dev_type);
 log_type = read(log_type);
 log_desc = read(log_desc);
 body = read(body);
-// 计算区资产库（atlas）需要 `{cust_id, content}`，且格式有两个硬约束（均实测）：
+// 计算区资产库（atlas）需要 `{cust_id, content}`，两个硬约束（均实测）：
 //
-// 1. `cust_id` 是 atlas **内部租户 UUID**，不是客户号（传客户号会 `400 ... is not a UUID`）。
-//    本站点由客户号 `1000000000000000001` 确定性派生：
-//    `uuid5(NAMESPACE_OID, "1000000000000000001") = 40a59f7d-df92-5958-adef-61def418d257`
-//    ⚠ 换客户必须同步改这里 —— OML 不能读环境变量，模型是共享的。
+// 1. `cust_id` = **客户号**，与证据侧（`agent_uplink_ivsrep`）同一个来源：网关绑定的
+//    `tenant_id`（`topology/sinks/defaults.toml` 的 `tenant_id:${WIST_TENANT_ID:unbound}`）。
+//    atlas 侧按客户清单把它解析成内部租户 UUID；**没登记会返回 400**
+//    （`tenant_unregistered`）→ 数据面 rescue，可见。
+//    ⚠ 不要在这里写租户 UUID：那是内部值，换客户时就变成死值。
 // 2. `content` 是对象，且 atlas 要求其中的 `body` 是**快照原文（字符串）**，不能是对象：
-//    `{"cust_id": <uuid>, "content": {"body": "<原文>"}}` → 200 accepted。
+//    `{"cust_id": <客户号>, "content": {"body": "<原文>"}}` → 200 accepted。
 //
 // 顶层 `body` 保留不动：本地 JSONL 与网关仍按它读。
-cust_id = chars("40a59f7d-df92-5958-adef-61def418d257");
+cust_id = read(tenant_id) { _ : chars("unknown") };
 content : obj = object { body = read(body); };

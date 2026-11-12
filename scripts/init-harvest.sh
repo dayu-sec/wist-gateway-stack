@@ -85,6 +85,9 @@ endpoint = "wparse:9001"
 # 同栈内网明文（harvest_1 无 TLS）。不要改成对公网可达的地址。
 allow_plaintext = true
 connect_timeout_ms = 5000
+# **不等 ACK**：warp-parse 的 tcp_src 只消费长度前缀帧、不回应答。
+# 若设成 true，每次发布都会等到超时 → 运行永远 Aborted、spool 永不清理（帧其实已送达）。
+expect_ack = false
 ack_timeout_ms = 15000
 publish_attempts = 3
 TOML

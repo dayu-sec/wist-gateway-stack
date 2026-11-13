@@ -101,6 +101,7 @@
 >
 > **syslog 采集入口**：设备/中间件直接发的裸 syslog（RFC3164/5424）可用 **TCP 与 UDP 两种传输**，容器内都监听 `1514`（协议不同、同号不冲突）：
 > `TCP` → `${WPARSE_SYSLOG_TCP_PORT}:1514/tcp`（source `syslog_tcp_1`），`UDP` → `${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（source `syslog_udp_1`），宿主默认都是 `1514`。**只发布端口不配 source 不会出数**。
+> 两个入口**同号也必须同语义**：`syslog_tcp_1` / `syslog_udp_1` 都显式 `header_mode = "keep"`，保留 `<pri>`/RFC5424 头，裸 syslog 规则才匹配得上。一边 keep、一边 skip 的话，同一条报文走 UDP 能解析、走 TCP 只进 `miss.dat`，看起来就像“同端口冲突”。需要“只要 body”（例如 rsyslog 转 JSON）请另开专用 source 与端口，不要改这两个。
 > 为什么不用标准 `514`：容器里 wparse 以 `999` 运行、绑不了 <1024，宿主 `514` 也常被 rsyslog 占用、rootless Docker 更发布不了特权端口。设备只能发 `514` 时，在 `values/value.yml` 把对应宿主端口改成 `514`（容器内仍 `1514`；要求宿主端口空闲、daemon 能绑）。
 > 其余常见替代口：`5514`、`5140`（避冲突时用），`6514/tcp` 是 syslog over TLS（非裸 TCP）。
 

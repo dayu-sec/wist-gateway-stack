@@ -252,11 +252,13 @@ services:
       - "${WPARSE_PORT}:9000"
       # syslog TCP 采集入口（裸 RFC3164/5424 / rsyslog 转发）：宿主 1514/tcp → 容器 1514/tcp。
       # 容器侧由 source `syslog_tcp_1`（connect = syslog_tcp_src）监听；与 UDP 同号、协议不同不冲突。
+      # 两个入口必须**同语义**：source 里都显式 `header_mode = "keep"`。只要一边是 skip，
+      # 同一条报文换个传输就「一边能解析、一边只进 miss」，现场会误判成端口冲突。
       # **注意**：本端口只有容器内有监听，设备的 syslog 目的地要显式带端口（1514）。
       - "${WPARSE_SYSLOG_TCP_PORT}:1514/tcp"
       # syslog UDP 采集入口（裸 RFC3164/5424，不经过 agent 信封）：宿主 1514/udp → 容器 1514/udp。
       # 容器侧监听由数据面 source `syslog_udp_1` 提供（connect = syslog_udp_src）；
-      # **只发布端口不配 source 不会出数**，两者必须一起改。
+      # **只发布端口不配 source 不会出数**，两者必须一起改；且与 TCP 入口同语义（都 keep 头）。
       # 为什么不是标准 514：容器里 wparse 以 999 运行、绑不了 <1024；宿主 514 也常被 rsyslog
       # 占用，且 rootless Docker 发布不了特权端口。设备只能发 514 时，把宿主端口改成 514 即可
       # （容器内仍 1514），前提是 daemon 能以 root 绑定且该端口空闲。

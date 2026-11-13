@@ -31,6 +31,21 @@ rm -rf "${WORK}/.run" "${WORK}/data"
 rm -f "${WORK}/wparse.local.toml"
 
 # 只留一个**空**的 file source：本门禁只关心「配置能不能装载」，不关心解析结果。
+# 在此之前先校验 syslog 同号入口：TCP/UDP 容器内都监听 1514，必须同语义（都 keep），
+# 否则同一条裸 syslog 换个传输就「一边能解析、一边只进 miss」，现场会当成端口冲突。
+for proto in tcp udp; do
+  src="${WORK}/topology/sources/syslog_${proto}_1.toml"
+  [[ -f "${src}" ]] || { echo "[FAIL] 缺少 syslog ${proto} 入口：${src}" >&2; exit 1; }
+  if ! grep -qs '^header_mode = "keep"$' "${src}"; then
+    echo "[FAIL] syslog_${proto}_1 必须显式 header_mode = \"keep\"（同号入口语义要一致）" >&2
+    exit 1
+  fi
+  if ! grep -qs '^port = 1514$' "${src}"; then
+    echo "[FAIL] syslog_${proto}_1 的容器内端口必须是 1514（compose 按这个发布）" >&2
+    exit 1
+  fi
+done
+
 rm -rf "${WORK}/topology/sources"
 mkdir -p "${WORK}/topology/sources" "${WORK}/data/in_dat"
 cat > "${WORK}/topology/sources/file_1.toml" <<'EOF'

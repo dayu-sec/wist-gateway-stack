@@ -3,6 +3,26 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.13.1-alpha] - 2026-11-13
+
+### 修复
+
+- **syslog 同号入口（TCP/UDP `1514`）语义对齐**：`syslog_tcp_1` 显式 `header_mode = "keep"`，
+  与 `syslog_udp_1` 一致。此前 TCP 走连接器默认 `skip`，会把 `<pri>`/RFC5424 头剥掉：
+  同一条裸 syslog 走 UDP 命中规则（`sec_log`/`raw_log`），走 TCP 只进 `miss.dat`。
+  `README` 把两者描述成等价，现场便把它归因为“端口冲突”（alpha 站点已据此把 UDP 源
+  `enable = false` 关掉）。要“只要 body”（如 rsyslog 转 JSON）请另开 source 与端口。
+- 新增门禁：`dev/tests/data-plane-config.test.sh` 断言两个 syslog 入口端口一致且都 `keep`，
+  防止同号入口再次漂移。
+
+### 升级注意
+
+- **种子不会覆盖运行态**（entrypoint 仍是 `cp --update=none`）：本次只改种子，
+  对**新部署**生效；存量站点要到这个修复，得显式同步或跟站点 infra 仓：
+  `rm -f data-plane-run/work/topology/sources/syslog_tcp_1.toml` 后再 `gops run stop && gops run start`，
+  或等 `wp-infra-*` 下发（alpha 已带）。
+  **不要**改成自动覆盖：运行态那份可能已由 Center / 现场改成正确值，种子无法判断。
+
 ## [0.13.0-alpha] - 2026-11-12
 
 ### 新增

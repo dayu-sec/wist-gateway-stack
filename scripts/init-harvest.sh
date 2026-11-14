@@ -34,8 +34,32 @@ esac
 code="${HARVEST_SOURCE_CODE:-tencent-cloud-prod}"
 envr="${HARVEST_ENV_REF:-prod}"
 regions="${HARVEST_REGIONS:-auto}"
-control_url="${HARVEST_CONTROL_URL:-}"
-control_poll_ms="${HARVEST_CONTROL_POLL_MS:-30000}"
+# 网关工作授权端点：**默认空 = 同栈网关**。
+# 不能写服务名 `gateway`：叶证书的 SAN 是对外域名（`<WEB_DOMAIN>,localhost,127.0.0.1`），
+# compose 给 gateway 加了这个域名的网络别名，所以内网解析 + 域名验签同时成立。
+# 端口是**容器内**的 3000（宿主 ${GATEWAY_PORT} 是 443，别混）。
+gateway_endpoint="${HARVEST_GATEWAY_ENDPOINT:-}"
+if [[ -z "${gateway_endpoint}" ]]; then
+  if [[ -n "${WEB_DOMAIN:-}" ]]; then
+    gateway_endpoint="https://${WEB_DOMAIN}:3000"
+  elif [[ "${enabled}" == "true" ]]; then
+    # 启用采集却推不出网关地址 = 会静默跑成离线模式（忽略网关授权），宁可当场失败。
+    echo "错误：HARVEST_GATEWAY_ENDPOINT 未配置且 WEB_DOMAIN 为空，推不出网关地址" >&2
+    echo "      要么设 WEB_DOMAIN（站点域名，证书 SAN 就是它），要么显式给 HARVEST_GATEWAY_ENDPOINT" >&2
+    exit 1
+  else
+    # 未启用采集：一个可选服务不该把整栈 localize 打死（dev / 预置身份的栈可能没有域名）。
+    echo "  警告：WEB_DOMAIN 为空且采集未启用，网关端点留空（离线模式）" >&2
+  fi
+fi
+gateway_poll_ms="${HARVEST_GATEWAY_POLL_MS:-30000}"
+case "${gateway_endpoint}" in
+  *'"'* | *' '*)
+    echo "错误：网关端点里不能有引号或空白：'${gateway_endpoint}'" >&2
+    exit 1
+    ;;
+esac
+gateway_ca_file="${HARVEST_GATEWAY_CA_FILE:-/etc/wist-harvest/gateway-ca.pem}"
 
 case "${code}" in
   *[!A-Za-z0-9._:-]*)
@@ -91,8 +115,9 @@ cat >"${tmp}" <<JSON
   "harvest_source_code": "${code}",
   "harvest_env_ref": "${envr}",
   "harvest_regions_literal": "${regions_json}",
-  "harvest_control_url": "${control_url}",
-  "harvest_control_poll_ms": ${control_poll_ms}
+  "harvest_gateway_endpoint": "${gateway_endpoint}",
+  "harvest_gateway_poll_ms": ${gateway_poll_ms},
+  "harvest_gateway_ca_file": "${gateway_ca_file}"
 }
 JSON
 if [[ -f "${VALUE_JSON}" ]] && cmp -s "${tmp}" "${VALUE_JSON}"; then
@@ -107,10 +132,10 @@ fi
 # ② 启用状态说明（非阻断）
 if [[ "${enabled}" == "true" ]]; then
   echo "  本地已允许调度：source_code=${code} env_ref=${envr} regions=${regions}"
-  if [[ -n "${control_url}" ]]; then
-    echo "  开关以中心为准：${control_url}（每 ${control_poll_ms}ms 一拍，新装默认关）"
+  if [[ -n "${gateway_endpoint}" ]]; then
+    echo "  采集授权以网关为准：${gateway_endpoint}（每 ${gateway_poll_ms}ms 一拍；未授权则不采）"
   else
-    echo "  未配 HARVEST_CONTROL_URL：开关只看本地 enabled，下次定点就会真采"
+    echo "  未配 HARVEST_GATEWAY_ENDPOINT：离线模式，按本地 enabled + 定点调度"
   fi
 else
   echo "  本地硬关（HARVEST_ENABLED=false）：进程常驻但不调度，数据源会渲染成只有注释。"

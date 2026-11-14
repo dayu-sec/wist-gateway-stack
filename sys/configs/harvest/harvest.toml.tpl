@@ -4,8 +4,8 @@
 
 [service]
 # **本地硬开关**：`false` = 进程常驻但不调度（healthcheck 只探活 + 检查 spool/state）。
-# 真正的开/关在中心（下面的 `[control]`）：这里 true 只代表「允许调度」。
-# 现场要急停就改 false —— 中心说 true 也越不过这个关。
+# 真正的开/关与采集范围在网关（下面的 `[gateway]` standing）：这里 true 只代表「允许调度」。
+# 现场要急停就改 false —— 网关授权也越不过这个关。
 enabled = {{harvest_enabled}}
 # 收齐之前不发送：一个采集范围的完整快照先落盘，再一次性发出。
 spool_dir = "/var/lib/wist-harvest/spool"
@@ -19,16 +19,31 @@ concurrency = 1
 # 空 ≠ 失败：只有范围完整且云端确实为空时才允许发空快照。
 allow_empty = false
 
-# 中心配置轮询：开关的真相在中心（gateway 的 harvest_setting），采集器自己定时问一句。
-# `url` 为空 = 不轮询（用上面的 [service] enabled）。需要 gateway >= 0.47.0-alpha。
-[control]
-url = "{{harvest_control_url}}"
-poll_interval_ms = {{harvest_control_poll_ms}}
+# 网关工作授权（worker 面，mTLS）：采什么 / 什么节奏由网关下发（standing）。
+# 没有客户端证书时，用一次性接入券换一张（落在 `identity_dir/`，0600）。
+[gateway]
+endpoint = "{{harvest_gateway_endpoint}}"
+source_code = "{{harvest_source_code}}"
+poll_interval_ms = {{harvest_gateway_poll_ms}}
+# 服务端信任锚（网关 TLS 证书的 CA）。自签站点必须给，否则握手失败。
+ca_file = "{{harvest_gateway_ca_file}}"
+# 身份目录（客户端证书 + 私钥，0600）。**必须落在于两个容器都挂了的 `state_dir` 里**：
+# `harvest-bootstrap` 换来的证书要让 `run` 看得见，而且不能跟着容器重建丢掉。
+identity_dir = "/var/lib/wist-harvest/state/identity"
 
-# token 复用管理面 token（部署取舍）：harvest 只需读，但 token 是同一个 ——
-# 所以 harvest 的出网面必须收窄到同栈内网。
-[control.credential]
-bearer = { file = "/secrets/sec-value.yml", field = "admin_token" }
+# 一次性接入券：只在**没有客户端证书**时用。
+# 同栈部署不需要它 —— `harvest-bootstrap` 用下面的 admin token 现签一张并**当场换成证书**
+# （落在 `identity_dir/`，`run` 起来直接用）。这里配的是跨机部署 / 手工排障的券：
+# 网关页「签发接入券」→ 写进宿主 `.wist/sec-value.yml` 的 `harvest_enroll_ticket`。
+# 字段缺失**不是错误**（只是没有券可用）。
+[gateway.enroll_ticket]
+file = "/secrets/sec-value.yml"
+field = "harvest_enroll_ticket"
+
+# 管理面 token：**只给 `bootstrap` 子命令**签发接入券 / 建初始 standing；`run` 不读。
+[gateway.admin_token]
+file = "/secrets/sec-value.yml"
+field = "admin_token"
 
 [retry]
 max_attempts = 4

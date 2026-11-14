@@ -1,7 +1,11 @@
 {
   "component": "wist-gateway-stack",
   "requires": { "wist-center": ">=0.24.0", "wist-gwlinkd": ">=0.18.4" },
-  "supports": { "wist-gateway": ">=0.40.0", "wist-agentd": ">=0.30.1" },
+  "supports": {
+    "wist-gateway": ">=0.48.0",
+    "wist-harvest": ">=0.6.0",
+    "wist-agentd": ">=0.30.1"
+  },
   "coexists_with": { "wist-center": ">=0.22.0", "wist-gwlinkd": ">=0.18.0" },
   "compat_mode": true,
   "bridge": [],

@@ -50,6 +50,9 @@ ignore:
   # wparse 运行态根（发布态 WPARSE_RUN_DATA / WPARSE_RUN_STATE / WPARSE_RUN_WORK，
   # 开发态 dev/）：pid / 锁 / 引擎自带的 sqlite、输出与工作副本。
   - data-plane-run
+  # 云采集（wist-harvest）运行态根（HARVEST_RUN_DIR）：spool / state / **identity**
+  # （客户端证书 + 私钥）。含凭据，绝不进交付包。
+  - harvest-run
   # 开发态资源：本地二进制（~92M，随平台而异）+ dev 运行态（含 store / 日志 / 渲染物）。
   - dev/bin
   - dev/configs
@@ -65,6 +68,8 @@ protect:
   - .env
   - packages
   - data-plane-run
+  # 采集器运行态（含客户端私钥与 spool）：升级不覆盖、也不删 —— 删了要重新接入。
+  - harvest-run
   - dev/bin
   - dev/configs
   - .wist

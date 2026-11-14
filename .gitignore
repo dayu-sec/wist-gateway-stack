@@ -9,6 +9,10 @@ sys/data-plane/data
 # 发布态 wparse 运行态根（WPARSE_RUN_DATA / WPARSE_RUN_STATE）；开发态的运行态在上面两个
 data-plane-run/
 
+# 云采集（wist-harvest）运行态根：spool / state（租约、运行报告）/ identity（客户端证书 + **私钥**）
+# 含凭据，绝不入库（契约/备份口径在 sys-prj.yml）。
+/harvest-run/
+
 # 本地二进制
 dev/bin/
 

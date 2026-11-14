@@ -37,14 +37,14 @@ secret_key = { file = "/secrets/sec-value.yml", field = "toc_secretkey" }
 # 原因：`HARVEST_ENABLED` 不是 true。
 #
 # 注意：服务是**常驻**的，没有 compose profile —— 未启用时容器照样在跑，只是不调度
-# （healthcheck 只探活 + 检查 spool/state）。真正“开不开”的真相在中心
-# （gateway 的 `harvest_setting`，网关信息页“云资产采集”卡），采集器每 30 秒自己来问一句。
+# （healthcheck 只探活 + 检查 spool/state）。真正“开不开 / 采什么”的真相在网关
+# （工作授权 standing，网关信息页「云资产采集」卡），采集器每 30 秒自己来拉一次。
 #
 # 启用步骤：
-#   1. 网关升到 >= 0.47.0-alpha，`HARVEST_CONTROL_URL` 指向
-#      `http://gateway:3001/api/v1/harvest/control`（同栈指标明文 ingest 监听）
-#   2. 在网关信息页「云资产采集」卡上打「开」（写 `harvest_setting.enabled`）
-#   3. 凭据写进 `.wist/sec-value.yml`：`toc_secretid` / `toc_secretkey`
+#   1. 网关 >= 0.48，`[gateway].endpoint` 指向 `https://gateway:8443`（TLS）
+#   2. 网关页「云资产采集」卡签发接入券 → 写进 `.wist/sec-value.yml` 的 `harvest_enroll_ticket`
+#   3. 启动后第一拍 poll 换取客户端证书（落在 state/identity/），再到页面上授权 standing
+#   4. 凭据写进 `.wist/sec-value.yml`：`toc_secretid` / `toc_secretkey`
 #
 # 本文件在当前状态下不渲染（`HARVEST_ENABLED=false` 是本地硬关，容器常驻但不调度）。
 {{/if}}

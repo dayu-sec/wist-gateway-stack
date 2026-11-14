@@ -277,14 +277,13 @@ services:
       wparse-run-init:
         condition: service_completed_successfully
 
-  # ── 云账号事实采集（**可选**：profile=harvest，默认不启）──
+  # ── 云账号事实采集（**常驻**；开关走 `[service] enabled`，不是安装期决定）──
   # 只出网到云 API、出站到同栈 wparse 的 harvest_1 source（容器内 9001，framing=len）；
   # **不暴露任何宿主端口**。凭据读 `.wist/sec-value.yml`（与网关同一份，ro 挂到 /secrets），
   # 不进 compose 环境 —— 避免 `docker inspect` 裸奔。
   harvest:
     container_name: wist-gateway-stack-harvest
     image: ${WIST_SPC}/wist-harvest:${HARVEST_TAG}
-    profiles: ["harvest"]
     # 与 gateway / wparse 同一运行身份（宿主目录按 999 对齐）
     user: "999:999"
     restart: unless-stopped
@@ -296,7 +295,7 @@ services:
       - "--config"
       - "/etc/wist-harvest/harvest.toml"
       - "--source"
-      - "/etc/wist-harvest/sources.d/${HARVEST_SOURCE_CODE}.toml"
+      - "/etc/wist-harvest/sources.d/source.toml"
       - "--run-at"
       - "${HARVEST_RUN_AT}"
       - "--jitter"
@@ -314,7 +313,7 @@ services:
       # diagnose：离线、非交互、不输出凭据；有 FAIL 即非 0（缺密钥文件会在这里暴露）。
       test: ["CMD", "/usr/local/bin/wist-harvest", "diagnose", "--quiet",
              "--config", "/etc/wist-harvest/harvest.toml",
-             "--source", "/etc/wist-harvest/sources.d/${HARVEST_SOURCE_CODE}.toml"]
+             "--source", "/etc/wist-harvest/sources.d/source.toml"]
       interval: 60s
       timeout: 15s
       retries: 3

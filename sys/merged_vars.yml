@@ -6,9 +6,9 @@ system:
 - name: VM_SPC
   value: quay.io/victoriametrics
 - name: GATEWAY_TAG
-  value: v0.45.0-alpha
+  value: v0.47.0-alpha
 - name: WEB_TAG
-  value: v0.34.0-alpha
+  value: v0.35.0-alpha
 - name: VM_TAG
   value: v1.154.0
 - name: WPARSE_TAG
@@ -96,15 +96,19 @@ system:
 - name: GWLINKD_UPGRADE_PROJECT_DIR
   value: ''
 - name: HARVEST_TAG
-  value: v0.1.0-alpha
+  value: v0.4.0-alpha
 - name: HARVEST_CONFIG_DIR
   value: ./configs/harvest
 - name: HARVEST_RUN_DIR
   value: ./harvest-run
 - name: HARVEST_SOURCE_CODE
   value: tencent-cloud-prod
-- name: HARVEST_TENANT_ID
-  value: ''
+- name: HARVEST_ENABLED
+  value: 'true'
+- name: HARVEST_CONTROL_URL
+  value: http://gateway:3001/api/v1/harvest/control
+- name: HARVEST_CONTROL_POLL_MS
+  value: '30000'
 - name: HARVEST_ENV_REF
   value: prod
 - name: HARVEST_REGIONS

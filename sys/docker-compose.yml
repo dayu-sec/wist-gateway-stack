@@ -279,6 +279,48 @@ services:
       wparse-run-init:
         condition: service_completed_successfully
 
+  # ── 云账号事实采集（**常驻**；开关走 `[service] enabled`，不是安装期决定）──
+  # 只出网到云 API、出站到同栈 wparse 的 harvest_1 source（容器内 9001，framing=len）；
+  # **不暴露任何宿主端口**。凭据读 `.wist/sec-value.yml`（与网关同一份，ro 挂到 /secrets），
+  # 不进 compose 环境 —— 避免 `docker inspect` 裸奔。
+  harvest:
+    container_name: wist-gateway-stack-harvest
+    image: ${WIST_SPC}/wist-harvest:${HARVEST_TAG}
+    # 与 gateway / wparse 同一运行身份（宿主目录按 999 对齐）
+    user: "999:999"
+    restart: unless-stopped
+    depends_on:
+      wparse:
+        condition: service_started
+    command:
+      - "run"
+      - "--config"
+      - "/etc/wist-harvest/harvest.toml"
+      - "--source"
+      - "/etc/wist-harvest/sources.d/source.toml"
+      - "--run-at"
+      - "${HARVEST_RUN_AT}"
+      - "--jitter"
+      - "${HARVEST_JITTER_SECONDS}s"
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${HARVEST_CONFIG_DIR}:/etc/wist-harvest:ro
+      - ${HARVEST_RUN_DIR}/spool:/var/lib/wist-harvest/spool
+      - ${HARVEST_RUN_DIR}/state:/var/lib/wist-harvest/state
+      # 挂**目录**而非文件：源缺失时 Docker 只是建出 `.wist/` 目录（本就 gitignore），
+      # 而不是把文件建成同名目录（引擎随后读目录会直接失败）。与 gateway 同一口径。
+      - ./.wist:/secrets:ro
+    healthcheck:
+      # diagnose：离线、非交互、不输出凭据；有 FAIL 即非 0（缺密钥文件会在这里暴露）。
+      test: ["CMD", "/usr/local/bin/wist-harvest", "diagnose", "--quiet",
+             "--config", "/etc/wist-harvest/harvest.toml",
+             "--source", "/etc/wist-harvest/sources.d/source.toml"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
   # ── 控制面后端 ──
   gateway:
     container_name: wist-gateway-stack-gateway

@@ -3,6 +3,66 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.14.0-alpha] - 2026-11-13
+
+### 新增
+
+- **常驻服务 `wist-harvest`（云账号事实采集）**：去掉 `profiles: ["harvest"]`，装完就在跑；
+  只出网到云 API、出站到同栈 wparse 的 `harvest_1` source（容器内 9001，`framing = "len"`）；
+  **不暴露任何宿主端口**。
+  **开不开不再由部署期决定**：中心（网关）持有 `harvest.enabled`，采集器每 30 秒
+  自己 `GET http://gateway:3001/api/v1/harvest/control` 问一句（复用管理面 admin token），
+  下一拍生效、**不重建容器**；页面上就是网关信息页的「云资产采集」卡。
+  失败语义 **fail-closed**：配了 `[control]` 时首拍前不采、首拍失败不采，之后沿用上一拍；
+  本地 `HARVEST_ENABLED=false` 是**硬关**（中心说 true 也不采，现场要停就停）。
+  新装默认不采：网关 `harvest_setting` 初始 `enabled = 0`，要在页面上打开。
+  **采集器不认识客户 / 租户**：一个网关只服务一个客户，客户身份由发送通道在入库时打上
+  （wparse 全局 tag `tenant_id`，来自 gwlinkd 写的 `WIST_TENANT_ID`），OML 用它拼 `cust_id`。
+  对应 `wist-harvest 0.2.0` 去 tenant、`0.3.0` 加 `[service] enabled`、`0.4.0` 加 `[control]` 自拉。
+  凭据复用平台密钥文件 `.wist/sec-value.yml`（键 `toc_secretid` / `toc_secretkey`，
+  由 `gops sec` 维护），`.wist` 目录 `:ro` 挂进容器 `/secrets` —— **不进 compose 环境**，
+  避免 `docker inspect` 裸奔（与网关 admin token 同一口径）。
+  `wist-harvest` 相应把凭据文件模式校验从「只认 0600」放宽为「0600 或 0640（仅属组可读）」，
+  并支持**扁平 YAML**（仅 `key: value`；遇到嵌套直接报错，不猜）。
+  配置走**与其它组件同一套**机制：模板在 `sys/configs/harvest/`（`harvest.toml.tpl` +
+  `sources.d/source.toml.tpl`），渲染值由 `scripts/init-harvest.sh` 备料
+  （`configs/harvest/harvest.value.json`），`gx.tpl` 渲染。脚本只剩三件事：备料派生值、
+  建 `harvest-run/{spool,state}`（必须早于 `gops sys perms`，否则 docker 建成 root:root）、
+  密钥文件提示。
+  **数据源文件名固定 `source.toml`**（`gx.tpl` 的 `dst` 不认变量），compose 的 `--source`
+  与挂载同名；旧版本的 `<source_code>.toml` 会在 localize 时被清掉。
+  本地硬关时 `{{#if harvest_enabled}}` 渲成「只有注释」的合法 TOML —— 不是可用数据源。
+
+  **升级顺序必须先 `gops sys localize` 再 `gops run start`**：容器现在是常驻的，如果先用
+  旧 `configs/harvest/`（没有 `enabled`、也没有 `sources.d/source.toml`）拉起，healthcheck
+  会因数据源缺失一直 unhealthy。
+
+### 变更
+
+- 网关镜像钉到 `v0.47.0-alpha`、前端到 `v0.35.0-alpha`：新增 `harvest_setting` 表与
+  `GET /api/v1/harvest/control`（采集器轮询，挂明文 ingest 监听）+ `GET`/`PUT /api/v1/admin/harvest`
+  （页面读写），网关信息页多一张「云资产采集」卡。
+- `HARVEST_TENANT_ID` 变量**删除**（采集器不再感知租户）；新增 `HARVEST_ENABLED`
+  （本地硬开关，默认 `true` = 允许调度）、`HARVEST_CONTROL_URL`（默认同栈网关 control 端点）、
+  `HARVEST_CONTROL_POLL_MS`（默认 `30000`）。
+- **`models/knowledge/` 改由 `wp-rules` 发布**：栈种子不再带这 5 个文件
+  （`knowdb.toml` / `semantic_dict.toml` / `example/`）。引擎对 `models/` 是**整目录替换**
+  （`[project_remote]` 的 mirror 语义），两个发布者共用一个目录就会出现「谁同步谁删掉对方的文件」；
+  现在 `models/` 只归 wp-rules，knowledge 随它发版。
+  数据库本体仍不在 `models/`：运行时 `authority.sqlite` 在 `<work>/.run/`，`knowdb.toml` 的
+  `[provider]` 可指向外部 PostgreSQL —— 这里只有配置与知识数据，可整份替换。
+- 新增门禁：`data-plane-config.test.sh` 断言种子里不再出现 `models/knowledge`；
+  新增 `harvest-config.test.sh`（渲染 / 常驻 / 中心轮询契约）。
+
+### 升级注意
+
+- 老站点升级后采集**保持原状态不采**：先在页面（或 `PUT /api/v1/admin/harvest`）打开。
+  确认清单：网关 ≥ 0.47.0-alpha、`.wist/sec-value.yml` 有 `admin_token` 与 `toc_secretid` /
+  `toc_secretkey`、`configs/harvest/sources.d/source.toml` 是真实数据源。
+- 老站点的 `data-plane-run/work/models/knowledge/` 会在下一次（拉到带 knowledge 的）`wp-rules`
+  同步时被整份镜像替换；同步之前那份旧文件不影响运行。
+- 离线站点（未接 Center、不跑 `[project_remote]`）会**没有** `models/knowledge`，引擎回落内置知识
+  （wparse 0.36 实测可正常装载）—— 需要现场自定义表时用 `knowdb.toml` 手动放回去。
 ## [0.13.1-alpha] - 2026-11-13
 
 ### 修复

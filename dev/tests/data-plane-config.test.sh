@@ -83,6 +83,13 @@ if grep -q 'ERROR' "${LOG}"; then
   exit 1
 fi
 
+# `models/` 只能有**一个**发布者（wp-rules）：knowledge 不在种子里，它随 wp-rules 发版。
+# 引擎对 managed 目录是「整目录删掉再重拷」，两个发布者共用一个目录时，谁同步谁删掉对方。
+if [[ -e "${WORK}/models/knowledge" ]]; then
+  echo '[FAIL] 种子里不该再有 models/knowledge：knowledge 随 wp-rules 发布（见 CHANGELOG [未发布]）' >&2
+  exit 1
+fi
+
 # 每个 sink 分组都在位（少一个 = 该类记录落进 `log_std`（`oml = ["*"]` 兜底）或直接丢）。
 # 名字是 2026-11-11 统一命名后的：文件 `host_*` / `log_*`，分组名跟着文件走。
 for name in agent-facts agent-dsnap host-metrics agent-ivsrep ignore log-raw log_std log_confused; do

@@ -1,0 +1,20 @@
+name : cloud_inventory_obs_snapshot
+rule : cloud_inventory/cloud_inventory_obs_snapshot
+---
+// 生产者原生格式先存下来（排障用），再把 `schema` 改写成**入口路由键**。
+// 顺序不能倒：先读后写，否则原生格式就丢了。
+//
+// 为什么在 warp-parse 改、而不是让采集器直接发 `atlas.in.*`：
+// 分工是「生产者不感知 atlas schema」。采集器发的是 `cloud_inventory/1`，
+// 这里映射成 `atlas.in.inventory.v1`；将来 family 或版本变了只改这一处。
+schema_native = read(schema);
+schema = chars("atlas.in.inventory.v1");
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+body = read(body);
+// 与 agentd 的 obs_dsnap 同一套契约：atlas 要 `{cust_id, content.body}`，
+// 且 `content.body` 必须是**原文字符串**（对象会被拒）。
+// `cust_id` 取客户号（来源是 source tags 上的 tenant_id），**不能**写租户 UUID。
+cust_id = read(tenant_id) { _ : chars("unknown") };
+content : obj = object { body = read(body); };

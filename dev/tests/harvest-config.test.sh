@@ -124,11 +124,13 @@ if [ "$(jstr harvest_regions_literal)" = '"auto"' ]; then ok "地域默认 auto"
 
 render_tpls
 render_rc=$?
+RENDER_OK=0
 if [ "${render_rc}" -eq 2 ]; then
   echo "  skip 未安装 gx：跳过模板渲染断言"
 elif [ "${render_rc}" -ne 0 ]; then
   no "gx tpl 渲染失败（启用态）"
 else
+  RENDER_OK=1
   for line in \
     '^source_code = "tencent-cloud-prod"$' \
     '^vendor = "TENCENT_CLOUD"$' \
@@ -244,10 +246,12 @@ if grep -qE '^instances = [2-9]$' "${TCP1}" 2>/dev/null; then
 else
   no "tcp_1 只开了一个读实例（harvest 大帧会阻塞 agent 上送）"
 fi
-if grep -qE '^endpoint = "wparse:9000"$' "${SERVICE_TOML}" 2>/dev/null; then
+if [ "${RENDER_OK}" -eq 0 ]; then
+  echo "  skip 未安装 gx：跳过 endpoint 渲染断言"
+elif grep -qE '^endpoint = "wparse:9000"$' "${SERVICE_TOML}" 2>/dev/null; then
   ok "harvest 的 endpoint 与 tcp_1 同端口"
 else
-  no "harvest 的 endpoint 与 tcp_1 不一致（或没渲染）"
+  no "harvest 的 endpoint 与 tcp_1 不一致：$(grep -E '^endpoint' "${SERVICE_TOML}" 2>/dev/null || echo 渲染产物缺失)"
 fi
 
 printf '\n通过 %d，失败 %d\n' "${pass}" "${fail}"

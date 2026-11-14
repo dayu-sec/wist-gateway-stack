@@ -281,7 +281,7 @@ services:
 
   # ── 云账号事实采集（**常驻**；开关走 `[service] enabled`，不是安装期决定）──
   # 只出网到云 API、出站到同栈 wparse 的**统一入口**（容器内 9000，与 agentd 同口，
-  # `framing=len`；两边靠 WPL 的 `CLOUDINV:` 标记区分）；
+  # `framing=len`；两边都用 `DSNAP:` 信封，靠记录里的 `schema` 区分）；
   # **不暴露任何宿主端口**。凭据读 `.wist/sec-value.yml`（与网关同一份，ro 挂到 /secrets），
   # 不进 compose 环境 —— 避免 `docker inspect` 裸奔。
   harvest:

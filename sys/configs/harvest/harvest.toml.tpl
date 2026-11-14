@@ -41,7 +41,8 @@ default_burst = 5.0
 
 [sink]
 # 同栈 wparse 的**统一数据入口**（`tcp_1`，容器内 9000，`framing = "len"` / ndjson）。
-# 与 agentd 上送同一个口：两者靠 WPL 的 `CLOUDINV:` 标记区分，路由按 OML 名分。
+# 与 agentd 上送同一个口、**同一个 `DSNAP:` 信封**：记录里的 `schema`
+# （`atlas.in.inventory.v1`）决定下游走哪条路，数据面不需要为采集器加规则。
 # **不要**改成对公网可达的地址（入口本身已发布到宿主，别再扩大范围）。
 endpoint = "wparse:9000"
 # 同栈内网明文（9000 无 TLS）。

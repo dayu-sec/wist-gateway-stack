@@ -276,7 +276,7 @@ system:
   #    凭据读 `.wist/sec-value.yml`（与网关同一份；键名 `toc_secretid` / `toc_secretkey`），
   #    以 :ro 挂进容器 —— **不进 compose 环境**，免得在 `docker inspect` 里裸奔。
   - name: HARVEST_TAG
-    value: v0.4.0-alpha
+    value: v0.5.0-alpha
   # 采集配置根（渲染物）：harvest.toml + sources.d/<source_code>.toml
   - name: HARVEST_CONFIG_DIR
     value: ./configs/harvest

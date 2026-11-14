@@ -3,6 +3,28 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.14.2-alpha] - 2026-11-13
+
+### 变更
+
+- **采集不需要自己的帧标记**：`wist-harvest 0.5.0` 改用 `DSNAP:` 信封（与 agentd 的原文快照
+  逐字一致），`schema` 直接写 atlas 的既定契约键 `atlas.in.inventory.v1` —— atlas 的写入端点
+  本来就按记录里的 `schema` 分发，不看帧标记。
+- 因此数据面**删掉三份只为采集器存在的定义**：`models/wpl/cloud_inventory/`、
+  `models/oml/cloud_inventory/`、`topology/sinks/business.d/cloud_inventory.toml`。
+  云资产记录现在走现成的 `agent_uplink_obs_dsnap` 规则与 `agent-dsnap` sink 分组。
+- `HARVEST_TAG` → `v0.5.0-alpha`。
+
+### 升级注意
+
+- **wire 不兼容，先升数据面再升采集器**：旧采集器发的 `CLOUDINV:` 帧在新规则下没有匹配，
+  会落 `miss.dat`；新采集器发的 `DSNAP:` 帧在旧数据面上由现有 dsnap 规则接住（`schema` 透传）。
+- 云资产会写进 `agent-dsnap.jsonl`（与主机快照同一个文件），元数据标签是 dsnap 的 ——
+  这是复用现有分组的代价；要分开文件就得在 infra 里再加一个分组。
+- 存量站点的工作根是 `cp --update=none`：旧的 `models/wpl|oml/cloud_inventory/` 与
+  `topology/sinks/business.d/cloud_inventory.toml` 不会被自动删（已经没有规则匹配它们，
+  不影响运行），需要干净就手工删。已接中心的站点，`models/` 会在同步时整份镜像。
+
 ## [0.14.1-alpha] - 2026-11-13
 
 ### 变更

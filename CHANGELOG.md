@@ -3,6 +3,37 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.0-alpha] - 2026-11-14
+
+### 变更（云采集：同栈自动接入 + 工作授权）
+
+- 组件 tag：`GATEWAY_TAG` → `v0.48.0-alpha`、`WEB_TAG` → `v0.36.0-alpha`、
+  `HARVEST_TAG` → `v0.6.0-alpha`（三仓同一版本火车，**不可混版**）。
+
+### 新增
+
+- **`harvest-bootstrap` 一次性服务**：gateway 就绪后用管理面 admin token 现签接入券、
+  **当场换证书**，再建初始 `plan_version=1` 的 standing（仅在 `HARVEST_ENABLED=true` 且从未授权时）。
+  `harvest` 以 `service_completed_successfully` 依赖它。
+- `gateway` 容器加 `${WEB_DOMAIN}` **网络别名**：harvest 用 `https://<域>:3000` 连内网，
+  验的就是叶证书 SAN 里的域名 —— 客户端无需放宽任何校验。
+
+### 变更
+
+- `HARVEST_GATEWAY_ENDPOINT` 改为**默认留空**：由 `scripts/init-harvest.sh` 按 `WEB_DOMAIN`
+  推导（跨机部署才显式填）。
+- 采集器身份目录从 `/var/lib/wist-harvest/identity` 挪到 `state_dir/identity`：
+  bootstrap 换的证书 `run` 看得见，且容器重建不丢。
+- `harvest-run/` 进 `sys-prj.yml` 的 `ignore` + `protect` 与 `.gitignore`（内含客户端私钥）。
+- `compat.json`：`supports` 抬到 `wist-gateway >= 0.48.0`，并新增 `wist-harvest >= 0.6.0`。
+
+### 升级注意
+
+- **必须同批升采集器与网关**：`wist-harvest 0.5.x` 只认 `[control]` 与旧端点，混版会停下来。
+- 网关 `0042` 迁移把 `harvest_setting` 重命名为 `harvest_setting_removed_0042`；升级后
+  同栈由 bootstrap 自动授权（已接中心的站点无需手工操作）。
+- 存量站点 `harvest-run/` 为空的新目录由 `localize` 建好并对齐权限（早于 `up`）。
+
 ## [0.14.2-alpha] - 2026-11-13
 
 ### 变更

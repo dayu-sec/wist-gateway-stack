@@ -1,14 +1,39 @@
 # 更新日志
 
-本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
+本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [0.14.1-alpha] - 2026-11-13
+
+### 变更
+
+- **数据入口统一到 `tcp_1:9000`**，删掉采集专用的 `harvest_1` source（原来在容器内 9001）：
+  两者连接器参数本来就一模一样（`tcp_src` + `framing = "len"` + `data_format = "ndjson"`），
+  区分靠 WPL 的 `CLOUDINV:` 标记、路由按 OML 名，不需要第二条 source。
+  `harvest.toml` 的 `[sink] endpoint` 随之改为 `wparse:9000`。
+- `tcp_1` 的读实例从 1 提到 **2**：读循环是**按连接串行**的（一个实例一次只在一帧上 `read`），
+  两个生产者（gwlinkd 转发的 agent 上送 + harvest 快照）共用一个实例时，
+  harvest 发大快照（帧上限 32MB）会把 agent 的帧挡在后面。
+- 新增门禁：`harvest-config.test.sh` 第 ⑦ 组钉「入口合约」——`tcp_1` 的端口 / framing /
+  ndjson / 读实例数必须与 harvest 的 sink 对得上，且不得再出现 `harvest_1.toml`。
+
+### 升级注意
+
+- **运行态旧文件要删**：工作根是 `cp --update=none`（只补缺失、不删旧），
+  存量站点的 `data-plane-run/work/topology/sources/harvest_1.toml` 不会被自动清掉。
+  它监听 9001，不影响运行（也不会有流量），但会让人误以为入口还是两条：
+  `rm -f data-plane-run/work/topology/sources/harvest_1.toml` 后 `gops run stop && gops run start`。
+- 旧 `configs/harvest/harvest.toml` 里还是 `wparse:9001`：必须重新 `gops sys localize`，
+  否则采集器会连一个不存在的端口（症状：快照一直发不出去 / 运行报连接失败）。
+- `cust_id` 不再依赖 source 级 tag：`tenant_id` 来自 wparse 全局 tag（gwlinkd 写进工作根
+  `.env` 的 `WP_GLOBAL_TAGS`），与 agentd 的 `obs_dsnap` 同一条来源。
 
 ## [0.14.0-alpha] - 2026-11-13
 
 ### 新增
 
 - **常驻服务 `wist-harvest`（云账号事实采集）**：去掉 `profiles: ["harvest"]`，装完就在跑；
-  只出网到云 API、出站到同栈 wparse 的 `harvest_1` source（容器内 9001，`framing = "len"`）；
+  只出网到云 API、出站到同栈 wparse 的 `tcp_1` 统一入口（容器内 9000，`framing = "len"`）；
   **不暴露任何宿主端口**。
   **开不开不再由部署期决定**：中心（网关）持有 `harvest.enabled`，采集器每 30 秒
   自己 `GET http://gateway:3001/api/v1/harvest/control` 问一句（复用管理面 admin token），

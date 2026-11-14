@@ -3,15 +3,17 @@
 #
 #   dev/tests/harvest-config.test.sh
 #
-# 钉六件事（都是现场会踩的）：
+# 钉八件事（都是现场会踩的）：
 #   1. 未启用时**不渲染可用数据源**（整份只有注释）——「绕过 profile 硬起容器」必须当场失败；
 #   2. 启用后数据源必须带 `vendor`（缺了 harvest 直接解析失败，不会猜厂商）；
 #   3. 地域字面量：`auto` 原样、逗号列表转 TOML 数组；
 #   4. 非法 HARVEST_ENABLED / 非法地域直接失败，不写出半成品；
-#   5. `harvest.toml` 的 sink 指向同栈 `wparse:9001`（同栈内网明文，不对外）；
+#   5. `harvest.toml` 的 sink 指向同栈统一入口 `wparse:9000`（与 agentd 同一口，靠 WPL 标记区分）；
 #   6. compose：**常驻**（没有 profiles）、没有宿主端口、`--source` 指向固定的 `source.toml`；
 #   7. 站点默认值（`sys/setting/vars.yml`）把开关交给中心：本地 `enabled=true` 只是允许调度，
-#      真正的开/关是 `HARVEST_CONTROL_URL` 轮询到的那一项。
+#      真正的开/关是 `HARVEST_CONTROL_URL` 轮询到的那一项；
+#   8. 入口契约：`tcp_1` 的端口 / framing / ndjson / 读实例数与 harvest 的 sink 对得上
+#      （换掉 tcp_1 就会静默断流）。
 set -uo pipefail
 
 S="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -155,10 +157,15 @@ else
   else
     no "control.url 默认不是空"
   fi
-  if grep -qE '^endpoint = "wparse:9001"$' "${SERVICE_TOML}"; then
-    ok "harvest.toml 的 sink 指向 wparse:9001"
+  if grep -qE '^endpoint = "wparse:9000"$' "${SERVICE_TOML}"; then
+    ok "harvest.toml 的 sink 指向 wparse:9000"
   else
-    no "harvest.toml 的 sink 不是 wparse:9001"
+    no "harvest.toml 的 sink 不是 wparse:9000"
+  fi
+  if [ -f "${S}/sys/data-plane/topology/sources/harvest_1.toml" ]; then
+    no "还留着独立的 harvest_1 source（数据入口应统一到 tcp_1:9000）"
+  else
+    ok "没有额外的采集专用 source（统一走 tcp_1:9000）"
   fi
   leftovers="$(grep -oE '\{\{[^}]+\}\}' "${SERVICE_TOML}" "${SOURCE_TOML}" 2>/dev/null || true)"
   if [ -z "${leftovers}" ]; then
@@ -220,6 +227,27 @@ if grep -q 'HARVEST_TENANT_ID' "${VARS}"; then
   no "vars.yml 里还有 HARVEST_TENANT_ID（采集器不感知租户）"
 else
   ok "vars.yml 里没有 tenant 残留"
+fi
+
+echo "⑦ 统一入口契约：tcp_1 与 harvest 的 sink 必须同口同帧"
+TCP1="${S}/sys/data-plane/topology/sources/tcp_1.toml"
+for line in '^port = 9000$' '^framing = "len"$' '^data_format = "ndjson"$'; do
+  if grep -qE "${line}" "${TCP1}" 2>/dev/null; then
+    ok "tcp_1 有 ${line}"
+  else
+    no "tcp_1 缺 ${line}（采集与 agentd 共用这个入口）"
+  fi
+done
+# 两个生产者共用一条 source：读实例必须 >=2，否则会被对方的半帧占住。
+if grep -qE '^instances = [2-9]$' "${TCP1}" 2>/dev/null; then
+  ok "tcp_1 的读实例 >=2（采集不会阻塞 agent 上送）"
+else
+  no "tcp_1 只开了一个读实例（harvest 大帧会阻塞 agent 上送）"
+fi
+if grep -qE '^endpoint = "wparse:9000"$' "${SERVICE_TOML}" 2>/dev/null; then
+  ok "harvest 的 endpoint 与 tcp_1 同端口"
+else
+  no "harvest 的 endpoint 与 tcp_1 不一致（或没渲染）"
 fi
 
 printf '\n通过 %d，失败 %d\n' "${pass}" "${fail}"

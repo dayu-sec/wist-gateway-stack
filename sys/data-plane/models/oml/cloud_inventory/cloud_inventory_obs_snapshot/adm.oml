@@ -15,6 +15,7 @@ seq = read(seq);
 body = read(body);
 // 与 agentd 的 obs_dsnap 同一套契约：atlas 要 `{cust_id, content.body}`，
 // 且 `content.body` 必须是**原文字符串**（对象会被拒）。
-// `cust_id` 取客户号（来源是 source tags 上的 tenant_id），**不能**写租户 UUID。
+// `cust_id` 取客户号（来源是 wparse 全局 tag `tenant_id`，由 gwlinkd 写进工作根 `.env`
+// 的 `WP_GLOBAL_TAGS`），**不能**写租户 UUID。
 cust_id = read(tenant_id) { _ : chars("unknown") };
 content : obj = object { body = read(body); };

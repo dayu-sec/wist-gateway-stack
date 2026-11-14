@@ -1,3 +1,13 @@
+# 统一数据入口（容器内 9000，宿主 `${WPARSE_PORT}`）。
+#
+# 两个生产者共用这一条 source，靠 WPL 标记区分、按 OML 名路由：
+#   · gwlinkd 转发的 agent 上送（信封 + 各种 `XXX:` 头）
+#   · wist-harvest 的云账号快照（`CLOUDINV:`）
+# 两者 `framing = "len"` / `data_format = "ndjson"` 完全一致，不需要第二条 source。
+#
+# `instances = 2`：读循环是**按连接串行**的（一个实例一次只在一帧上 `read`），
+# 两个生产者就开两个读实例 —— 否则 harvest 发大快照（帧上限 32MB）时会占住唯一的
+# 实例，gwlinkd 那边的帧要等这一帧读完。
 key = "tcp_1"
 enable = true
 connect = "tcp_src"
@@ -8,3 +18,4 @@ addr = "0.0.0.0"
 port = 9000
 framing = "len"
 data_format = "ndjson"
+instances = 2

@@ -40,10 +40,11 @@ default_qps = 5.0
 default_burst = 5.0
 
 [sink]
-# 同栈 wparse 的 `harvest_1` source（容器内 9001，应用契约写死，见
-# `sys/data-plane/topology/sources/harvest_1.toml`）。**不要**改成对公网可达的地址。
-endpoint = "wparse:9001"
-# 同栈内网明文（harvest_1 无 TLS）。
+# 同栈 wparse 的**统一数据入口**（`tcp_1`，容器内 9000，`framing = "len"` / ndjson）。
+# 与 agentd 上送同一个口：两者靠 WPL 的 `CLOUDINV:` 标记区分，路由按 OML 名分。
+# **不要**改成对公网可达的地址（入口本身已发布到宿主，别再扩大范围）。
+endpoint = "wparse:9000"
+# 同栈内网明文（9000 无 TLS）。
 allow_plaintext = true
 connect_timeout_ms = 5000
 # **不等 ACK**：warp-parse 的 tcp_src 只消费长度前缀帧、不回应答。

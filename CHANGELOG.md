@@ -3,6 +3,11 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.3-alpha] - 2026-11-15
+
+- `WEB_TAG` → `v0.36.1-alpha`：修「云资产采集」卡残留的 P1 说明（P2 的按钮已经在上面了），
+  并把接入券的说明改成「一次性、同栈部署无需人工」。
+
 ## [0.15.2-alpha] - 2026-11-15
 
 **机制：把「挂载真的能建起来吗」变成门禁的一部分。**

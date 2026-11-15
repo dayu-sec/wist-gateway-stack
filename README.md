@@ -435,6 +435,29 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 - 前端入口：`https://<host>:8443`（nginx 终止 TLS，证书是页面自己的；首访浏览器会提示自签不受信）
 - 网关 API：`https://<host>:3000`
 
+### 云采集的接入（没有人工步骤）
+
+采集器的身份是**客户端证书**，不是配置里的什么东西。接入由 `harvest-bootstrap` 完成：
+它每次启动用管理面 token 向网关现签一张**一次性券**，**当场换成证书**（券只在内存里活几秒，
+不落盘），然后 `harvest` 才被拉起（compose 里 `depends_on: harvest-bootstrap: service_completed_successfully`）。
+
+所以：**没有人要搬券、要投文件、要对属主。** 页面「云资产采集」卡上那个「签发接入券」按钮
+只在两件事上有用 —— 留痕（库里只存券的 `sha256`，能查谁何时给哪个 `source_code` 签过）
+与排障核对。
+
+表一直是空的，按这个顺序查（不要往容器里投券，栈内没有这条路径）：
+
+```bash
+docker logs wist-gateway-stack-harvest-bootstrap   # 接入那一步：成功会打「已接入网关」/「已建立初始 standing」
+```
+
+1. 日志说拿不到管理面 token → 修栈根 `.wist/sec-value.yml` 的 `admin_token`（`gops sec` 维护）；
+2. 日志说连不上 / 验名失败 → 查网关地址（`WEB_DOMAIN` 推导）与服务端信任锚（`identity/gateway/public`）；
+3. 改完 `gops run start` —— `harvest-bootstrap` 每次启动都会重新接入，不用重启整栈。
+
+> 券是**一次性**的（默认 24h，上限 7d），也是**短期**的：它**不进** `.wist/sec-value.yml` ——
+> 那里是 admin token、云账号 SecretId/Key 这类要轮换、要进备份的长期密钥。
+
 ## 开发态（本地二进制）
 
 ```bash

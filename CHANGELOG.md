@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.5-alpha] - 2026-11-15
+
+**把「人工搬运接入券」这条路删掉：栈内接入只有 `harvest-bootstrap`。**
+
+采集器的身份是客户端证书，接入由 `harvest-bootstrap` 完成：每次启动用管理面 token 向网关
+现签一张一次性券，**当场换成证书**（券只在内存里活几秒，不落盘），然后 `harvest` 才被拉起。
+既然 harvest 只作为本栈的服务存在，就不存在「把券投给采集器」的人工步骤 —— 上一轮短暂加过的
+`scripts/harvest-enroll.sh` 已删除（它会制造一条仍需属主对齐、错了还会静默失败的旁路）。
+
+- `WEB_TAG` → `v0.36.4-alpha`、`HARVEST_TAG` → `v0.7.2-alpha`：页面那一段不再教人跑脚本，
+  改成说清「自动接入」与「表一直空时按日志修输入、`gops run start` 重跑」，并说明
+  「签发接入券」只用于留痕与排障核对。采集器那边同步删掉了人工投券通道（`run` 不再自己接入）。
+- README：「起来之后」改写为「云采集的接入（没有人工步骤）」，附三条排查步骤。
+- 采集器对 `<state_dir>/enroll.ticket`（以及 `HARVEST_ENROLL_TICKET`）的读取**已删除**：
+  `run` 没证书时只报错并退避，接入只由 `harvest-bootstrap` 做（现签现换，券不落盘）。
+
 ## [0.15.4-alpha] - 2026-11-15
 
 - `HARVEST_TAG` → `v0.7.1-alpha`、`WEB_TAG` → `v0.36.3-alpha`。

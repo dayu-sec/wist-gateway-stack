@@ -251,6 +251,10 @@ gops sys localize
 
 > 网关的 admin token 走密钥文件（栈根 `.wist/sec-value.yml`，键 `admin_token`，只读挂进网关容器、`WIST_GATEWAY_SEC_FILE` 指定）；该文件由 `scripts/init-gateway.sh` 生成、`.gitignore`。其它密钥如需，仍可用 `${SEC_xxx}` 占位由 `gops run start` 从 `~/.galaxy/sec_value.yml` 注入、不落盘。
 
+> **`WP_INS_ID`（wparse ≥ 0.36.2）**：`wp_event_id` 的布局是 `秒 | 实例 | 计数器`，实例段就取这个值
+> （`100..=1123`，默认 `100`）。**多个站点把数据汇到同一个中心时必须各不相同**，否则同一秒发号会撞 ID；
+> 单站点不用改。非数字 / 越界会让 wparse **启动失败**（上游有意的 fail-closed）。
+
 ### 前置：挂载文件
 
 compose 还挂这些路径：

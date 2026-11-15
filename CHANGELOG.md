@@ -3,6 +3,29 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.6-alpha] - 2026-11-15
+
+- `WEB_TAG` → `v0.36.5-alpha`：页面上「签发接入券」那块 UI 删了 —— 栈内接入是 `harvest-bootstrap`
+  现签现换，页面签出来的券**没有任何消费方**（网关侧的管理面端点保留，bootstrap 走的就是它）。
+  卡上只留：接入是自动的 / 表一直是空的怎么查（日志 → 修 token·域名·信任锚 → `gops run start`）/
+  要重新接入就删 `harvest-run/state/identity/` 后重跑。
+- `WPARSE_TAG`：`0.36.0-alpha` → **`0.36.4-alpha`**。之间几个版本的要点：
+  - 0.36.1：TCP/TLS sink 断链**自愈**（1s→30s 退避重建，含 TLS 握手）+ keepalive —— 接收端重启
+    后不再需要人工重启 wparse；
+  - 0.36.2：`wp_event_id` 改为确定性布局（`秒 32 | 实例 10 | 计数器 22`），并引入 `WP_INS_ID`；
+  - 0.36.3 / 0.36.4：接力链路不再覆盖/重复上游 `wp_*` meta（`UPSTREAM_*_KEEP` 开关，默认等于原行为）。
+- 新增变量 `WP_INS_ID`（默认 `100`，compose 以 `${WP_INS_ID:-100}` 传入 wparse）。
+  **多个站点汇到同一个中心时必须各不相同**（`100..=1123`）：同秒发号 + 实例号相同会撞 `wp_event_id`。
+  取值非数字 / 越界会让 wparse **启动失败**（上游有意的 fail-closed）。
+
+### 升级注意
+
+- **TCR 里要先有 `warp-parse:0.36.4-alpha`**：wparse 是上游镜像，不在 wist 发布流水线里。
+  站点如果用 `WARP_SPC=dy-sec.tencentcloudcr.com/cloud`，升级前必须先在能推 TCR 的机器上跑
+  `WARP_SPC=ghcr.io/wp-labs ./dev/push-images.sh`（源前缀要临时指回 ghcr，否则脚本会认为源就是目标而跳过），
+  否则 wparse 容器会卡在拉镜像。
+- 多站点共用中心时，给每个站点在 `values/` 里配不同的 `WP_INS_ID`，再 `gops sys localize`。
+
 ## [0.15.5-alpha] - 2026-11-15
 
 **把「人工搬运接入券」这条路删掉：栈内接入只有 `harvest-bootstrap`。**

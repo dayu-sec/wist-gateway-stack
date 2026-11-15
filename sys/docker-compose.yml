@@ -206,10 +206,10 @@ services:
       # 用 `TZ=:<file>` 而不是 `TZ=<zone 名>`：后者要求镜像自带 tzdata，索引不到时 glibc 会
       # 静默回落 UTC（看起来设了、其实没生效）；前者只认我们给的这份文件。
       TZ: ":/etc/tz-runtime/localtime"
-      # 事件号里的实例段（wparse ≥ 0.36.2 的 `wp_event_id` 布局：秒 | 实例 | 每秒计数器）。
-      # **多站点汇到同一个中心时必须各不相同**（100..=1123），否则同一秒发号会撞 ID；
-      # 单站点保持默认 100。用 `:-100` 兜底：wparse 读到空串会启动失败（它只认数字）。
-      WP_INS_ID: ${WP_INS_ID:-100}
+      # 事件号实例段（`WP_INS_ID`）**不在这里注入**：wparse 的解析优先级是
+      # 进程环境 > `<work-root>/.env`，一旦 compose 注入，gwlinkd 按中心绑定写进 `.env` 的
+      # 实例号就会被覆盖（多站点共用中心时会撞 `wp_event_id`）。实例号由 gwlinkd 在绑定时落
+      # `.env`；未绑定 / 旧中心 → wparse 自己回退默认 `100`（并打 WARN）。
       WPARSE_VM_ENDPOINT: http://victoria-metrics:8428
       # 数据面 sink（agent-facts / agent-logs）用的网关内部接入端点；
       # 与网关配置的 [ingest].listen_addr 对应（明文 HTTP，只走 compose 内网）。

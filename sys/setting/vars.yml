@@ -39,12 +39,10 @@ system:
   - name: WPARSE_TAG
     value: 0.36.4-alpha
 
-  # 事件号的实例段（wparse ≥ 0.36.2 的 `wp_event_id` 布局：秒 32 | 实例 10 | 每秒计数器 22）。
-  # **多个站点把数据汇到同一个中心时必须各不相同**（取值 100..=1123）：同一秒发号、实例号
-  # 又相同就会撞 ID。单站点保持默认 100 即可。非数字 / 越界 / 发号后被改 → wparse 启动失败
-  # （有意的 fail-closed，不静默回退）。
-  - name: WP_INS_ID
-    value: 100
+  # 事件号实例段（wparse ≥ 0.36.2 的 `wp_event_id`：秒 32 | 实例 10 | 每秒计数器 22）
+  # **不在栈变量里配**：它由中心「绑定客户」时的 `wp_ins_id` 下发，gwlinkd 落到 wparse 工作根
+  # `.env`。compose 不注入 `WP_INS_ID`（进程环境优先级更高，会把绑定值盖掉）；未绑定时
+  # wparse 回退默认 100。多个站点汇到同一个中心时，由中心分配互不相同的实例号。
 
   # 宿主端口（容器内端口是应用契约，写在 compose 里）
   - name: GATEWAY_PORT

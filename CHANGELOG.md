@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.7-alpha] - 2026-11-15
+
+**事件号实例段（`WP_INS_ID`）改由中心绑定下发，栈不再注入进程环境变量。**
+
+- 删除 `sys/setting/vars.yml` 的 `WP_INS_ID` 变量与 compose 里的
+  `WP_INS_ID: ${WP_INS_ID:-100}`。wparse 的解析优先级是**进程环境 > 工作根 `.env`**，
+  compose 一旦注入，gwlinkd 按中心绑定写进 `.env` 的实例号就会被盖掉 ——
+  多站点汇到同一个中心时仍然会撞 `wp_event_id`。
+- 实例号改由中心「绑定客户」的 `wp_ins_id`（`100..=1123`）下发，gwlinkd 写入
+  wparse 工作根 `.env`；未绑定 / 旧中心时 wparse 回退默认 `100`（打 WARN）。
+- 多站点共用中心：在中心给每台网关分配不同实例号即可，不再需要改站点 `values/`。
+
 ## [0.15.6-alpha] - 2026-11-15
 
 - `WEB_TAG` → `v0.36.5-alpha`：页面上「签发接入券」那块 UI 删了 —— 栈内接入是 `harvest-bootstrap`

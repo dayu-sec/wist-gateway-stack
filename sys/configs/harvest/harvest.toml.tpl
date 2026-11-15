@@ -31,16 +31,17 @@ ca_file = "{{harvest_gateway_ca_file}}"
 # `harvest-bootstrap` 换来的证书要让 `run` 看得见，而且不能跟着容器重建丢掉。
 identity_dir = "/var/lib/wist-harvest/state/identity"
 
-# 一次性接入券：只在**没有客户端证书**时用。
-# 同栈部署不需要它 —— `harvest-bootstrap` 用下面的 admin token 现签一张并**当场换成证书**
-# （落在 `identity_dir/`，`run` 起来直接用）。这里配的是跨机部署 / 手工排障的券：
-# 网关页「签发接入券」→ 写进宿主 `.wist/sec-value.yml` 的 `harvest_enroll_ticket`。
-# 字段缺失**不是错误**（只是没有券可用）。
-[gateway.enroll_ticket]
-file = "/secrets/sec-value.yml"
-field = "harvest_enroll_ticket"
+# ── 一次性接入券**不在这里** ─────────────────────────────────────────────
+# 券是「一次性邀请码」：用完即废、默认 24 小时过期。它不是要维护的凭据，
+# 所以**不进宿主 `.wist/sec-value.yml`**（那里放 admin token / 云 SecretId 这类要轮换、要进备份的东西）。
+#
+# 券的两条瞬时通道（都只在「没有客户端证书」时用）：
+#   · 同栈部署：`harvest-bootstrap` 用下面的 admin token 现签一张、**当场换证书**，不落盘；
+#   · 跨机部署：网关页「签发接入券」→ 把券写进 <state_dir>/enroll.ticket（0600），
+#     `run` 读到就换证书，**成功即删**；也可用一次性环境变量 HARVEST_ENROLL_TICKET。
 
 # 管理面 token：**只给 `bootstrap` 子命令**签发接入券 / 建初始 standing；`run` 不读。
+# 这是**长期**密钥（要轮换、进备份），放 `.wist/sec-value.yml` 才是对的。
 [gateway.admin_token]
 file = "/secrets/sec-value.yml"
 field = "admin_token"

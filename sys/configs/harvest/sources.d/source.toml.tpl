@@ -41,10 +41,13 @@ secret_key = { file = "/secrets/sec-value.yml", field = "toc_secretkey" }
 # （工作授权 standing，网关信息页「云资产采集」卡），采集器每 30 秒自己来拉一次。
 #
 # 启用步骤：
-#   1. 网关 >= 0.48，`[gateway].endpoint` 指向 `https://gateway:8443`（TLS）
-#   2. 网关页「云资产采集」卡签发接入券 → 写进 `.wist/sec-value.yml` 的 `harvest_enroll_ticket`
+#   1. 网关 >= 0.48，`[gateway].endpoint` 指向 `https://<域>:3000`（TLS）
+#   2. 同栈部署不用管券：`harvest-bootstrap` 用 `[gateway.admin_token]` 现签一张、当场换证书。
+#      跨机部署才需要：网关页「云资产采集」卡签发接入券 → 写进 `<state_dir>/enroll.ticket`（0600），
+#      `run` 读到就换证书、**成功即删**；一次性环境变量 `HARVEST_ENROLL_TICKET` 也行。
+#      **券是一次性的**（默认 24h），不要写进 `.wist/sec-value.yml`。
 #   3. 启动后第一拍 poll 换取客户端证书（落在 state/identity/），再到页面上授权 standing
-#   4. 凭据写进 `.wist/sec-value.yml`：`toc_secretid` / `toc_secretkey`
+#   4. 云凭据写进 `.wist/sec-value.yml`：`toc_secretid` / `toc_secretkey`（长期密钥，这里才是对的）
 #
 # 本文件在当前状态下不渲染（`HARVEST_ENABLED=false` 是本地硬关，容器常驻但不调度）。
 {{/if}}

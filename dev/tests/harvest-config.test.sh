@@ -157,6 +157,18 @@ else
   else
     no "harvest.toml 缺 [gateway] 段"
   fi
+  if grep -qE '^\[gateway\.admin_token\]$' "${SERVICE_TOML}"; then
+    ok "admin_token 从密钥文件读（bootstrap 用；长期凭据）"
+  else
+    no "harvest.toml 缺 [gateway.admin_token]"
+  fi
+  # 券是一次性的，不能进长期密钥库：配置里出现 enroll_ticket 已经是解析错误（deny_unknown_fields），
+  # 渲染产物里也不该出现。
+  if grep -q 'enroll_ticket' "${SERVICE_TOML}"; then
+    no "harvest.toml 还写着 enroll_ticket（一次性券不该放 sec-value.yml）"
+  else
+    ok "一次性接入券不在配置文件/密钥库里（走 state/enroll.ticket 或一次性环境变量）"
+  fi
   if grep -qE '^endpoint = "https://gw\.example\.com:3000"$' "${SERVICE_TOML}"; then
     ok "gateway.endpoint 由 WEB_DOMAIN 推导（同名网络别名 + 容器内 3000）"
   else

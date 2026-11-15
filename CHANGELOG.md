@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.4-alpha] - 2026-11-15
+
+- `HARVEST_TAG` → `v0.7.1-alpha`、`WEB_TAG` → `v0.36.3-alpha`。
+- **接入券不再写进 `.wist/sec-value.yml`**：它是一次性的（默认 24h），不是要轮换/进备份的凭据。
+  同栈由 `harvest-bootstrap` 自动完成；跨机投放 `harvest-run/state/enroll.ticket`（0600）
+  或一次性环境变量 `HARVEST_ENROLL_TICKET`。`.wist/sec-value.yml` 里只留 `admin_token`
+  与云账号凭据。
+- 页面上的接入券那一块从「说有哪些通道」改成「能照做」：**什么时候需要**（已经在 worker 表里就不用；
+  只有跨机首次接入 / `state/identity/` 丢了才用）、**怎么用**（签字 → 复制 → 落成 0600 文件，
+  带完整 `install -m 600 -o 999 -g 999` 命令）、**成功与失败判据**。属主必须是容器运行身份，
+  否则采集器读不到会当成「没有券」—— 这正是本栈之前那类权限坑。
+- `sources.d/source.toml.tpl` 未启用分支里的「启用步骤」也不再教用户把券写进 `.wist/sec-value.yml`；
+  采集器日志在「既无证书又无券」时现在直接点名它要读的那个路径。
+
+### 升级注意
+
+- 如果旧现场在 `.wist/sec-value.yml` 里写过 `harvest_enroll_ticket`：那条键可以删了（已不再读取），
+  采集器会按 `enroll.ticket` / bootstrap 现签的方式接入。
+
 ## [0.15.3-alpha] - 2026-11-15
 
 - `WEB_TAG` → `v0.36.1-alpha`：修「云资产采集」卡残留的 P1 说明（P2 的按钮已经在上面了），

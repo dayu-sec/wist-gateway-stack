@@ -306,7 +306,11 @@ services:
     volumes:
       - ${HARVEST_CONFIG_DIR}:/etc/wist-harvest:ro
       - ${HARVEST_RUN_DIR}/state:/var/lib/wist-harvest/state
-      - ./identity/gateway/public/gateway-ca.crt.pem:/etc/wist-harvest/gateway-ca.pem:ro
+      # 服务端信任锚（网关 TLS 证书的 CA，只读目录）：**不能落在 `/etc/wist-harvest` 里** ——
+      # 那是上面那个只读目录挂载，Docker 无法在它里面创建文件挂载点
+      # （症状：`create mountpoint ... read-only file system`）。
+      # 挂目录：源缺失时只会得到一个空目录，不会把 `*.pem` 建成同名目录。
+      - ./identity/gateway/public:/etc/wist-harvest-ca:ro
       - ./.wist:/secrets:ro
 
   harvest:
@@ -336,8 +340,8 @@ services:
       - ${HARVEST_CONFIG_DIR}:/etc/wist-harvest:ro
       - ${HARVEST_RUN_DIR}/spool:/var/lib/wist-harvest/spool
       - ${HARVEST_RUN_DIR}/state:/var/lib/wist-harvest/state
-      # 服务端信任锚（网关 TLS 证书的 CA，只读单文件）：harvest 用它验网关。
-      - ./identity/gateway/public/gateway-ca.crt.pem:/etc/wist-harvest/gateway-ca.pem:ro
+      # 服务端信任锚（网关 TLS 证书的 CA，只读目录）：路径必须**在配置目录之外**（同上）。
+      - ./identity/gateway/public:/etc/wist-harvest-ca:ro
       # 挂**目录**而非文件：源缺失时 Docker 只是建出 `.wist/` 目录（本就 gitignore），
       # 而不是把文件建成同名目录（引擎随后读目录会直接失败）。与 gateway 同一口径。
       - ./.wist:/secrets:ro

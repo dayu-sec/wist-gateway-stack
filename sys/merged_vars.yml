@@ -110,7 +110,7 @@ system:
 - name: HARVEST_GATEWAY_POLL_MS
   value: '30000'
 - name: HARVEST_GATEWAY_CA_FILE
-  value: /etc/wist-harvest/gateway-ca.pem
+  value: /etc/wist-harvest-ca/gateway-ca.crt.pem
 - name: HARVEST_ENV_REF
   value: prod
 - name: HARVEST_REGIONS

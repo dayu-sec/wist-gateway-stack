@@ -59,7 +59,7 @@ case "${gateway_endpoint}" in
     exit 1
     ;;
 esac
-gateway_ca_file="${HARVEST_GATEWAY_CA_FILE:-/etc/wist-harvest/gateway-ca.pem}"
+gateway_ca_file="${HARVEST_GATEWAY_CA_FILE:-/etc/wist-harvest-ca/gateway-ca.crt.pem}"
 
 case "${code}" in
   *[!A-Za-z0-9._:-]*)

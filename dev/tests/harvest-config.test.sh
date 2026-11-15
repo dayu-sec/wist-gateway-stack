@@ -162,10 +162,10 @@ else
   else
     no "gateway.endpoint 不是 https://<WEB_DOMAIN>:3000：$(grep -E '^endpoint' "${SERVICE_TOML}" | head -1)"
   fi
-  if grep -qE '^ca_file = "/etc/wist-harvest/gateway-ca.pem"$' "${SERVICE_TOML}"; then
-    ok "gateway.ca_file 指向挂进来的网关 CA"
+  if grep -qE '^ca_file = "/etc/wist-harvest-ca/gateway-ca\.crt\.pem"$' "${SERVICE_TOML}"; then
+    ok "gateway.ca_file 指向挂进来的网关 CA（在配置目录之外）"
   else
-    no "gateway.ca_file 没指向 /etc/wist-harvest/gateway-ca.pem"
+    no "gateway.ca_file 不在 /etc/wist-harvest-ca（挂载嵌套会在只读挂载里建挂载点→失败）"
   fi
   if grep -qE '^endpoint = "wparse:9000"$' "${SERVICE_TOML}"; then
     ok "harvest.toml 的 sink 指向 wparse:9000"
@@ -324,6 +324,30 @@ for svc in harvest harvest-bootstrap; do
     ok "${svc} 挂了 /var/lib/wist-harvest/state"
   else
     no "${svc} 没挂 /var/lib/wist-harvest/state（身份/租约对不上）"
+  fi
+done
+
+# 挂载目标**不能嵌套**：`/etc/wist-harvest` 是 `:ro` 目录挂载，若再把 CA 挂到它里面，
+# Docker 要在只读挂载里创建挂载点 → `create mountpoint ... read-only file system`（真事：0.15.0）。
+container_targets() { # container_targets <service>
+  awk -v svc="  $1:" '
+    $0 == svc { inside = 1; next }
+    inside && /^  [A-Za-z0-9_-]+:$/ { inside = 0 }
+    inside && /^      - / { print }
+  ' "${COMPOSE}" | sed -E 's/^ +- "?//; s/"?$//; s/:(ro|rw|z|Z)$//' | sed -nE 's/.*:(\/.*)$/\1/p'
+}
+for svc in harvest harvest-bootstrap; do
+  nested=""
+  while IFS= read -r a; do
+    while IFS= read -r b; do
+      [ "${a}" = "${b}" ] && continue
+      case "${b}" in "${a}"/*) nested="${a} ⊂ ${b}" ;; esac
+    done <<< "$(container_targets "${svc}")"
+  done <<< "$(container_targets "${svc}")"
+  if [ -z "${nested}" ]; then
+    ok "${svc} 的挂载目标互不嵌套"
+  else
+    no "${svc} 的挂载目标嵌套（只读挂载里建不出挂载点）：${nested}"
   fi
 done
 

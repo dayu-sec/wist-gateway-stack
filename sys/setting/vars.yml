@@ -301,10 +301,10 @@ system:
     value: ""
   - name: HARVEST_GATEWAY_POLL_MS
     value: "30000"
-  # 服务端信任锚（网关 TLS 证书的 CA）：compose 把 `identity/gateway/public/gateway-ca.crt.pem`
-  # 只读挂到 `/etc/wist-harvest/gateway-ca.pem`。
+  # 服务端信任锚（网关 TLS 证书的 CA）：compose 把 `identity/gateway/public/`
+  # 以只读目录挂到 `/etc/wist-harvest-ca`（**必须在配置目录之外**，否则挂载点建在只读挂载里会失败）。
   - name: HARVEST_GATEWAY_CA_FILE
-    value: /etc/wist-harvest/gateway-ca.pem
+    value: /etc/wist-harvest-ca/gateway-ca.crt.pem
   - name: HARVEST_ENV_REF
     value: prod
   # auto = 运行时用 DescribeRegions 解析（只取 AVAILABLE）；也可写逗号分隔的固定列表

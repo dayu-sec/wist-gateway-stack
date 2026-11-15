@@ -187,6 +187,45 @@ gate_gops_version() {
   return 0
 }
 
+# ⑥ 嵌套挂载：子挂载点必须真的能在父挂载的宿主目录里建起来。
+#
+#    2026-11-14 事故：`docker compose config` 干净、`dev/tests/*` 47 条全绿、`create` 也退出 0，
+#    直到 `up` 才在 runc 里炸：`error mounting ... create mountpoint ... read-only file system`。
+#    判据与两种发作方式（:ro 硬失败 / rw 静默以 root 建）见 `scripts/lib/nested-mounts.sh`。
+#
+#    这里用 **strict**：localize 跑到这里时 init-*.sh 都执行完了，挂载点应该已经存在；
+#    “只是声明过”不算，不然等于把问题推到 `gops run start`。
+#    （干净 checkout 上跑的是 `dev/check-compose-mounts.sh`，那边用 declared 模式。）
+gate_mounts_nested() {
+  local root="$1"
+  command -v docker >/dev/null 2>&1 || return 0
+  if [ ! -f "$root/.env" ]; then
+    gate_warn "mounts.nested" "没有 .env，跳过嵌套挂载检查" "先 gops sys localize 生成 .env（否则 compose 里的变量展开成空路径）"
+    return 0
+  fi
+  # shellcheck source=nested-mounts.sh
+  . "$root/scripts/lib/nested-mounts.sh"
+
+  local rendered problems
+  rendered=$(mktemp "${TMPDIR:-/tmp}/compose-rendered.XXXXXX")
+  if ! (cd "$root" && docker compose --project-directory . -f sys/docker-compose.yml config) >"$rendered" 2>/dev/null; then
+    rm -f "$rendered"
+    gate_warn "mounts.nested" "compose 渲染失败，跳过嵌套挂载检查" "先看 \`docker compose config\` 的报错"
+    return 0
+  fi
+  problems=$(nested_mount_problems "$root" strict "$rendered")
+  rm -f "$rendered"
+  [ -z "$problems" ] && return 0
+
+  local svc target host reason
+  while IFS='|' read -r svc target host reason; do
+    [ -n "$svc" ] || continue
+    gate_fail "mounts.nested" \
+      "${svc}：${target} —— ${reason}" \
+      "宿主路径 ${host} 不存在：把子挂载挂到父挂载之外，或在 localize 阶段以部署账号预建（参考 scripts/init-wparse-admin.sh 的 NESTED_MOUNTS）"
+  done <<<"$problems"
+}
+
 # 汇总：调用方按 GATE_FAIL/GATE_WARN 决定退出码
 run_local_gates() {
   local root="$1"
@@ -194,6 +233,7 @@ run_local_gates() {
   GATE_ONLY="${2:-}"
   gate_gops_version "$root"
   gate_secrets "$root"
+  gate_mounts_nested "$root"
   # shellcheck disable=SC2086  # 清单里有空格分隔的多个路径，故意的
   gate_render_applied "$root" ${GATE_RENDER_FILES:-}
   gate_port_owners "$root"

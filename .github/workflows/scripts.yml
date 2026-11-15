@@ -69,6 +69,10 @@ jobs:
         run: gops sys localize --no-flow --only --no-perms-check
       - name: Validate bind identity contract
         run: ./dev/check-compose-perms.sh
+      # 嵌套挂载：子挂载点缺了会等 `up` 才炸（父挂载 :ro → 直接起不来；可写 → 以 root 建）。
+      # 干净 checkout 上 `data-plane-run/` 不存在，所以用 declared 模式（只验有没有脚本预建）。
+      - name: Validate nested mounts
+        run: ./dev/check-compose-mounts.sh
 
   shell-tests:
     name: Shell regression (${{ matrix.os }})

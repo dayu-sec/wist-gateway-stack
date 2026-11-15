@@ -470,9 +470,23 @@ dev 态由 `./dev/svc.sh start` 带起它，**配置驱动**：读 `dev/configs/
 
 ```bash
 ./dev/lint.sh                    # shellcheck（错误/警告 + 反引号 SC2006），CI 跑的是同一条命令
+./dev/check-compose-mounts.sh    # 嵌套挂载：子挂载点必须能在宿主上建起来（改 compose 必跑）
 dev/tests/*.test.sh              # 脚本回归测试：**故意用守护进程的最小 PATH** 跑
 cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测（通用引擎在 wist-stack-tools/stackcheck-core）
 ```
+
+> **嵌套挂载为什么要单独查**（2026-11-14 事故）：harvest 的信任锚被挂进 `/etc/wist-harvest`
+> （配置目录的 `:ro` 挂载），`docker compose config` 干净、`dev/tests/*` 全绿、
+> `docker compose create` 也退出 0 —— 只有 `up` 在 runc 里报
+> `create mountpoint ... read-only file system`。父挂载可写时更阴：Docker 以 root 建挂载点，
+> 到 `gops sys perms --apply` 才整片失败。判据见 `scripts/lib/nested-mounts.sh`：
+> **A ⊂ B 且 B 是宿主 bind ⇒ B 的宿主源 + 相对路径必须已存在**（嵌套本身没错，
+> wparse 的 `/data/{data,.run,identity}` 就这么用；缺挂载点才是错）。
+
+> 真起容器验证（只查挂载 / OCI 层，不断言服务健康）：`./dev/smoke-up.sh --yes <服务...>`
+> （带 `--yes`；会 `up -d --no-deps` 后 `rm -sf`，**不要在现场栈上跑**）。
+> localize 末尾的 `mounts.nested` 门禁用的是 **strict** 模式（挂载点必须真实存在），
+> CI 用 **declared** 模式（干净 checkout 里 `data-plane-run/` 本就不存在，只验“有没有脚本预建”）。
 
 > `tools/stackcheck` 现在只保留 gateway profile 与 package / knowledge / identity / prereq / TLS
 > 策略；渲染/密钥/端口/镜像/compose/x509 的通用实现在公共仓

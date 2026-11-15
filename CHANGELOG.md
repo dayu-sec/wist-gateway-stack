@@ -3,6 +3,30 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.2-alpha] - 2026-11-15
+
+**机制：把「挂载真的能建起来吗」变成门禁的一部分。**
+
+0.15.1 修了 harvest 信任锚的挂载嵌套，但那一类错误当时**没有任何一层能拦住**：
+`docker compose config` 干净、`dev/tests/*` 全绿、`docker compose create` 也退出 0 ——
+只有 `up` 在 runc 里才报 `create mountpoint ... read-only file system`。补三层：
+
+- **静态判据** `scripts/lib/nested-mounts.sh` + `dev/check-compose-mounts.sh`：
+  `A ⊂ B` 且 B 是宿主 bind 时，**B 的宿主源 + 相对路径必须已存在**。
+  嵌套本身不是错（wparse 的 `/data/{data,.run,identity}` 就这么用），缺挂载点才是错；
+  父挂载 `:ro` 是硬失败，可写时是「Docker 以 root 建 → `perms --apply` 整片失败」，两种分别报。
+- **localize 门禁** `mounts.nested`（**strict**：挂载点必须真实存在），在 `gops run start`
+  之前就拦住；CI 跑 **declared** 模式（干净 checkout 里 `data-plane-run/` 本就不存在，
+  只验「有没有脚本在 localize 阶段预建」—— 照 `init-wparse-admin.sh` 的既有做法）。
+- **真起容器**`dev/smoke-up.sh`：`up -d --no-deps` → 看 `State.Error` / 状态 → `rm -sf`，
+  只断言挂载 / OCI 层，**不断言服务健康**。
+
+回归：`dev/tests/nested-mounts.test.sh`（8 条）钉住两种发作方式、挂文件落在目录上的类型不符、
+以及 declared / strict 的差异；`.github/workflows/scripts.yml` 在 `compose-perms` job 里
+增加一条 `Validate nested mounts`。
+
+> 发布 stack 前建议跑：`./dev/check-compose-mounts.sh && ./dev/smoke-up.sh --yes harvest-bootstrap`。
+
 ## [0.15.1-alpha] - 2026-11-14
 
 **修复 0.15.0 起不来的问题（`create mountpoint ... read-only file system`）。**

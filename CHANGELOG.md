@@ -3,6 +3,20 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.1-alpha] - 2026-11-14
+
+**修复 0.15.0 起不来的问题（`create mountpoint ... read-only file system`）。**
+
+- 网关信任锚原本挂到 `/etc/wist-harvest/gateway-ca.pem`，而 `/etc/wist-harvest` 是**配置目录的
+  `:ro` 目录挂载** —— Docker 无法在只读挂载里创建文件挂载点，`harvest` 与 `harvest-bootstrap`
+  都会启动失败。改成把 `identity/gateway/public/` 以**只读目录**挂到 `/etc/wist-harvest-ca`，
+  `HARVEST_GATEWAY_CA_FILE` 跟着指向 `/etc/wist-harvest-ca/gateway-ca.crt.pem`。
+- 顺带把单文件改成目录挂载：源缺失时只会得到一个空目录，而不会把 `*.pem` 建成同名目录。
+- 回归：`dev/tests/harvest-config.test.sh` 新增「同一服务的挂载目标互不嵌套」断言 ——
+  这条会直接抓住本次事故。
+
+> **`0.15.0-alpha` 请勿使用**：云采集两个服务都会起不来。
+
 ## [0.15.0-alpha] - 2026-11-14
 
 ### 变更（云采集：同栈自动接入 + 工作授权）

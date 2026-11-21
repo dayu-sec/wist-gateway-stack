@@ -26,9 +26,9 @@ system:
 
   # 镜像 tag：网关与前端各自独立发版，tag 分开；需要钉版本时改这里
   - name: GATEWAY_TAG
-    value: v0.48.0-alpha
+    value: v0.49.1-alpha
   - name: WEB_TAG
-    value: v0.36.5-alpha
+    value: v0.37.0-alpha
   # 观测镜像：直接用上游官方 victoriametrics/victoria-metrics（compose 里 image 就是它）
   - name: VM_TAG
     value: v1.154.0
@@ -278,10 +278,11 @@ system:
 
   # ── wist-harvest（云账号事实采集；**常驻服务**，开关不是安装期决定的）──
   #    一个云账号一个数据源；采集器**无任何入站端口**：只出网到云 API、出站到同栈 wparse。
-  #    凭据读 `.wist/sec-value.yml`（与网关同一份；键名 `toc_secretid` / `toc_secretkey`），
+  #    凭据读 `.wist/sec-value.yml`（与网关同一份；键名跟 HARVEST_VENDOR 走：腾讯云
+  #    `toc_secretid`/`toc_secretkey`，阿里云 `ali_secretid`/`ali_secretkey`），
   #    以 :ro 挂进容器 —— **不进 compose 环境**，免得在 `docker inspect` 里裸奔。
   - name: HARVEST_TAG
-    value: v0.7.2-alpha
+    value: v0.8.1-alpha
   # 采集配置根（渲染物）：harvest.toml + sources.d/<source_code>.toml
   - name: HARVEST_CONFIG_DIR
     value: ./configs/harvest
@@ -292,6 +293,13 @@ system:
   # 不含客户 / 租户：一个网关只服务一个客户，客户身份由发送通道（wparse 全局 tag）在入库时打上。
   - name: HARVEST_SOURCE_CODE
     value: tencent-cloud-prod
+  # 云厂商：TENCENT_CLOUD（默认）/ ALIYUN。决定适配器与凭据键名：
+  #   TENCENT_CLOUD → `.wist/sec-value.yml` 的 toc_secretid / toc_secretkey
+  #   ALIYUN        → ali_secretid / ali_secretkey
+  # **启用采集时**换厂商必须同时换 HARVEST_SOURCE_CODE（下游身份，不能沿用 tencent-cloud-prod）；
+  # 未启用时不渲染可用数据源，允许先选厂商。
+  - name: HARVEST_VENDOR
+    value: TENCENT_CLOUD
   # **本地硬开关**（`[service] enabled`）：false = 进程常驻但不调度。
   # 真正的开/关与采集范围在网关（「云资产采集」卡的工作授权）：这里默认 true = 「允许调度」，
   # 实际采不采由网关下发的 standing 决定。现场要急停就改 false。

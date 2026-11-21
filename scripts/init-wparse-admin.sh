@@ -188,7 +188,14 @@ CRED="${STACK_ROOT}/identity/gwlinkd/credential.json"
 GIT_CERT_HOST="${RUN_DIR}/.run/git-client.crt.host"
 GIT_KEY_HOST="${RUN_DIR}/.run/git-client.key.host"
 
-if [[ -f "${CRED}" ]]; then
+# 服务以 **root** 运行（system 作用域固定）→ 它写的 credential.json 是 root:0600；
+# 本脚本按约定以**部署账号**跑 → 读不到。这**不是**错误：投影出的 git-client.*
+# 目前还没消费方（wparse 上游未支持客户端证书），不该因它把 localize 拖死。
+# 注：每次续期后 gwlinkd 会重写该文件（仍是 root），所以这个分支会反复走到。
+if [[ -f "${CRED}" && ! -r "${CRED}" ]]; then
+  warn "读不到 ${CRED}（属主 root：服务以 root 运行）：跳过 Git 客户端证书投影"
+  rm -f "${GIT_CERT_HOST}" "${GIT_KEY_HOST}"
+elif [[ -f "${CRED}" ]]; then
   tmp_crt="$(mktemp "${RUN_DIR}/.run/.git-client.crt.host.XXXXXX")"
   tmp_key="$(mktemp "${RUN_DIR}/.run/.git-client.key.host.XXXXXX")"
   python3 - "${CRED}" "${tmp_crt}" "${tmp_key}" <<'PY'

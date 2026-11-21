@@ -3,6 +3,46 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.16.0-alpha] - 2026-11-21
+
+**网关 / 前端跟版到 0.49.1 / 0.37.0（关键进程指标）；云资产采集可选厂商（阿里云）；wparse 启动前做数据面自检。**
+
+### 组件（升级注意）
+
+- `GATEWAY_TAG` v0.48.0-alpha → **v0.49.1-alpha**，`WEB_TAG` v0.36.5-alpha → **v0.37.0-alpha**。
+  - 网关新增采集面 **`ProcessMetrics`** 与采集来源 `KeyProcessMetrics`：按策展签名（systemd 单元 /
+    可执行名 / 监听端口）选**关键进程**采 rss / cpu / state。**需要被管机器上的 agentd ≥ 0.36.0**
+    （旧 agentd 只会少掉这几个面，不报错也不影响其它采集）。
+  - 前端现在认得这个来源，并把可采的数据库 / 消息队列指标从「未接」里拿出来。
+- 录入知识库包时**先查上游版本、再验内容**：包要求更高的网关版本时现在直接报「需要 ≥ X」
+  （`package_incompatible`），不再误报「内容不合法」。现场遇到这两条错误时按提示升网关，不要改知识库内容。
+
+### 新增（云资产采集：厂商可选）
+
+- 新增 `HARVEST_VENDOR`（`TENCENT_CLOUD` 默认 / `ALIYUN`）：数据源模板按它渲染 `vendor` 与
+  `[credential]` 键名；阿里云用 `access_key_id`/`access_key_secret` ← `.wist/sec-value.yml`
+  的 `ali_secretid`/`ali_secretkey`，腾讯云保持 `secret_id`/`secret_key` ← `toc_secretid`/`toc_secretkey`。
+- **启用采集时**换厂商必须同时换 `HARVEST_SOURCE_CODE`：沿用 `tencent-cloud-prod` 会当场失败 ——
+  `source_code` 是下游的资源匹配 / 作用域隔离键，把阿里云资产标成腾讯云数据源是静默错数
+  （未启用时不渲染可用数据源，允许先选厂商、暂不改 source_code）。
+- `HARVEST_TAG` 升到 **v0.8.1-alpha**（含 `Vendor::Aliyun`；不升会在解析 `vendor = "ALIYUN"` 时失败）。
+- 初始化脚本与用例跟上：`scripts/init-harvest.sh`、`dev/tests/harvest-config.test.sh` 增加阿里云渲染与错配拒绝。
+
+### 新增（数据面自检：启动前拦住“静默丢数据”）
+
+- wparse 容器在 `exec` **之前**跑 `wparse check`：两个 sink 分组绑同一个 oml matcher 时，引擎不报错、
+  只静默丢 OML 富化（下游拿原始字段，VM 回 204 一条序列都不建）—— 2026-11-12 现场因此断流 6 天。
+  判据在引擎（warp-parse#375），旧镜像没有 `check` 子命令时只提示、不拦。
+- 升级流程新增 **⓪a 强制闸门**（`scripts/check-data-plane.sh`）：在 pull / up 之前用**新镜像**跑一次，
+  种子被污染时升级前就红。CI 也跑同一条（`ci.yml` 的绑定身份那一步之后）。
+
+### 新增（gwlinkd 运维）
+
+- `dev/uninstall-gwlinkd.sh`：卸载 / 重装前归档 `identity/` 与配置到 `backups/`
+  （含客户端证书与私钥，该目录已在 `.gitignore` 里）。
+- `scripts/init-wparse-admin.sh`：读不到 gwlinkd 写的 `credential.json`（属主 root:0600）时**跳过**
+  Git 客户端证书投影并提示，不再把 localize 拖死（该投影目前没有消费方）。
+
 ## [0.15.7-alpha] - 2026-11-15
 
 **事件号实例段（`WP_INS_ID`）改由中心绑定下发，栈不再注入进程环境变量。**
@@ -166,8 +206,13 @@
 - 云资产会写进 `agent-dsnap.jsonl`（与主机快照同一个文件），元数据标签是 dsnap 的 ——
   这是复用现有分组的代价；要分开文件就得在 infra 里再加一个分组。
 - 存量站点的工作根是 `cp --update=none`：旧的 `models/wpl|oml/cloud_inventory/` 与
-  `topology/sinks/business.d/cloud_inventory.toml` 不会被自动删（已经没有规则匹配它们，
-  不影响运行），需要干净就手工删。已接中心的站点，`models/` 会在同步时整份镜像。
+  `topology/sinks/business.d/cloud_inventory.toml` 不会被自动删。已接中心的站点，`models/` 会在同步时整份镜像。
+- ⚠ **残留不是无害的（原结论「已经没有规则匹配它们，不影响运行」已被证伪）**：残留文件仍然绑着 OML。
+  一旦它与新版分组绑到**同一个** matcher，引擎就会把规则路由给先装载的分组、把 OML 归属给后装载的分组 →
+  收数据的分组拿到的是 WPL 原始字段，VM 对缺 `metric` 的行回 204，**一条序列都不建**，
+  而 wparse 日志 0 条 ERROR。2026-11-12 现场因此静默断流 6 天（issue #3）。
+  之后版本起由引擎自己的 `wparse check` 拦（`scripts/check-data-plane.sh` 在 localize ⑦a
+  与容器入口各跑一次；镜像还不带 `check` 时跳过），重复绑定时会阻断/拒绝启动。
 
 ## [0.14.1-alpha] - 2026-11-13
 

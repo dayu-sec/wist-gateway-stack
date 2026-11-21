@@ -36,6 +36,8 @@ dev/bin/
 /state/
 # 安装包投放目录（现场放 agent 安装包，只读挂给网关容器）
 /packages/
+# 卸载 / 重装前的归档（`dev/uninstall-gwlinkd.sh` 写这里；含客户端证书 + **私钥**，绝不入库）
+/backups/
 
 # ===== gops 生成物 =====
 # 变量解析结果（gops sys update / package 生成）

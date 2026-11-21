@@ -34,6 +34,38 @@ esac
 code="${HARVEST_SOURCE_CODE:-tencent-cloud-prod}"
 envr="${HARVEST_ENV_REF:-prod}"
 regions="${HARVEST_REGIONS:-auto}"
+# 云厂商：决定 `vendor` 与凭据在 `.wist/sec-value.yml` 里的键名。
+# 一个网关只服务一个云账号；切换厂商必须同时换 `HARVEST_SOURCE_CODE`（下游身份）。
+vendor="${HARVEST_VENDOR:-TENCENT_CLOUD}"
+case "${vendor}" in
+  TENCENT_CLOUD | tencent | tencent_cloud)
+    vendor="TENCENT_CLOUD"
+    cred_key_id="secret_id"
+    cred_key_secret="secret_key"
+    cred_field_id="toc_secretid"
+    cred_field_secret="toc_secretkey"
+    ;;
+  ALIYUN | aliyun | ali)
+    vendor="ALIYUN"
+    cred_key_id="access_key_id"
+    cred_key_secret="access_key_secret"
+    cred_field_id="ali_secretid"
+    cred_field_secret="ali_secretkey"
+    ;;
+  *)
+    echo "错误：HARVEST_VENDOR 只接受 TENCENT_CLOUD / ALIYUN：'${vendor}'" >&2
+    echo "      当前栈没有为其它厂商定义 .wist/sec-value.yml 键名映射；先补齐再用。" >&2
+    exit 1
+    ;;
+esac
+# source_code 是下游身份，不是展示名：换了厂商还留着腾讯云默认值 = 把阿里云资产
+# 标成腾讯云的数据源，错得静默且彻底，所以**启用时**当场拦住。
+# 未启用时不渲染可用数据源，允许先选厂商、暂不改 source_code（不把可选服务卡在 localize）。
+if [[ "${enabled}" == "true" && "${vendor}" != "TENCENT_CLOUD" && "${code}" == "tencent-cloud-prod" ]]; then
+  echo "错误：HARVEST_VENDOR=${vendor} 但 HARVEST_SOURCE_CODE 仍是默认的 tencent-cloud-prod" >&2
+  echo "      source_code 是下游的资源匹配 / 作用域隔离键，切换厂商时必须显式设置（如 aliyun-prod）" >&2
+  exit 1
+fi
 # 网关工作授权端点：**默认空 = 同栈网关**。
 # 不能写服务名 `gateway`：叶证书的 SAN 是对外域名（`<WEB_DOMAIN>,localhost,127.0.0.1`），
 # compose 给 gateway 加了这个域名的网络别名，所以内网解析 + 域名验签同时成立。
@@ -113,6 +145,11 @@ cat >"${tmp}" <<JSON
 {
   "harvest_enabled": ${enabled},
   "harvest_source_code": "${code}",
+  "harvest_vendor": "${vendor}",
+  "harvest_cred_key_id": "${cred_key_id}",
+  "harvest_cred_key_secret": "${cred_key_secret}",
+  "harvest_cred_field_id": "${cred_field_id}",
+  "harvest_cred_field_secret": "${cred_field_secret}",
   "harvest_env_ref": "${envr}",
   "harvest_regions_literal": "${regions_json}",
   "harvest_gateway_endpoint": "${gateway_endpoint}",
@@ -131,7 +168,7 @@ fi
 
 # ② 启用状态说明（非阻断）
 if [[ "${enabled}" == "true" ]]; then
-  echo "  本地已允许调度：source_code=${code} env_ref=${envr} regions=${regions}"
+  echo "  本地已允许调度：vendor=${vendor} source_code=${code} env_ref=${envr} regions=${regions}"
   if [[ -n "${gateway_endpoint}" ]]; then
     echo "  采集授权以网关为准：${gateway_endpoint}（每 ${gateway_poll_ms}ms 一拍；未授权则不采）"
   else
@@ -145,8 +182,8 @@ fi
 # ③ 密钥：与网关共用 `.wist/sec-value.yml`（`gops sec` 维护，`:ro` 挂到容器 /secrets）。
 #    只做**非阻断**提示 —— 缺键时容器起来会因 healthcheck 失败暴露，不必在 localize 阶段拦住。
 if [[ -f ./.wist/sec-value.yml ]]; then
-  echo "  密钥文件就绪：./.wist/sec-value.yml（需要键 toc_secretid / toc_secretkey，gops sec list 可核对）"
+  echo "  密钥文件就绪：./.wist/sec-value.yml（需要键 ${cred_field_id} / ${cred_field_secret}，gops sec list 可核对）"
 else
   echo "  提示：./.wist/sec-value.yml 不存在 —— 启用云采集前必须写入："
-  echo "         toc_secretid / toc_secretkey（用 gops sec 维护，模式 0640、属组=容器 gid）"
+  echo "         ${cred_field_id} / ${cred_field_secret}（用 gops sec 维护，模式 0640、属组=容器 gid）"
 fi

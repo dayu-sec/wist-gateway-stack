@@ -441,6 +441,47 @@ gops run diagnose     # 渲染后的 compose 配置：排查变量/端口/挂载
 - 前端入口：`https://<host>:8443`（nginx 终止 TLS，证书是页面自己的；首访浏览器会提示自签不受信）
 - 网关 API：`https://<host>:3000`
 
+### 选云厂商与凭据键
+
+一个网关只服务**一个云账号**，厂商由 `HARVEST_VENDOR` 决定（产品默认 `TENCENT_CLOUD`）。
+**启用采集时**换厂商必须同时改 `HARVEST_SOURCE_CODE`（下游的资源匹配 / 作用域隔离键），
+否则 `scripts/init-harvest.sh` 会当场失败 —— 沿用 `tencent-cloud-prod` 去采阿里云，等于
+把阿里云资产标成腾讯云的数据源，错得静默且彻底。未启用时不渲染可用数据源，允许先选厂商。
+
+| `HARVEST_VENDOR` | 渲染出的 `[credential]` 键 | `.wist/sec-value.yml` 字段 |
+| --- | --- | --- |
+| `TENCENT_CLOUD`（默认） | `secret_id` / `secret_key` | `toc_secretid` / `toc_secretkey` |
+| `ALIYUN` | `access_key_id` / `access_key_secret` | `ali_secretid` / `ali_secretkey` |
+
+阿里云 RAM 用户至少需要：`ecs:DescribeInstances`、`ecs:DescribeRegions`、
+`vpc:DescribeEipAddresses`、`vpc:DescribeVpcs`、`vpc:DescribeVSwitches`；
+跑 `cost` 另需 `bss:QueryAccountBill`。最省事是直接挂 `AliyunECSReadOnlyAccess` +
+`AliyunVPCReadOnlyAccess`（+ `AliyunBSSReadOnlyAccess`）。建号步骤、最小权限策略与
+`Forbidden.RAM` 排障见 `wist-harvest` 仓的 `docs/aliyun-account.md`。
+
+站点覆盖写 `values/value.yml`（作为 `wist-dev-gateway` 运维项目的一部分时，写在
+`<项目根>/values/wist-gateway-stack/sys_value.yml`；`gops sys localize` 会一并渲染 `.env`
+与数据源）：
+
+```yaml
+HARVEST_VENDOR: ALIYUN
+HARVEST_SOURCE_CODE: aliyun-prod
+```
+
+> 切换 `source_code` 等于换采集器身份：网关侧要给新的 `source_code` 重新授权
+> standing（旧账号的授权不会自动迁移）。
+>
+> 旧客户端证书也不能复用：`harvest-bootstrap` 会看到「身份已存在」而跳过接入，
+> 网关报 `harvest_worker_not_found`。**`wist-harvest >= 0.8.1`**（栈的 `HARVEST_TAG`
+> 升到该版本后）会自动把旧身份目录改名备份并重新接入；**0.8.0 及更早**需要手动：
+> 把 `harvest-run/state/identity/` 改名备份，再 `gops run start`。
+>
+> 另外要分清：RAM 权限不足**不会**导致容器启动失败（`harvest` 仍会 healthy，只是每轮
+> `Aborted`、不发帧）；启动失败先看 `harvest-bootstrap` 日志（身份 / 网关 / standing）。
+>
+> 凭据仍只放 `.wist/sec-value.yml`（`gops sec` 维护，0640、属组 = 容器 gid），
+> 不要写进 `.env`，那会出现在 `docker inspect` 里。
+
 ### 云采集的接入（没有人工步骤）
 
 采集器的身份是**客户端证书**，不是配置里的什么东西。接入由 `harvest-bootstrap` 完成：
@@ -511,6 +552,17 @@ cargo test --manifest-path tools/stackcheck/Cargo.toml   # 检查器单测（通
 > 到 `gops sys perms --apply` 才整片失败。判据见 `scripts/lib/nested-mounts.sh`：
 > **A ⊂ B 且 B 是宿主 bind ⇒ B 的宿主源 + 相对路径必须已存在**（嵌套本身没错，
 > wparse 的 `/data/{data,.run,identity}` 就这么用；缺挂载点才是错）。
+
+> **sink 分组重复绑定为什么要查**（2026-11-12 事故，静默 6 天）：升级只加不删，
+> `topology/sinks/business.d/` 里新旧两代分组并存（`agent_metrics` / `host_metrics`、
+> `raw` / `log_raw`、`parsed` / `log_std`），两个分组绑**同一个** OML。引擎把规则路由给先装载的
+> 分组、把 OML 归属给后装载的分组 —— 收数据的分组手里没有 OML，走 passthrough，VM 对缺 `metric`
+> 的行回 204，**一条序列都不建**，而 wparse 日志 0 条 ERROR（引擎侧 wp-labs/wp-motor#117）。
+> **判据不在本仓、也不在 gops**：已经向上游要 `wparse check`（wp-labs/warp-parse#375），
+> 引擎自己用同一个 loader 判，结论永远与运行时一致。本仓只负责三处“叫它跑”：
+> `scripts/check-data-plane.sh`（localize ⑦a，一次命令行容器，跑种子 + 工作根）、
+> 同样脚本的 CI 一步、以及 **容器入口 `exec` 之前那次自检（失败即拒绝启动）**。
+> 两处都有特性探测：镜像还没带 `check` 时只提示、不拦（升 `WPARSE_TAG` 后自动生效）。
 
 > 真起容器验证（只查挂载 / OCI 层，不断言服务健康）：`./dev/smoke-up.sh --yes <服务...>`
 > （带 `--yes`；会 `up -d --no-deps` 后 `rm -sf`，**不要在现场栈上跑**）。

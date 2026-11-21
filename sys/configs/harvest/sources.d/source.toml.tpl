@@ -14,7 +14,8 @@
 {{#if harvest_enabled}}
 source_code = "{{harvest_source_code}}"
 # 厂商：选择适配器。**必填且显式** —— 不写/写错就启动失败，绝不猜。
-vendor = "TENCENT_CLOUD"
+# `TENCENT_CLOUD` / `ALIYUN`（由 `HARVEST_VENDOR` 渲染）。
+vendor = "{{harvest_vendor}}"
 group = "inventory"
 env_ref = "{{harvest_env_ref}}"
 # 地域：`"auto"` = 运行时用 DescribeRegions 解析；或固定列表（`HARVEST_REGIONS` 逗号分隔）。
@@ -28,10 +29,13 @@ subnet = true
 
 # 凭据只写「从哪读」，永远不写值。
 # 与网关共用 `.wist/sec-value.yml`（扁平 YAML，`gops sec` 维护），`:ro` 挂进容器 `/secrets`。
+# 键名跟着厂商走（`HARVEST_VENDOR`）：
+#   TENCENT_CLOUD → secret_id / secret_key ← toc_secretid / toc_secretkey
+#   ALIYUN        → access_key_id / access_key_secret ← ali_secretid / ali_secretkey
 # **不要**改成 env —— 那会让密钥出现在 `docker inspect` 里。
 [credential]
-secret_id = { file = "/secrets/sec-value.yml", field = "toc_secretid" }
-secret_key = { file = "/secrets/sec-value.yml", field = "toc_secretkey" }
+{{harvest_cred_key_id}} = { file = "/secrets/sec-value.yml", field = "{{harvest_cred_field_id}}" }
+{{harvest_cred_key_secret}} = { file = "/secrets/sec-value.yml", field = "{{harvest_cred_field_secret}}" }
 {{else}}
 # ── 采集未启用（本文件不是可用数据源）────────────────────────────────────
 # 原因：`HARVEST_ENABLED` 不是 true。
@@ -47,7 +51,8 @@ secret_key = { file = "/secrets/sec-value.yml", field = "toc_secretkey" }
 #      `run` 读到就换证书、**成功即删**；一次性环境变量 `HARVEST_ENROLL_TICKET` 也行。
 #      **券是一次性的**（默认 24h），不要写进 `.wist/sec-value.yml`。
 #   3. 启动后第一拍 poll 换取客户端证书（落在 state/identity/），再到页面上授权 standing
-#   4. 云凭据写进 `.wist/sec-value.yml`：`toc_secretid` / `toc_secretkey`（长期密钥，这里才是对的）
+#   4. 云凭据写进 `.wist/sec-value.yml`：腾讯云 `toc_secretid` / `toc_secretkey`，
+#      阿里云 `ali_secretid` / `ali_secretkey`（长期密钥，这里才是对的）
 #
 # 本文件在当前状态下不渲染（`HARVEST_ENABLED=false` 是本地硬关，容器常驻但不调度）。
 {{/if}}

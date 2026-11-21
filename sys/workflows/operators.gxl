@@ -156,6 +156,13 @@ mod operators {
     //    回滚，而不是等升级完成、现场跑了两天才发现一个键掉进了别的 TOML 段。
     //    闸门语义：WARN 与「失败但不阻断」（如知识库包缺 .sig）都不拦，只有真会把栈弄坏的才拦。
     //    首次部署也一样：`docker compose up` 之前就把错误的渲染拦下来。
+    //
+    // ⑦a 数据面配置自检：判据**在引擎**（`wparse check`，见 wp-labs/warp-parse#375），本仓只负责
+    //    “用新镜像、在 pull/up 之前、把两棵树各跑一次”。为什么必须在这里：两个 sink 分组
+    //    绑同一个 oml matcher 时，引擎不报错、只静默丢 OML 富化（下游拿原始字段，VM 回 204
+    //    一条序列都不建）—— 2026-11-12 现场因此断流 6 天。镜像还没有 `check` 时脚本打印
+    //    跳过（升 `WPARSE_TAG` 后自动生效）。
+    gx.cmd ( "./scripts/check-data-plane.sh" );
     gx.cmd ( "./scripts/check-stack.sh --gate" );
   }
 

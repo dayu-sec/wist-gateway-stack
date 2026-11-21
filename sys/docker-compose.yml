@@ -199,6 +199,21 @@ services:
           echo "info: 没有可用的中心信任锚（$${trust}）—— 公网 CA 的中心或尚未接入中心时是正常态；本容器回落系统根" >&2
           unset SSL_CERT_FILE GIT_SSL_CAINFO
         fi
+        # 数据面自检（**失败则拒绝启动**）：两个 sink 分组绑同一个 oml matcher 时，引擎不报错、
+        # 只静默丢 OML 富化（下游拿 WPL 原始字段；VM 对缺 metric 的行回 204，一条序列都不建）。
+        # 2026-11-12 现场因此断流 6 天。放在 exec **之前** = 判的是叠加后的**最终状态**
+        # （种子 + 工作根残留，工作根还可能被 project_remote 更新过）。
+        # 特性探测：`check` 子命令由 wp-labs/warp-parse#375 引入；旧镜像没有它时只提示、不拦
+        # （把 WPARSE_TAG 升上去后自动生效，不需要再改这里）。
+        if /usr/local/bin/wparse check --help >/dev/null 2>&1; then
+          if ! /usr/local/bin/wparse check --work-root /data; then
+            echo "错误：数据面配置检查未通过（同一个 oml matcher 被两个 sink 分组绑定）——拒绝启动" >&2
+            echo "      按上面点名的文件删掉旧的那份；注意 /seed 是只读的，要删宿主上的 sys/data-plane 与工作根" >&2
+            exit 1
+          fi
+        else
+          echo "info: 本镜像的 wparse 没有 check 子命令（warp-parse#375），跳过数据面自检" >&2
+        fi
         exec /usr/bin/flock --verbose -n -E 75 -F /data/.run/.wparse.lock \
           /usr/local/bin/wparse daemon --work-root /data
     environment:

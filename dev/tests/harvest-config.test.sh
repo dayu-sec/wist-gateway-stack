@@ -3,7 +3,7 @@
 #
 #   dev/tests/harvest-config.test.sh
 #
-# 钉八件事（都是现场会踩的）：
+# 钉九件事（都是现场会踩的）：
 #   1. 未启用时**不渲染可用数据源**（整份只有注释）——「绕过 profile 硬起容器」必须当场失败；
 #   2. 启用后数据源必须带 `vendor`（缺了 harvest 直接解析失败，不会猜厂商）；
 #   3. 地域字面量：`auto` 原样、逗号列表转 TOML 数组；
@@ -14,7 +14,9 @@
 #      真正的开/关是网关下发的 standing；端点不写服务名（证书 SAN 是 WEB_DOMAIN）；
 #      且 compose 必须给 gateway 加上这个域名的网络别名（否则验名一定失败）；
 #   8. 入口契约：`tcp_1` 的端口 / framing / ndjson / 读实例数与 harvest 的 sink 对得上
-#      （换掉 tcp_1 就会静默断流）。
+#      （换掉 tcp_1 就会静默断流）；
+#   9. 厂商与凭据键名绑定：`ALIYUN` 渲染出 `access_key_id`/`access_key_secret` ← `ali_secretid`/`ali_secretkey`；
+#      换厂商不换 `source_code`（下游身份）必须当场拒绝。
 set -uo pipefail
 
 S="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -197,6 +199,38 @@ else
   fi
 fi
 
+echo "②b 阿里云：vendor 与凭据键名跟着 HARVEST_VENDOR 走"
+if prep HARVEST_ENABLED=true HARVEST_VENDOR=ALIYUN HARVEST_SOURCE_CODE=aliyun-prod; then
+  ok "备料成功（阿里云）"
+else
+  no "备料失败（阿里云）：$(tail -3 "${TMP}/prep.log")"
+fi
+if [ "$(jstr harvest_vendor)" = "ALIYUN" ]; then ok "render 值是 ALIYUN"; else no "harvest_vendor 不是 ALIYUN"; fi
+render_tpls
+render_rc=$?
+if [ "${render_rc}" -eq 2 ]; then
+  echo "  skip 未安装 gx：跳过模板渲染断言"
+elif [ "${render_rc}" -ne 0 ]; then
+  no "gx tpl 渲染失败（阿里云）"
+else
+  for line in \
+    '^vendor = "ALIYUN"$' \
+    '^source_code = "aliyun-prod"$' \
+    '^access_key_id = \{ file = "/secrets/sec-value.yml", field = "ali_secretid" \}$' \
+    '^access_key_secret = \{ file = "/secrets/sec-value.yml", field = "ali_secretkey" \}$'; do
+    if grep -qE "${line}" "${SOURCE_TOML}"; then
+      ok "阿里云数据源里有 ${line}"
+    else
+      no "阿里云数据源里缺 ${line}"
+    fi
+  done
+  if grep -qE '^secret_id = ' "${SOURCE_TOML}"; then
+    no "阿里云数据源还写着腾讯云的 secret_id"
+  else
+    ok "阿里云数据源没有腾讯云凭据键残留"
+  fi
+fi
+
 echo "③ 地域列表：逗号分隔 → TOML 数组字面量"
 prep HARVEST_ENABLED=true HARVEST_REGIONS="ap-guangzhou, ap-shanghai"
 if [ "$(jstr harvest_regions_literal)" = '["ap-guangzhou", "ap-shanghai"]' ]; then
@@ -211,6 +245,21 @@ if prep HARVEST_ENABLED=true HARVEST_REGIONS=" , "; then
   no "空地域列表竟然通过了"
 else
   ok "空地域列表被拒绝"
+fi
+if prep HARVEST_ENABLED=true HARVEST_VENDOR=ALIYUN; then
+  no "换厂商但仍用 tencent-cloud-prod 竟然通过了"
+else
+  ok "换厂商不换 source_code 被拒绝（下游身份不能沿用）"
+fi
+if prep HARVEST_ENABLED=true HARVEST_VENDOR=oracle; then
+  no "未知 HARVEST_VENDOR 竟然通过了"
+else
+  ok "未知 HARVEST_VENDOR 被拒绝"
+fi
+if prep HARVEST_ENABLED=false HARVEST_VENDOR=ALIYUN; then
+  ok "未启用时允许先选厂商、暂不改 source_code（不卡 localize）"
+else
+  no "未启用时换个厂商竟然把 localize 打死了"
 fi
 
 # 采集是**可选服务**：未启用时不能让缺域名把整栈 localize 打死；启用时又必须当场拦住

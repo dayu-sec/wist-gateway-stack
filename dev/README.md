@@ -515,6 +515,7 @@ dev/
   tests/                        # 回归测试（开发态工具；knowledge 纯本地）
     install-initial-knowledge.test.sh #  localize 的初始知识库步骤：空 URL 告警 / 缺包失败 / 包在就位
     local-gates.test.sh         #  local-gates.sh 的契约：不推导容器 gid / --only 前缀过滤
+    data-plane-check.test.sh    #  check-data-plane.sh 的分支：老镜像跳过 / 失败阻断 / 两棵树都跑
   check-compose-perms.sh        # CI 薄封装：compose 里 user: 与挂载权限契约（无 gops 时 SKIP）
   bin/                          # wparse 等本地二进制（不入 git）
 

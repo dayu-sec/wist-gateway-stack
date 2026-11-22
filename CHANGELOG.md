@@ -3,6 +3,34 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.0-alpha] - 2026-11-22
+
+**响应可以从页面发起了：主机页新增「发起响应」，第一次把处置链路从 UI 走通。**
+
+### 组件
+
+- `GATEWAY_TAG` v0.53.0-alpha → **v0.54.0-alpha**，`WEB_TAG` v0.39.0-alpha → **v0.40.0-alpha**。
+- agentd **不变**（v0.41.0-alpha 已含所需的全部改动）。
+
+### 新增（发起响应）
+
+- **`/hosts` 变成 tab 壳**：「主机清单」+「发起响应」。
+- 发起页（第一版只开 `disk.cleanup`）：选机器 → 选范围（临时目录 / 已轮转日志）→
+  填最小年龄与硬上限 → **先预览（R0，只读）** 看到候选清单 → **提交清理（R2）** 进审批。
+- 网关为此新增两项只读能力（均自动迁移，无配置项）：
+  - **执行结果落库**（新表 `action_result`，`migrations/sqlite/0046_action_result.sql`）：
+    过去 agentd 上报的结果**只回 ack、直接丢弃**，现在按 `(agent_id, action_id)` 幂等存下整份报文，
+    新增 `GET /api/v1/admin/agents/{id}/action-results/{action_id}` 读回。
+  - **目标画像** `GET /api/v1/admin/agents/{id}/plan-target`：`platform` / `arch` 只来自
+    agent 上报的事实；没报过就回 `409 action_plan_target_unknown`，不编默认值。
+
+### 升级注意
+
+1. **预览也要授权单**：`disk.cleanup.preview` 是 R0，同样受响应授权单约束。
+   没签授权单的机器点预览会看到「去签授权单」的提示 —— 先到「采集授权 → 响应授权」签一张。
+2. **目标画像依赖事实摘要**：从没上报过事实的机器无法生成计划（页面上会提示先刷新事实）。
+3. 只开放了清理一个动作；其余 18 个 opcode 缺参数契约，前端不做自由参数输入。
+
 ## [0.18.0-alpha] - 2026-11-22
 
 **响应能力从「一次一审」扩到「时间窗授权」：低风险动作可以在一段有期限的窗口内执行。**

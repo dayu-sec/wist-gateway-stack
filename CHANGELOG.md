@@ -3,6 +3,32 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.17.0-alpha] - 2026-11-22
+
+**响应能力的控制面闭环：网关能审批 / 签发执行计划，前端新增「响应审批」页。**
+
+### 组件（升级注意）
+
+- `GATEWAY_TAG` v0.49.1-alpha → **v0.52.0-alpha**，`WEB_TAG` v0.37.0-alpha → **v0.38.0-alpha**。
+  一次跟完网关 0.50 / 0.51 / 0.52 三档：下发 ActionPlan → 入队前能力闸 → 审批与签发。
+  - 网关新增审批链路：提交计划 → 投票 → 签发（Ed25519 attestation）→ 入队下发。
+    新表 `action_approval` / `action_approval_vote`（`migrations/sqlite/0044_action_approval.sql`），
+    **启动时自动迁移**，无需手工执行 SQL。
+  - 新增可选配置段 `[plan_signing]`（见 `wist-gateway.toml` 末尾的注释示例）：
+    **不配私钥就不签发** —— `issue` 回 503 `plan_signing_unavailable`，没有「跳过签名」的降级。
+    没写这一段的站点**不会启动失败**，审批页照常可看可批，只是签发按钮会给出明确提示。
+  - 启用签发需要两处配合：控制面配 `key_file` / `key_id`；被管机 agentd 的
+    `[attestation] trusted_keys` 放同一 `key_id` 的公钥。私钥只留在控制面，**不要**拷到被管机。
+  - 下发计划前会做**能力闸**：agentd 没报过 `exec_capabilities` → `409 action_plan_capability_unknown`；
+    要的 opcode / 执行 profile 不在上报清单里 → `409 action_plan_capability_missing`。
+  - **被管机的 agentd 要先升**：旧 agentd 不认 `kind = action_plan` 的命令，会被本地终审拒掉。
+- 前端新增 `/approvals`（侧栏「Agent管理 → 响应审批」）：待批 / 已批 / 全部 三档，
+  通过 / 驳回 / 签发并下发。通过不可改票、签发会下发到机器，两处都二次确认。
+
+### 已知边界
+
+- 当前网关只有单一 Admin Token，需要**两名审批人**的 R3 计划在页面上跑不通（提交时回 `409 approval_policy_unsupported`）。
+
 ## [0.16.0-alpha] - 2026-11-21
 
 **网关 / 前端跟版到 0.49.1 / 0.37.0（关键进程指标）；云资产采集可选厂商（阿里云）；wparse 启动前做数据面自检。**

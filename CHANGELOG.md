@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.4-alpha] - 2026-11-23
+
+**修复：执行成功了，页面上却没有任何反馈。**
+
+结果其实已经落库（`action_result` 表里有完整报文），命令也已经结单 —— 只是发起页的预览
+只活在当次会话里（`actionId` 是组件 state），刷新一次就再也找不回来。
+
+- `GATEWAY_TAG` v0.55.0-alpha → **v0.56.0-alpha**：新增
+  `GET /api/v1/admin/agents/{agent_id}/action-results?limit=N`，按 `received_at` 倒序
+  返回这台机器最近的执行结果（默认 10 条，上限 50）。
+- `WEB_TAG` v0.42.0-alpha → **v0.43.0-alpha**：发起页预览下方新增「最近的执行结果」区块，
+  刷新页面后仍能看到历史，展开可看候选清单。
+- `agentd` 无需变更（仍是 ≥ v0.42.0-alpha 即可，0.42 起才会上报执行结果）。
+- 升级后现场可见的差异：执行完的命令在「发起响应」页里不再消失，会留在「最近的执行结果」。
+
 ## [0.19.3-alpha] - 2026-11-22
 
 **修复：`action_plan` 命令永远显示「执行中」。**

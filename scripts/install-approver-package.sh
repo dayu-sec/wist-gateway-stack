@@ -68,7 +68,7 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   [ -n "$url" ] || { echo "需要 GATEWAY_URL（或 value.json 的 public_base_url）" >&2; exit 1; }
   [ -n "$token" ] || { echo "需要 ADMIN_TOKEN（或密钥文件 $SEC_FILE 的 admin_token）" >&2; exit 1; }
   response="$(curl -sk -H "Authorization: Bearer ${token}" "$(api)")"
-  printf '%s\n' "$response" | rg -q '"packages"' || {
+  printf '%s\n' "" | grep -q '"packages"' || {
     echo "读取失败：${response}" >&2
     exit 1
   }

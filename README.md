@@ -401,6 +401,16 @@ gops run start
 KNOWLEDGE_SIGNING_PUBKEY=/path/to/knowledge-signing.pub.pem gops sys localize
 #   关掉：rm identity/gateway/public/knowledge-signing.pub.pem && gops sys localize
 
+# 投放**审批终端** wist-approve（客户审批人从网关下载，私钥在他们自己机器上）：
+#   不投 = /api/v1/approver/... 对三个平台都回 503，审批人装不上 CLI。
+#   制品来自 wist-gateway 的 Release（三平台，Linux 是静态 musl）；隔离站点用 --from <离线目录>。
+#   国内走 COS 镜像时给基址（含仓库 + 渠道）：
+#     APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway scripts/install-approver-package.sh --tag "$GATEWAY_TAG"
+#   注意别把 vars.yml 里的 ARTIFACT_HOME 拿过来用：那个是 wist-knowledge 的源基址。
+#   投完不需要重启容器（网关读的是挂载卷里的 state/），审批人重新下载即可拿到。
+./scripts/install-approver-package.sh --tag "$GATEWAY_TAG"
+./scripts/install-approver-package.sh --check --tag "$GATEWAY_TAG"   # 核对缺口与投放自哪个 tag
+
 # 改了证书/配置后，必须**重启网关容器**才生效（`up -d` 不会因挂载文件变化而重建）：
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway
 ```

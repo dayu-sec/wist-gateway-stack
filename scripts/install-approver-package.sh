@@ -7,23 +7,30 @@
 #
 #   <栈根>/configs/gateway/state/approver-package/<triple>/wist-approve
 #
+# 运行前提：网关 ≥ v0.57.1-alpha 时，三个平台的制品**已经烘在镜像里**
+# （`/usr/share/wist/approver-package/<triple>/wist-approve`），分发面默认直接用镜像里那份 ——
+# 所以「不跑本脚本」是正常状态，不是缺口。
+#
+# 本脚本负责的是**覆盖**（及离线投放）：
+#   * 想在不等网关发版的情况下换 CLI；
+#   * 或网点还在 ≤ 0.57.0，镜像里没有内置制品。
+#
 # 用法：
 #   scripts/install-approver-package.sh                 # 按 GATEWAY_TAG 从 GitHub Release 拉
-#   scripts/install-approver-package.sh --tag v0.57.0-alpha
+#   scripts/install-approver-package.sh --tag v0.57.1-alpha
 #   scripts/install-approver-package.sh --from ./downloads   # 离线：用本地已下好的 tar.gz
-#   scripts/install-approver-package.sh --check --tag v0.57.0-alpha   # 只检查，不写
+#   scripts/install-approver-package.sh --check --tag v0.57.1-alpha   # 只检查，不写
 #
 # 制品源基址（含仓库 + 渠道）默认是 GitHub Release，可换成 COS 镜像（同 `vars.yml` 里
 # knowledge 那个镜像的桶，前缀换成 wist-gateway）：
-#   APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway scripts/install-approver-package.sh --tag v0.57.0-alpha
+#   APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway scripts/install-approver-package.sh --tag v0.57.1-alpha
 #
 # 落到哪儿可用 `APPROVER_PACKAGE_DIR=` 覆盖（测试用）；现场保持默认。
 #
 # 幂等：同一个 tag 重复跑，内容一致就跳过（不会每次重写）。
 # 不接进 localize（`sys/workflows/operators.gxl`）：隔离站点没有外网，挂上去会让
-# `gops sys localize` / 升级的 regenerate 阶段直接失败；而且制品文件名固定，
-# `gx.download` 的 reuse_cache 不判版本，升 tag 也不会更新。部署后手工跑一次。
-# 是否漏投由 `--check` 判（含「制品是哪个 tag 投的」——记在 VERSION 文件里）。
+# `gops sys localize` / 升级的 regenerate 阶段直接失败；而**默认也不需要** —— 镜像内置。
+# 覆盖状态由 `--check` 看（含「覆盖自哪个 tag」——记在 VERSION 文件里）。
 set -euo pipefail
 
 trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
@@ -40,12 +47,15 @@ PLATFORMS=(aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-
 TAG="${GATEWAY_TAG:-}"
 FROM_DIR=""
 CHECK_ONLY=0
+REQUIRE_ALL=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tag) TAG="${2:-}"; shift 2 ;;
     --from) FROM_DIR="${2:-}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
+    # 离线站点 / 不想依赖镜像内置时用：少任何一个平台就非零退出。
+    --require-all) REQUIRE_ALL=1; shift ;;
     # 头部注释块就是帮助文本：按注释块动态取，不硬编码行号（加一行注释就会漂）。
     -h|--help) awk 'NR>1 { if ($0 !~ /^#/) exit; print }' "$0"; exit 0 ;;
     *) echo "未知参数：$1" >&2; exit 2 ;;
@@ -74,33 +84,40 @@ note() { printf '  %s\n' "$*"; }
 # 审批人下载到的还是旧 CLI，而 `--check` 一片绿。
 VERSION_FILE="${TARGET_DIR}/VERSION"
 
-# 现状巡检只在 `--check` 下打印：投放模式下先报一屏「缺少」，看着像失败。
+# 现状巡检只在 `--check` 下打印。
+#
+# **空目录不是错误**：网关 ≥ v0.57.1-alpha 时三个平台的制品已经烘在镜像里，分发面默认用
+# 镜像那份；本站只有「想不等网关发版就换 CLI」时才需要覆盖。需要「必须全部覆盖」
+# （离线站点 / 旧镜像）就加 `--require-all`。
 if [ "$CHECK_ONLY" -eq 1 ]; then
   missing=0
   for platform in "${PLATFORMS[@]}"; do
     if [ -f "${TARGET_DIR}/${platform}/wist-approve" ]; then
-      note "已就位 ${platform}"
+      note "已覆盖 ${platform}"
     else
-      note "缺少   ${platform}"
+      note "未覆盖 ${platform}（用网关镜像内置制品）"
       missing=$((missing + 1))
     fi
   done
   if [ -f "$VERSION_FILE" ]; then
     installed="$(cat "$VERSION_FILE")"
-    note "投放版本 ${installed}"
+    note "覆盖版本 ${installed}"
     # 只在**能知道期望版本**时才比较（手动跑常常不传 tag）。不一致不算失败：
     # 旧版制品仍然能分发，只是审批人拿到的是旧 CLI。
     if [ -n "$TAG" ] && [ "$installed" != "$TAG" ]; then
-      echo "提醒：制品是 ${installed}，当前 tag 是 ${TAG} —— 需要重新投放（--tag ${TAG}）" >&2
+      echo "提醒：覆盖制品是 ${installed}，当前 tag 是 ${TAG} —— 需要重新投放（--tag ${TAG}）" >&2
     fi
   else
-    note "投放版本 未知（没有 VERSION 文件）"
+    note "覆盖版本 未知（没有 VERSION 文件）"
   fi
-  if [ "$missing" -gt 0 ]; then
-    echo "共 ${missing} 个平台缺制品；网关的 /api/v1/approver/... 对这些平台会回 503。" >&2
+  # 不传 `--require-all` 时，网关 ≥ v0.57.1 的站点到这里就是正常状态。
+  if [ "$missing" -gt 0 ] && [ "$REQUIRE_ALL" -eq 1 ]; then
+    echo "共 ${missing} 个平台没有站点覆盖（--require-all）。旧镜像（≤ v0.57.0）下这些平台会 503。" >&2
     exit 1
   fi
-  echo "三个平台的制品都已就位。"
+  if [ "$missing" -gt 0 ]; then
+    echo "没覆盖的平台由网关镜像内置制品提供（需网关 ≥ v0.57.1-alpha；更旧会 503）。"
+  fi
   exit 0
 fi
 
@@ -180,7 +197,7 @@ done
 
 echo
 # 部分失败时不写 VERSION：盘上会是「一半新一半旧」的混合态，而 VERSION 只有一个值 ——
-# 写下去等于把这个事实抹掉，下一次 `--check` 会说「投放版本 vX」而其实有一个平台还是旧的。
+# 写下去等于把这个事实抹掉，下一次 `--check` 会说「覆盖版本 vX」而其实有一个平台还是旧的。
 if [ "$failed" -gt 0 ]; then
   echo "共 ${failed} 个平台未能投放（新投 ${placed}，已是最新 ${uptodate}）。" >&2
   echo "盘上可能已是混合版本，本次**没有**更新 VERSION 记录。修好缺的那几个平台再跑一次。" >&2
@@ -190,7 +207,7 @@ fi
 if [ -n "$TAG" ]; then
   mkdir -p "$TARGET_DIR"
   printf '%s\n' "$TAG" > "$VERSION_FILE"
-  echo "已记录投放版本：${TAG}"
+  echo "已记录覆盖版本：${TAG}"
 fi
 echo "提示：网关容器挂的是 configs/gateway/state，**不需要重启**；重新下载即可拿到。"
 echo "核对：scripts/install-approver-package.sh --check"

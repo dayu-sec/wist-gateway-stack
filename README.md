@@ -401,15 +401,18 @@ gops run start
 KNOWLEDGE_SIGNING_PUBKEY=/path/to/knowledge-signing.pub.pem gops sys localize
 #   关掉：rm identity/gateway/public/knowledge-signing.pub.pem && gops sys localize
 
-# 投放**审批终端** wist-approve（客户审批人从网关下载，私钥在他们自己机器上）：
-#   不投 = /api/v1/approver/... 对三个平台都回 503，审批人装不上 CLI。
+# （默认不需要）**覆盖**审批终端 wist-approve。
+#   网关 ≥ v0.57.1-alpha 时三个平台的制品**已经烘在镜像里**，分发面直接用那份 ——
+#   `/api/v1/approver/...` 开箱可用，不需要任何手工步骤（也不用重启容器）。
+#   只有这两种情况才跑本脚本：① 不等网关发版就换 CLI；② 网关还在 ≤ v0.57.0。
 #   制品来自 wist-gateway 的 Release（三平台，Linux 是静态 musl）；隔离站点用 --from <离线目录>。
 #   国内走 COS 镜像时给基址（含仓库 + 渠道）：
 #     APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway scripts/install-approver-package.sh --tag "$GATEWAY_TAG"
 #   注意别把 vars.yml 里的 ARTIFACT_HOME 拿过来用：那个是 wist-knowledge 的源基址。
-#   投完不需要重启容器（网关读的是挂载卷里的 state/），审批人重新下载即可拿到。
+#   投完不需要重启容器（网关读的是挂载卷里的 state/，覆盖优先于镜像内置）。
 ./scripts/install-approver-package.sh --tag "$GATEWAY_TAG"
-./scripts/install-approver-package.sh --check --tag "$GATEWAY_TAG"   # 核对缺口与投放自哪个 tag
+./scripts/install-approver-package.sh --check --tag "$GATEWAY_TAG"          # 看哪些平台被覆盖了
+./scripts/install-approver-package.sh --check --require-all --tag "$GATEWAY_TAG"  # 必须全覆盖（离线站点）
 
 # 改了证书/配置后，必须**重启网关容器**才生效（`up -d` 不会因挂载文件变化而重建）：
 docker compose --project-directory . -f sys/docker-compose.yml restart gateway

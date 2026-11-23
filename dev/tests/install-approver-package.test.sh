@@ -93,11 +93,17 @@ case "${declared}" in
   *gnu*) fail "Linux 制品必须是 musl（gnu 在客户老系统上跑不起来）" ;;
 esac
 
-# ── 2. 缺制品时 --check 必须非零（并说清后果）────────────────────────────────
-if "${SCRIPT}" --check >"${TMP}/out" 2>&1; then
-  fail "--check 在什么都没投放时应当失败"
+# ── 2. 空目录不是错误；`--require-all` 才是门禁 ──────────────────────────
+# 网关 ≥ v0.57.1 已经把三个平台的制品烘在镜像里，本站不覆盖也能分发。
+run "check（空目录，默认）" --check
+case "$(cat "${TMP}/out")" in
+  *"镜像内置"*) ;;
+  *) fail "空目录时 --check 应当说明「走镜像内置制品」" ;;
+esac
+if "${SCRIPT}" --check --require-all >"${TMP}/out" 2>&1; then
+  fail "--require-all 下空目录必须非零退出（旧镜像会 503）"
 fi
-grep -q '503' "${TMP}/out" || fail "--check 失败时应当说明后果（503）"
+grep -q '503' "${TMP}/out" || fail "--require-all 失败时应当说明后果（503）"
 
 # ── 3. 部分失败：不该写 VERSION ──────────────────────────────────────────────
 make_tarball aarch64-apple-darwin 'fake-darwin-v1'
@@ -129,7 +135,8 @@ grep -q '已是最新' "${TMP}/out" || fail "同内容重跑应当说明「已�
   fail "同内容重跑不该重写文件（幂等）"
 
 run "check（全就位）" --check --tag "${TAG}"
-grep -q "投放版本 ${TAG}" "${TMP}/out" || fail "--check 应当报告投放自哪个 tag"
+grep -q "覆盖版本 ${TAG}" "${TMP}/out" || fail "--check 应当报告覆盖自哪个 tag"
+run "check（全就位 + require-all）" --check --require-all --tag "${TAG}"
 
 # ── 5. 换内容要覆盖；带前缀目录的 tarball 也要能解 ──────────────────────────
 make_tarball aarch64-apple-darwin 'fake-darwin-v2' 'wist-approve-9-prefixed'

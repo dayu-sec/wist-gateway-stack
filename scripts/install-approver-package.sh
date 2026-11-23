@@ -1,126 +1,85 @@
 #!/usr/bin/env bash
-# 投放 `wist-approve` 制品，供网关的 `/api/v1/approver/...` 分发面使用。
+# 录入 / 查看**审批终端（wist-approve）安装包** —— 走网关的包管理，语义与 agent 安装包一致：
+#   拿到包 → 拷进投放目录（`packages/`，只读挂到容器 `/packages`）→ 登记「容器内路径」为来源
+#   → 网关拉取并缓存 → 分发端点只读缓存（install.sh 内嵌的 sha256 与发出的字节同源）。
 #
-# 为什么需要这一步：网关不构建任何东西（镜像只来自 CI），它只负责**分发**已经存在的
-# 制品。制品来自 `wist-gateway` 仓的 release（`wist-approve-<tag>-<triple>.tar.gz`），
-# 本脚本把它们放到网关读得到的位置：
-#
-#   <栈根>/configs/gateway/state/approver-package/<triple>/wist-approve
-#
-# 运行前提：网关 ≥ v0.57.1-alpha 时，三个平台的制品**已经烘在镜像里**
-# （`/usr/share/wist/approver-package/<triple>/wist-approve`），分发面默认直接用镜像里那份 ——
-# 所以「不跑本脚本」是正常状态，不是缺口。
-#
-# 本脚本负责的是**覆盖**（及离线投放）：
-#   * 想在不等网关发版的情况下换 CLI；
-#   * 或网点还在 ≤ 0.57.0，镜像里没有内置制品。
+# 为什么不再直接往 `state/approver-package/` 里丢文件：那样网关不知道「盘上这份是什么版本」，
+# 也就没法做「录入 / 查看 / 撤销」；现在与 agent 包同一条链，管理面能回答这三个问题。
 #
 # 用法：
-#   scripts/install-approver-package.sh                 # 按 GATEWAY_TAG 从 GitHub Release 拉
-#   scripts/install-approver-package.sh --tag v0.57.1-alpha
-#   scripts/install-approver-package.sh --from ./downloads   # 离线：用本地已下好的 tar.gz
-#   scripts/install-approver-package.sh --check --tag v0.57.1-alpha   # 只检查，不写
+#   scripts/install-approver-package.sh --tag v0.58.0-alpha   # 从 Release 下载三平台并登记
+#   scripts/install-approver-package.sh --from ./downloads    # 离线：用本地 tar.gz
+#   scripts/install-approver-package.sh --check               # 只看网关当前登记了什么
+#   任一命令加 --dry-run                                      # 只打印，不拷文件、不发请求
 #
-# 制品源基址（含仓库 + 渠道）默认是 GitHub Release，可换成 COS 镜像（同 `vars.yml` 里
-# knowledge 那个镜像的桶，前缀换成 wist-gateway）：
-#   APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway scripts/install-approver-package.sh --tag v0.57.1-alpha
-#
-# 落到哪儿可用 `APPROVER_PACKAGE_DIR=` 覆盖（测试用）；现场保持默认。
-#
-# 幂等：同一个 tag 重复跑，内容一致就跳过（不会每次重写）。
-# 不接进 localize（`sys/workflows/operators.gxl`）：隔离站点没有外网，挂上去会让
-# `gops sys localize` / 升级的 regenerate 阶段直接失败；而**默认也不需要** —— 镜像内置。
-# 覆盖状态由 `--check` 看（含「覆盖自哪个 tag」——记在 VERSION 文件里）。
+# 可覆盖 env（与 import-package.sh 同义）：
+#   PACKAGE_DIR   投放目录（默认 ./packages）
+#   GATEWAY_URL   管理面基址（默认取 configs/gateway/wist-gateway.value.json 的 public_base_url）
+#   ADMIN_TOKEN   管理面 token（默认取密钥文件 .wist/sec-value.yml 的 admin_token）
+#   APPROVER_ARTIFACT_BASE  制品源基址（含仓库+渠道；默认 GitHub Release，可换 COS 镜像）
 set -euo pipefail
 
 trap 'echo "$0 失败：第 ${LINENO} 行（退出码 $?）" >&2' ERR
 
-STACK_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-# `APPROVER_PACKAGE_DIR` 覆盖是为了测试能在临时目录里跑（同 `PACKAGE_DIR` 之于
-# `import-package.sh`）；现场不用传，默认就是网关挂进去的那个 state 子目录。
-TARGET_DIR="${APPROVER_PACKAGE_DIR:-${STACK_ROOT}/configs/gateway/state/approver-package}"
-# 三个 triple 必须与网关分发白名单一致（`src/api/install_package.rs` 的 PLATFORM_*
-# 常量，审批分发面复用它），也与 CI 的 build-approver-cli 矩阵一致（Linux 静态 musl）。
-# 投到白名单外的名字，网关不会去读那个目录 —— 下载端点会一直 503。
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+STACK_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+PACKAGE_DIR="${PACKAGE_DIR:-${STACK_ROOT}/packages}"
+# 容器里 packages/ 的挂载点（与 import-package.sh 同约定）。
+CONTAINER_PACKAGE_DIR="/packages"
 PLATFORMS=(aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
+APPROVER_ARTIFACT_BASE="${APPROVER_ARTIFACT_BASE:-https://github.com/dayu-sec/wist-approve/releases/download}"
+APPROVER_ARTIFACT_BASE="${APPROVER_ARTIFACT_BASE%/}"
 
 TAG="${GATEWAY_TAG:-}"
 FROM_DIR=""
 CHECK_ONLY=0
-REQUIRE_ALL=0
+DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tag) TAG="${2:-}"; shift 2 ;;
     --from) FROM_DIR="${2:-}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
-    # 离线站点 / 不想依赖镜像内置时用：少任何一个平台就非零退出。
-    --require-all) REQUIRE_ALL=1; shift ;;
-    # 头部注释块就是帮助文本：按注释块动态取，不硬编码行号（加一行注释就会漂）。
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) awk 'NR>1 { if ($0 !~ /^#/) exit; print }' "$0"; exit 0 ;;
     *) echo "未知参数：$1" >&2; exit 2 ;;
   esac
 done
 
-# 制品源基址：**已包含「仓库 + 发布渠道」前缀**，下载地址 = `<基址>/<tag>/<文件名>`。
-# 与栈里的 `ARTIFACT_HOME` + `KNOWLEDGE_PATH` 同一形态，但**不能直接复用那个变量**：
-# `ARTIFACT_HOME` 在栈里指的是 wist-knowledge 仓（默认还指向 COS 镜像），仓库名不同，
-# 拿来拼 wist-gateway 的地址会得到一个不存在的路径。
-#
-#   直连 GitHub（缺省）：https://github.com/dayu-sec/wist-gateway/releases/download
-#   国内 COS 镜像：       https://<COS 桶域>/wist-gateway
-#                        （`upload-cos` 把 Release 附件原样推到 `<prefix=仓名>/<tag>/<文件名>`，
-#                          与 knowledge 的对象键排布一致 —— 同桶时只换前缀，路径段两边都成立）
-#
-# 现场覆盖：APPROVER_ARTIFACT_BASE=... scripts/install-approver-package.sh --tag <tag>
-# （走不到外网就 `--from <离线目录>`；本脚本**不**读 .env / vars，故意不靠隐式环境。）
-APPROVER_ARTIFACT_BASE="${APPROVER_ARTIFACT_BASE:-https://github.com/dayu-sec/wist-gateway/releases/download}"
-APPROVER_ARTIFACT_BASE="${APPROVER_ARTIFACT_BASE%/}"
-
 note() { printf '  %s\n' "$*"; }
 
-# 投放时的 tag 记在 VERSION 里：制品的文件名是固定的（`<triple>/wist-approve`），
-# 不记版本的话，升了 `GATEWAY_TAG` 还没重新投放这件事**没有任何地方看得出来** ——
-# 审批人下载到的还是旧 CLI，而 `--check` 一片绿。
-VERSION_FILE="${TARGET_DIR}/VERSION"
+# 管理面基址与 token：与 import-package.sh 同一套取法（现场不用手填）。
+VALUE_JSON="${WIST_GATEWAY_VALUE_JSON:-${STACK_ROOT}/configs/gateway/wist-gateway.value.json}"
+SEC_FILE="${WIST_GATEWAY_SEC_FILE:-${STACK_ROOT}/.wist/sec-value.yml}"
+url="${GATEWAY_URL:-}"
+token="${ADMIN_TOKEN:-}"
+if [ -f "$VALUE_JSON" ]; then
+  [ -n "$url" ] || url="$(sed -n 's/.*"public_base_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VALUE_JSON" | sed -n '1p')"
+fi
+if [ -f "$SEC_FILE" ]; then
+  [ -n "$token" ] || token="$(sed -n 's/^[[:space:]]*admin_token:[[:space:]]*//p' "$SEC_FILE" | sed -n '1p')"
+fi
+url="${url%/}"
 
-# 现状巡检只在 `--check` 下打印。
-#
-# **空目录不是错误**：网关 ≥ v0.57.1-alpha 时三个平台的制品已经烘在镜像里，分发面默认用
-# 镜像那份；本站只有「想不等网关发版就换 CLI」时才需要覆盖。需要「必须全部覆盖」
-# （离线站点 / 旧镜像）就加 `--require-all`。
+api() { printf '%s/api/v1/admin/approver/install-package' "$url"; }
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
-  missing=0
-  for platform in "${PLATFORMS[@]}"; do
-    if [ -f "${TARGET_DIR}/${platform}/wist-approve" ]; then
-      note "已覆盖 ${platform}"
-    else
-      note "未覆盖 ${platform}（用网关镜像内置制品）"
-      missing=$((missing + 1))
-    fi
-  done
-  if [ -f "$VERSION_FILE" ]; then
-    installed="$(cat "$VERSION_FILE")"
-    note "覆盖版本 ${installed}"
-    # 只在**能知道期望版本**时才比较（手动跑常常不传 tag）。不一致不算失败：
-    # 旧版制品仍然能分发，只是审批人拿到的是旧 CLI。
-    if [ -n "$TAG" ] && [ "$installed" != "$TAG" ]; then
-      echo "提醒：覆盖制品是 ${installed}，当前 tag 是 ${TAG} —— 需要重新投放（--tag ${TAG}）" >&2
-    fi
-  else
-    note "覆盖版本 未知（没有 VERSION 文件）"
-  fi
-  # 不传 `--require-all` 时，网关 ≥ v0.57.1 的站点到这里就是正常状态。
-  if [ "$missing" -gt 0 ] && [ "$REQUIRE_ALL" -eq 1 ]; then
-    echo "共 ${missing} 个平台没有站点覆盖（--require-all）。旧镜像（≤ v0.57.0）下这些平台会 503。" >&2
+  [ -n "$url" ] || { echo "需要 GATEWAY_URL（或 value.json 的 public_base_url）" >&2; exit 1; }
+  [ -n "$token" ] || { echo "需要 ADMIN_TOKEN（或密钥文件 $SEC_FILE 的 admin_token）" >&2; exit 1; }
+  response="$(curl -sk -H "Authorization: Bearer ${token}" "$(api)")"
+  printf '%s\n' "$response" | rg -q '"packages"' || {
+    echo "读取失败：${response}" >&2
     exit 1
-  fi
-  if [ "$missing" -gt 0 ]; then
-    echo "没覆盖的平台由网关镜像内置制品提供（需网关 ≥ v0.57.1-alpha；更旧会 503）。"
-  fi
+  }
+  printf '%s\n' "$response"
+  echo
+  echo "提示：记录存在但 available=false 表示缓存副本不在了（重新登记即可）。"
   exit 0
 fi
 
+[ -n "$url" ] || { echo "需要 GATEWAY_URL（或 value.json 的 public_base_url）" >&2; exit 1; }
+[ -n "$token" ] || { echo "需要 ADMIN_TOKEN（或密钥文件 $SEC_FILE 的 admin_token）" >&2; exit 1; }
 if [ -z "$FROM_DIR" ] && [ -z "$TAG" ]; then
   echo "没有 tag：请给 --tag，或在 .env 里设置 GATEWAY_TAG，或用 --from <目录>" >&2
   exit 1
@@ -130,20 +89,14 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
 
 placed=0
-uptodate=0
 failed=0
+mkdir -p "$PACKAGE_DIR"
 
 for platform in "${PLATFORMS[@]}"; do
-  dest_dir="${TARGET_DIR}/${platform}"
-  dest="${dest_dir}/wist-approve"
-
+  name="wist-approve-${TAG}-${platform}.tar.gz"
+  src=""
   if [ -n "$FROM_DIR" ]; then
-    src=""
-    # 优先用带 tag 的规范名，否则退回通配名（离线目录里文件名常常只剩 triple）。
-    # 用 glob 循环而不是 `find | head -1`：后者在 pipefail 下会被 head 提前关闭管道
-    # 冒成 SIGPIPE，把「找到了」误判成失败。
-    for candidate in "${FROM_DIR}/wist-approve-${TAG}-${platform}.tar.gz" \
-                     "${FROM_DIR}/wist-approve-"*"-${platform}.tar.gz"; do
+    for candidate in "${FROM_DIR}/${name}" "${FROM_DIR}/wist-approve-"*"-${platform}.tar.gz"; do
       if [ -f "$candidate" ]; then src="$candidate"; break; fi
     done
     if [ -z "$src" ]; then
@@ -152,63 +105,52 @@ for platform in "${PLATFORMS[@]}"; do
       continue
     fi
   else
-    src="${WORK_DIR}/wist-approve-${TAG}-${platform}.tar.gz"
-    url="${APPROVER_ARTIFACT_BASE}/${TAG}/wist-approve-${TAG}-${platform}.tar.gz"
-    note "下载 ${platform} ← ${url}"
-    if ! curl -fsSL "$url" -o "$src"; then
-      echo "下载失败：${url}（可用 --from 走离线）" >&2
+    download="${APPROVER_ARTIFACT_BASE}/${TAG}/${name}"
+    note "下载 ${platform} ← ${download}"
+    # dry-run 不碰网络：只把 URL 与将要发的请求打出来（这也让 URL 形状可测）。
+    if [ "$DRY_RUN" -eq 1 ]; then
+      note "[dry-run] POST $(api) {\"platform\":\"${platform}\",\"source\":\"${CONTAINER_PACKAGE_DIR}/${name}\"}"
+      placed=$((placed + 1))
+      continue
+    fi
+    src="${WORK_DIR}/${name}"
+    if ! curl -fsSL "$download" -o "$src"; then
+      echo "下载失败：${download}（可用 --from 走离线）" >&2
       failed=$((failed + 1))
       continue
     fi
   fi
+  [ -s "$src" ] || { echo "空制品：${src}" >&2; failed=$((failed + 1)); continue; }
 
-  mkdir -p "$dest_dir"
-  # 先解到临时目录，再按内容决定要不要覆盖 —— 幂等是真的（同 tag 重跑不动已就位的文件），
-  # 也不是靠注释声称的。
-  staged="${WORK_DIR}/staged-${platform}"
-  rm -rf "$staged"; mkdir -p "$staged"
-  tar -xzf "$src" -C "$staged" wist-approve 2>/dev/null || {
-    # tarball 里可能带前缀目录；兜底整包解开再找。
-    tar -xzf "$src" -C "$staged"
-  }
-  found="$(find "$staged" -name wist-approve -type f -print -quit)"
-  if [ -z "$found" ]; then
-    echo "包内没有 wist-approve：${src}" >&2
-    failed=$((failed + 1))
+  dest="${PACKAGE_DIR}/$(basename "$src")"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    note "[dry-run] 拷贝 $(basename "$src") → ${PACKAGE_DIR}/"
+  else
+    cp -f "$src" "$dest.tmp" && mv -f "$dest.tmp" "$dest"
+  fi
+
+  body="$(printf '{"platform":"%s","source":"%s/%s","requested_by":"stack-install-approver-package"}' \
+    "$platform" "$CONTAINER_PACKAGE_DIR" "$(basename "$src")")"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    note "[dry-run] POST $(api) ${body}"
+    placed=$((placed + 1))
     continue
   fi
-  if [ ! -s "$found" ]; then
-    echo "包内的 wist-approve 是空文件：${src}" >&2
-    failed=$((failed + 1))
-    continue
-  fi
-  if [ -f "$dest" ] && cmp -s "$found" "$dest"; then
-    chmod 0644 "$dest"
-    note "已是最新 ${platform}（内容相同，未重写）"
-    uptodate=$((uptodate + 1))
-    continue
-  fi
-  cp "$found" "$dest.tmp"
-  chmod 0644 "$dest.tmp"
-  mv -f "$dest.tmp" "$dest"
-  placed=$((placed + 1))
-  note "已投放 ${platform} → ${dest}"
+  response="$(curl -sk -X POST -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' -d "$body" "$(api)")"
+  case "$response" in
+    *'"platform"'*) note "已登记 ${platform}" ; placed=$((placed + 1)) ;;
+    *)
+      echo "登记 ${platform} 失败：${response}" >&2
+      failed=$((failed + 1))
+      ;;
+  esac
 done
 
 echo
-# 部分失败时不写 VERSION：盘上会是「一半新一半旧」的混合态，而 VERSION 只有一个值 ——
-# 写下去等于把这个事实抹掉，下一次 `--check` 会说「覆盖版本 vX」而其实有一个平台还是旧的。
 if [ "$failed" -gt 0 ]; then
-  echo "共 ${failed} 个平台未能投放（新投 ${placed}，已是最新 ${uptodate}）。" >&2
-  echo "盘上可能已是混合版本，本次**没有**更新 VERSION 记录。修好缺的那几个平台再跑一次。" >&2
+  echo "共 ${failed} 个平台未能登记（成功 ${placed}）。修好后重跑。"
   exit 1
 fi
-
-if [ -n "$TAG" ]; then
-  mkdir -p "$TARGET_DIR"
-  printf '%s\n' "$TAG" > "$VERSION_FILE"
-  echo "已记录覆盖版本：${TAG}"
-fi
-echo "提示：网关容器挂的是 configs/gateway/state，**不需要重启**；重新下载即可拿到。"
-echo "核对：scripts/install-approver-package.sh --check"
-echo "客户侧安装：curl -fsSLk '<网关>/api/v1/approver/install/<triple>/install.sh' | sh"
+echo "三个平台都已登记（网关已拉取并缓存）。审批人那条命令现在就能用："
+echo "  curl -fsSLk '${url}/api/v1/approver/install/<triple>/install.sh' | sh"

@@ -8,11 +8,12 @@
 **审批终端从「一串子命令」变成「键盘就能操作的字符界面」，并且装完即用。**
 
 - `GATEWAY_TAG` v0.57.1-alpha → **v0.58.0-alpha**：
-  - `wist-approve` **不带参数就进全屏字符界面**（左右两栏：审批单列表 + 待签摘要；
-    `a` 批准、`s` 签发、`A` 批准+签发、`x` 驳回、`Enter` 确认）。子命令全部保留给脚本 / air-gap。
-  - 二进制装到 **`~/bin`**（原来 `~/.wist/bin` 不在 PATH 上，敲命令直接 command not found）；
-  - **装完免配置**：安装脚本把网关地址与 CA 写进 `~/.wist/config.toml`，不再需要
-    `--gateway` / `--ca-file`（只差管理员下发的 token）；网关 CA / 私钥 / token 仍在 `~/.wist`。
+  - `wist-approve` 拆成**独立仓**（`dayu-sec/wist-approve`，CI 对齐 `wist-agentd`）；
+    网关不再构建它、也不再烘到镜像里。
+  - 审批终端安装包改走**包管理**（与 agent 安装包同一套）：管理面录入来源 → 网关拉取并缓存 →
+    分发只读缓存。栈侧用 `scripts/install-approver-package.sh --tag <tag>`（把包放进 `packages/`
+    并登记 `/packages/<文件名>`），`--check` 看网关当前登记了什么。
+  - CLI 自身的改进（字符界面、装到 `~/bin`、`~/.wist/config.toml` 免配置）随这一版一起来。
 - `WEB_TAG` **v0.45.0-alpha**：审批页新增「安装与钥匙」tab（安装命令 + 审批公钥从表格下方
   独立出来），安装提示文案同步为 `~/bin`。
 - `agentd` 不变。

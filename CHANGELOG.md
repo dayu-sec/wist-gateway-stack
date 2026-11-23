@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.7-alpha] - 2026-11-23
+
+**审批终端从「一串子命令」变成「键盘就能操作的字符界面」，并且装完即用。**
+
+- `GATEWAY_TAG` v0.57.1-alpha → **v0.58.0-alpha**：
+  - `wist-approve` **不带参数就进全屏字符界面**（左右两栏：审批单列表 + 待签摘要；
+    `a` 批准、`s` 签发、`A` 批准+签发、`x` 驳回、`Enter` 确认）。子命令全部保留给脚本 / air-gap。
+  - 二进制装到 **`~/bin`**（原来 `~/.wist/bin` 不在 PATH 上，敲命令直接 command not found）；
+  - **装完免配置**：安装脚本把网关地址与 CA 写进 `~/.wist/config.toml`，不再需要
+    `--gateway` / `--ca-file`（只差管理员下发的 token）；网关 CA / 私钥 / token 仍在 `~/.wist`。
+- `WEB_TAG` **v0.45.0-alpha**：审批页新增「安装与钥匙」tab（安装命令 + 审批公钥从表格下方
+  独立出来），安装提示文案同步为 `~/bin`。
+- `agentd` 不变。
+- 已装过旧版（`~/.wist/bin/wist-approve`）的机器：重跑一次安装即可，脚本会提示旧副本可删。
+
 ## [0.19.6-alpha] - 2026-11-23
 
 **修复：审批人装不上 CLI（503 `approver_package_unavailable`）。**

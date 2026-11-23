@@ -3,6 +3,23 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.6-alpha] - 2026-11-23
+
+**修复：审批人装不上 CLI（503 `approver_package_unavailable`）。**
+
+制品原来要有人登录网关主机手工投一次，多站点 / 四十台起步的现场必然被漏。现在三个平台的
+`wist-approve` **直接烘在网关镜像里**（`/usr/share/wist/approver-package/<triple>/wist-approve`），
+分发面开箱可用，隔离站点也能拿。
+
+- `GATEWAY_TAG` v0.57.0-alpha → **v0.57.1-alpha**（前端 / agentd 不变）。
+- `scripts/install-approver-package.sh` 语义改为**覆盖工具**（默认不需要跑）：
+  - 覆盖落点 `<栈根>/configs/gateway/state/approver-package/<triple>/wist-approve`，
+    优先级高于镜像内置；投完仍不需重启容器。
+  - 只有两种情况要跑：① 不等网关发版就换 CLI；② 网关还在 ≤ v0.57.0。
+  - `--check` 默认**不再因缺覆盖而失败**（空 = 走镜像内置）；要当门禁用
+    `--check --require-all`（离线站点 / 旧镜像）。
+- `agentd` 无需变更。
+
 ## [0.19.5-alpha] - 2026-11-23
 
 **审批从网关搬到客户侧：`wist-approve` CLI 由**网关自己**分发。**

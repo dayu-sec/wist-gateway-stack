@@ -3,6 +3,14 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.8-alpha] - 2026-11-23
+
+**修复：「安装与钥匙」tab 里安装区块被推到了下方。**
+
+- `WEB_TAG` v0.45.0-alpha → **v0.45.1-alpha**：安装区块去掉「上一块之后」的分隔样式，
+  现在紧接 tab 提示出现（之前多出 48px 空白 + 一条分隔线，看着像掉到页面底部）。
+- `GATEWAY_TAG` 不变（仍 v0.58.0-alpha）；`agentd` 不变。
+
 ## [0.19.7-alpha] - 2026-11-23
 
 **审批终端从「一串子命令」变成「键盘就能操作的字符界面」，并且装完即用。**

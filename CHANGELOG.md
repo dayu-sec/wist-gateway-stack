@@ -3,6 +3,46 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.5-alpha] - 2026-11-23
+
+**审批从网关搬到客户侧：`wist-approve` CLI 由**网关自己**分发。**
+
+外部签发（审批权归客户）落地后，网关页面不再有投票 / 签发按钮 —— 审批人用自己的机器上的
+`wist-approve` 完成「投票 + 用私钥签名」。CLI 制品由**网关**分发（`/api/v1/approver/…`），
+而不是只发 GitHub Release：隔离站点根本连不上外网，网关是唯一必然可达的地址。
+
+- `GATEWAY_TAG` v0.56.0-alpha → **v0.57.0-alpha**：新增审批公钥登记面
+  （`/api/v1/admin/approver-keys`）、签发载荷面（`/approvals/{id}/signing-payload`）、
+  外部证明校验（`issue` 可带 `attestation`，七条校验后再入库），以及审批终端分发面
+  （`/api/v1/approver/packages|install/…`，**公开无鉴权、不含任何凭据**）。
+- `WEB_TAG` v0.43.0-alpha → **v0.44.0-alpha**：响应审批页改为**只读**（每行给出可直接复制的
+  命令），新增「审批公钥」区块（导入 / 显示指纹 / 吊销 / **重新启用已吊销**），以及「安装审批终端」
+  区块（按平台给出一条 `curl … install.sh | sh`，基址取管理面的 Agent 对外地址）。
+- 新增 `scripts/install-approver-package.sh`：把 `wist-approve` 制品投放到
+  `configs/gateway/state/approver-package/<triple>/wist-approve` —— 网关容器挂的就是这个
+  目录，投放后**不需要重启**，审批人重新下载即可拿到。
+
+### 部署后要做一步（不做的话审批人下载会 503 `approver_package_unavailable`）
+
+```bash
+scripts/install-approver-package.sh --tag v0.57.0-alpha           # 有外网：从 GitHub Release 拉
+scripts/install-approver-package.sh --from ./downloads            # 隔离站点：用离线 tar.gz
+scripts/install-approver-package.sh --check --tag v0.57.0-alpha   # 核对（含「制品是哪个 tag 投的」）
+```
+
+- 三个 triple 固定：`x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl` /
+  `aarch64-apple-darwin`，与网关的分发白名单（`install_package.rs` 的三个 `PLATFORM_*`）一致。
+  Linux 制品是**静态 musl**：审批人的跳板机常是 CentOS 7/8 这类老系统，绑 glibc 版本的
+  二进制在那边连加载器都过不去。
+- 源基址可换（默认 GitHub Release）：`APPROVER_ARTIFACT_BASE=https://<COS 桶域>/wist-gateway`，
+  下载地址 = `<基址>/<tag>/<文件名>`。**不要**拿 `ARTIFACT_HOME` 来用 —— 那个是
+  wist-knowledge 的源基址，仓库名不同。
+- 这一步**故意不接进 localize**：隔离站点没有外网，挂上去会让 `gops sys localize` 与升级的
+  `regenerate` 阶段直接失败；而且制品文件名固定，`gx.download` 的 `reuse_cache` 不判版本，
+  升了 tag 也不会更新。
+- 客户侧安装：`curl -fsSLk '<网关>/api/v1/approver/install/<triple>/install.sh' | sh`
+  （脚本里内嵌包摘要，装完打印下一步；**私钥不随包分发**，由审批人自己生成）。
+
 ## [0.19.4-alpha] - 2026-11-23
 
 **修复：执行成功了，页面上却没有任何反馈。**

@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.3-alpha] - 2026-11-22
+
+**修复：`action_plan` 命令永远显示「执行中」。**
+
+- `GATEWAY_TAG` v0.54.0-alpha → **v0.55.0-alpha**（前端 / agentd 不变）。
+- 网关收到 agentd 的执行结果时，顺手把对应的 `action_plan` 命令结单为
+  `succeeded` / `failed`。此前它只落结果、不结命令，因为 agent 只在「取走」时回报
+  `accepted`，执行完没有终态 ack —— 于是命令队列里那些计划永远停在 `claimed`。
+- 配套：`wist-agentd` 需 **≥ v0.42.0-alpha**（0.42 才真正把执行结果发给网关；
+  更早版本的 agentd 从不发送，网关也就无从结单）。
+
 ## [0.19.2-alpha] - 2026-11-22
 
 **前端跟版：发起页对老 agentd 给出明确拒绝，不再是无限「等待结果」。**

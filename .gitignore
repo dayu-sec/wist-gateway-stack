@@ -38,6 +38,8 @@ dev/bin/
 /packages/
 # 卸载 / 重装前的归档（`dev/uninstall-gwlinkd.sh` 写这里；含客户端证书 + **私钥**，绝不入库）
 /backups/
+# 现场排障 / 发版临时产物（数据库取证副本、旧 .env、下载的制品）：只在本机用，绝不入库
+/tmp/
 
 # ===== gops 生成物 =====
 # 变量解析结果（gops sys update / package 生成）

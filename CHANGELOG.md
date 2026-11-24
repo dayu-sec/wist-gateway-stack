@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.10-alpha] - 2026-11-24
+
+**镜像版本不变（网关 0.58.1 / 前端 0.45.1），只修栈自身的三处问题。**
+
+- **补 0.19.9 漏掉的变量同步**：`sys/setting/vars.yml` 改成 `v0.58.1-alpha` 时没跟
+  `gops sys update` 的产物 `sys/merged_vars.yml`，于是 0.19.9 的交付包里 `GATEWAY_TAG`
+  仍是 `v0.58.0-alpha`（`dev/push-images.sh` 的产品默认值、以及任何一次 `gops sys update` /
+  `localize` 都会拿到旧值 —— 与 v0.4.6 那次事故同一形状）。本版两文件已对齐。
+- 修 `scripts/install-approver-package.sh --check` 恒失败：判定里把**空串**而不是响应体
+  喂给了 `grep`，于是命令永远退 1 并报「读取失败」（登记其实是成功的）。
+- 补 `dev/tests/install-approver-package.test.sh` 的 `--check` 用例（假 `curl` 打桩）：
+  合法登记表退 0 且原样输出，非登记表必须非零退出 —— 回退修复后这条会红。
+- `.gitignore` 补 `/tmp/`：现场排障 / 发版的临时产物（数据库取证副本、旧 `.env`、
+  下载的制品）不该再以未跟踪文件的形式冒出来。
+
 ## [0.19.9-alpha] - 2026-11-24
 
 **网关 0.58.1 + 前端 0.45.1。**

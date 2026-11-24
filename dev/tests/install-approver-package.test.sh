@@ -9,6 +9,8 @@
 #      （网关读不到宿主路径 —— 这是最容易写错的一处）；
 #   3. **制品源基址**已含仓库+渠道，地址 = `<基址>/<tag>/<文件名>`；
 #   4. dry-run **不碰网络、不拷文件**：只打印将执行的请求。
+#   5. `--check` **真的解析响应**：合法登记表退 0 并原样打出来，非登记表退非零
+#      （历史 bug：把空串而不是响应体喂给 `grep`，于是永远判「读取失败」）。
 #
 # 跑法：`dev/tests/install-approver-package.test.sh`（CI 由 scripts.yml 全量跑）
 set -euo pipefail
@@ -86,4 +88,31 @@ if env -u GATEWAY_URL ADMIN_TOKEN=t WIST_GATEWAY_VALUE_JSON="${TMP}/nope.json" b
 fi
 grep -q 'GATEWAY_URL' "${TMP}/out" || fail "--check 缺地址时应当说清要什么"
 
-echo "ok: 审批终端安装包登记脚本（平台表 / 容器内路径 / 源基址 / dry-run 不落盘）"
+# ── 5. --check 必须真的解析响应（用假 curl 打桩，不碰网络）────────────────
+mkdir -p "${TMP}/bin"
+cat >"${TMP}/bin/curl" <<'FAKE_CURL'
+#!/usr/bin/env bash
+# --check 只发一条 GET：把网关的登记表原样吐出来。
+printf '%s\n' "${FAKE_CURL_BODY:-}"
+FAKE_CURL
+chmod +x "${TMP}/bin/curl"
+
+run_check() {
+  env PATH="${TMP}/bin:${PATH}" FAKE_CURL_BODY="$1" \
+    GATEWAY_URL=https://gw.example ADMIN_TOKEN=t \
+    bash "${SCRIPT}" --check
+}
+
+ok_body='{"packages":[{"platform":"aarch64-apple-darwin","available":true,"version":"v9.9.9-alpha"}]}'
+run_check "${ok_body}" >"${TMP}/out" 2>&1 || {
+  cat "${TMP}/out" >&2
+  fail "--check 收到合法登记表时必须退 0（历史 bug：拿空串去 grep，恒判「读取失败」）"
+}
+grep -q '"packages"' "${TMP}/out" || { cat "${TMP}/out" >&2; fail "--check 应把登记表原样打出来"; }
+
+if run_check '{"error":"boom"}' >"${TMP}/out" 2>&1; then
+  fail "--check 收到非登记表时必须非零退出"
+fi
+grep -q '读取失败' "${TMP}/out" || { cat "${TMP}/out" >&2; fail "--check 读不到登记表时应说清失败"; }
+
+echo "ok: 审批终端安装包登记脚本（平台表 / 容器内路径 / 源基址 / dry-run 不落盘 / --check 解析）"

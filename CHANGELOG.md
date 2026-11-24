@@ -3,6 +3,17 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.14-alpha] - 2026-11-25
+
+**前端 0.45.2：菜单与页面归位。**
+
+- `WEB_TAG` v0.45.1-alpha → **v0.45.2-alpha**：
+  - 云资产采集从「网关配置」页抽出，独立为 `/harvest`，归「采集」组；
+  - 「安装包」从「Agent管理」移到「网关」组（面包屑分组同步）；
+  - 页名对齐职责：`数据面链路`→`数据链路`、`采集日志`→`日志观测`、`Gateway 信息`→`网关配置`；
+    路由不变，旧书签不受影响。
+- `GATEWAY_TAG` / `WPARSE_TAG` / `VM_TAG` / `HARVEST_TAG` 不变。
+
 ## [0.19.13-alpha] - 2026-11-25
 
 **容器日志加轮转：json-file 默认无上限，现场单个容器 19 天攒到 13 GB。**

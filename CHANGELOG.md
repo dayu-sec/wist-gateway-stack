@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.11-alpha] - 2026-11-24
+
+**数据面引擎升到 wparse 0.37.0-alpha，`wparse check` 闸门从此真正生效。**
+
+- `WPARSE_TAG` 0.36.4-alpha → **0.37.0-alpha**：
+  - 新增 `wparse check` 离线配置校验（不启 sink/source、不抢锁、不写文件，退出码 0/1/2）；
+  - 0.16.x 起 `scripts/check-data-plane.sh` 在旧镜像上只能「跳过」（判据在引擎，旧镜像
+    没有该子命令）。本版起 localize 的 ⓪a 闸门会**真的拦住**“两个 sink_group 绑同一个
+    oml matcher” 这类静默丢富化（2026-11-12 现场因此断流 6 天）；
+  - 站点可在 `sys/data-plane/wparse.local.toml` 加 `[validate] deny_duplicate_oml = true`
+    让引擎启动即 fail-closed（该文件不被 `project_remote` 覆盖，适合做站点策略）；
+  - `wparse check` 同时校验 `wparse.local.toml`：站点覆盖写错时以退出码 2 报出，不再静默忽略。
+- 镜像已在 TCR：`dy-sec.tencentcloudcr.com/cloud/warp-parse:0.37.0-alpha`（上游镜像，不在 wist 流水线里）。
+- `GATEWAY_TAG` / `WEB_TAG` / `VM_TAG` 不变。
+
 ## [0.19.10-alpha] - 2026-11-24
 
 **镜像版本不变（网关 0.58.1 / 前端 0.45.1），只修栈自身的三处问题。**

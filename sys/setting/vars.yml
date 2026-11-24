@@ -37,7 +37,7 @@ system:
   # 的 latest 与 <version> 指向同一个 digest）。
   # 0.32.x 起管理面配置在项目根 wparse.local.toml（不在被 project_remote 替换的 conf/ 里）。
   - name: WPARSE_TAG
-    value: 0.36.4-alpha
+    value: 0.37.0-alpha
 
   # 事件号实例段（wparse ≥ 0.36.2 的 `wp_event_id`：秒 32 | 实例 10 | 每秒计数器 22）
   # **不在栈变量里配**：它由中心「绑定客户」时的 `wp_ins_id` 下发，gwlinkd 落到 wparse 工作根

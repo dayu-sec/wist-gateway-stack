@@ -3,6 +3,24 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.13-alpha] - 2026-11-25
+
+**容器日志加轮转：json-file 默认无上限，现场单个容器 19 天攒到 13 GB。**
+
+- `sys/docker-compose.yml` 新增 `x-logging` 锚点并挂到全部 8 个服务：
+  `driver=json-file` + `max-size=50m` + `max-file=3`（每个容器最多 150 MB）。
+  现场实测：`victoria-metrics` 容器的 json 日志从 11-05 累积到 **13.3 GB**，
+  把 50G 的系统盘写到 84%（只剩 7.6G）；截断后磁盘回到 31%。
+- 组件版本不变（`GATEWAY_TAG` / `WEB_TAG` / `WPARSE_TAG` / `VM_TAG`）。
+
+### 升级注意（既有站点的磁盘）
+
+- 另一半占用来自 `data-plane-run/work`：入口用 `cp -R --update=none`，种子**只补缺失、
+  不覆盖现场**，所以装机时的旧配置会一直留着。旧版 `raw.toml`/`parsed.toml` 的产物
+  `raw.json` / `gateway.json`（实测 6.9G + 4.8G）与无轮转的 `monitor.dat`（940M）都出自这里。
+- 处置：删掉已无配置引用的旧产物；再把 `sys/data-plane/topology`（sinks/sources）同步到
+  工作根（以种子为准），**不要**动 `models/`（那里是项目远端内容）。
+
 ## [0.19.12-alpha] - 2026-11-24
 
 **修 `check-data-plane.sh`：`wparse check` 真跑起来后，先被两个 compose-only 变量挡住。**

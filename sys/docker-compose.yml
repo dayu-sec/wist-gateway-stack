@@ -41,12 +41,22 @@
 # 也管不到容器内的进程（网关自己的 `flock` 锁在容器里是独立的一把，见
 # `wist-gateway/src/infra/single_instance.rs` 与下面 wparse 那段的同一思路）。
 
+# 容器日志轮转：docker 的 json-file 默认**无上限**（现场实测 victoria-metrics 一个容器
+# 19 天攒了 13 GB，50G 的盘写到 84%）。日志只用于排障，不需要无限历史：
+# 每个容器 50MB × 3 份 = 最多 150MB。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # ── 观测：指标 ──
   victoria-metrics:
     container_name: wist-gateway-stack-vm
 #    image: victoriametrics/victoria-metrics:${VM_TAG}
     image: ${VM_SPC}/victoria-metrics:${VM_TAG}
+    logging: *default-logging
     restart: unless-stopped
     ports:
       - "${VM_PORT}:8428"
@@ -108,6 +118,7 @@ services:
   wparse-volume-init:
     container_name: wist-gateway-stack-wparse-volume-init
     image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
+    logging: *default-logging
     user: "0:0"
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
@@ -122,6 +133,7 @@ services:
   wparse-run-init:
     container_name: wist-gateway-stack-wparse-run-init
     image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
+    logging: *default-logging
     user: "999:999"
     restart: "no"
     depends_on:
@@ -163,6 +175,7 @@ services:
   wparse:
     container_name: wist-gateway-stack-wparse
     image: ${WARP_SPC}/warp-parse:${WPARSE_TAG}
+    logging: *default-logging
     # 运行身份显式钉死（镜像里是 wparse）；宿主侧按同一 gid 对齐权限，见文件头「运行身份」
     user: "999:999"
     restart: unless-stopped
@@ -306,6 +319,7 @@ services:
   harvest-bootstrap:
     container_name: wist-gateway-stack-harvest-bootstrap
     image: ${WIST_SPC}/wist-harvest:${HARVEST_TAG}
+    logging: *default-logging
     user: "999:999"
     restart: "no"
     depends_on:
@@ -335,6 +349,7 @@ services:
   harvest:
     container_name: wist-gateway-stack-harvest
     image: ${WIST_SPC}/wist-harvest:${HARVEST_TAG}
+    logging: *default-logging
     # 与 gateway / wparse 同一运行身份（宿主目录按 999 对齐）
     user: "999:999"
     restart: unless-stopped
@@ -377,6 +392,7 @@ services:
   # ── 控制面后端 ──
   gateway:
     container_name: wist-gateway-stack-gateway
+    logging: *default-logging
     # 本地零配置联调可换成 bootstrap 镜像（image 改成 wist-gateway:bootstrap）
     image: ${WIST_SPC}/wist-gateway:${GATEWAY_TAG}
     # 运行身份显式钉死（镜像里是 wist）；宿主侧按同一 gid 对齐权限，见文件头「运行身份」
@@ -449,6 +465,7 @@ services:
   web:
     container_name: wist-gateway-stack-web
     image: ${WIST_SPC}/wist-gateway-web:${WEB_TAG}
+    logging: *default-logging
     restart: unless-stopped
     environment:
       # 时区：nginx 的 access/error log 用本地时间（见 scripts/init-timezone.sh 说明）。

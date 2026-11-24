@@ -9,6 +9,8 @@
 #   3. 检查通过 → exit 0，并且**种子与工作根各跑一次**、都是只读挂载；
 #   4. docker 不可用（没装 / daemon 没起）→ 跳过（本地开发不该被拦），但要打出来；
 #   5. 镜像不在本地 → 先 pull；pull 也失败 → exit 1（部署时同样缺这个镜像）。
+#   6. 退出码分开报：`1` = 语义问题（重复 matcher）、`2` = 配置加载失败（变量 / endpoint）；
+#      并把 **compose 注入的两个端点**显式传给检查容器（它们不在 `.env` 里，少了就会误红）。
 #
 #   dev/tests/data-plane-check.test.sh
 set -euo pipefail
@@ -71,15 +73,25 @@ grep -q 'check --help' "${TMP}/old-image.log" || bad "没有探测 check 子命�
 grep -q 'check --work-root' "${TMP}/old-image.log" && bad "探测失败时仍跑了实际检查"
 grep -q 'skip:' "${TMP}/old-image.out" || bad "跳过没有被说出来"
 
-echo "== 2) 检查失败 → exit 1 =="
+echo "== 2) 检查失败（exit 1，语义）→ exit 1，点名处置 =="
 run_case check-fail 1 env FAKE_HELP_RC=0 FAKE_CHECK_RC=1
 grep -q 'check --work-root' "${TMP}/check-fail.log" || bad "没有跑实际检查"
-grep -q '种子与工作根都要删' "${TMP}/check-fail.out" || bad "失败时没有给出处置"
+grep -q '种子与工作根都要改' "${TMP}/check-fail.out" || bad "失败时没有给出处置"
+grep -q '语义问题' "${TMP}/check-fail.out" || bad "退出码 1 没有报成语义问题"
+
+echo "== 2b) 配置加载失败（exit 2）→ 不能误报成重复绑定 =="
+run_case check-load-fail 1 env FAKE_HELP_RC=0 FAKE_CHECK_RC=2
+grep -q '配置加载失败' "${TMP}/check-load-fail.out" || bad "退出码 2 没报成配置加载失败"
+grep -q '两个 sink 分组绑定' "${TMP}/check-load-fail.out" && bad "退出码 2 被误报成重复绑定"
 
 echo "== 3) 检查通过 → exit 0，且两棵树各跑一次、都是只读挂载 =="
 run_case check-ok 0 env FAKE_HELP_RC=0 FAKE_CHECK_RC=0
 for want in "/check" "/work" ":ro"; do
   grep -q -- "${want}" "${TMP}/check-ok.log" || bad "调用里缺 ${want}（日志：$(cat "${TMP}/check-ok.log")）"
+done
+# 这两个端点只由 compose 注入（不在 .env）：不显式传，引擎会因 http.endpoint 不是 http(s) 直接失败。
+for want in "WPARSE_VM_ENDPOINT=" "WPARSE_GATEWAY_ENDPOINT="; do
+  grep -q -- "${want}" "${TMP}/check-ok.log" || bad "没把 ${want} 传给检查容器（日志：$(cat "${TMP}/check-ok.log")）"
 done
 n="$(grep -c 'check --work-root' "${TMP}/check-ok.log" || true)"
 [[ "${n}" -eq 2 ]] || bad "期望种子 + 工作根各一次，实际 ${n} 次"

@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.9-alpha] - 2026-11-24
+
+**网关 0.58.1 + 前端 0.45.1。**
+
+- `GATEWAY_TAG` v0.58.0-alpha → **v0.58.1-alpha**：
+  - 命令队列行带 `action_id`（页面可跳执行详情）；
+  - 签发成功但入队失败时回滚「已签发」，那张单可以重签；
+  - 结果已入库但命令未结单时回 5xx（agent 重发，队列不会永远停在「执行中」）。
+- `WEB_TAG` 保持 **v0.45.1-alpha**：审批终端包录入入口、命令队列的「详情」、
+  发起响应链路修复（授权单缺口的去签入口 / 计划窗口对齐审批 TTL）与多页文案精简。
+- `agentd` 建议同批升到 **v0.43.0-alpha**：macOS 上 `disk.cleanup.apply` 从「下发即 rejected」变成真的能执行。
+
 ## [0.19.8-alpha] - 2026-11-23
 
 **修复：「安装与钥匙」tab 里安装区块被推到了下方。**

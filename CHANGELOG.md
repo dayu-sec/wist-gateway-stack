@@ -3,6 +3,18 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.12-alpha] - 2026-11-24
+
+**修 `check-data-plane.sh`：`wparse check` 真跑起来后，先被两个 compose-only 变量挡住。**
+
+- 0.19.11 把 `WPARSE_TAG` 升到 0.37.0-alpha 后，闸门从「跳过」变成「真跑」，CI 立刻红：
+  种子里的 `${WPARSE_VM_ENDPOINT}` / `${WPARSE_GATEWAY_ENDPOINT}` **只由 `sys/docker-compose.yml`
+  注入**，而检查容器只带 `.env`，`http.endpoint` 拿不到 http(s) 前缀，引擎以配置错误退出。
+- `scripts/check-data-plane.sh` 显式传入这两个端点（值与 compose 一致，调用方用同名环境变量
+  可覆盖），并对退出码分开报错：`1` = 语义问题（重复 matcher，会静默丢富化）、
+  `2` = 配置加载失败（`${VAR}` 解析不到 / endpoint 不是 http(s) / `wparse.local.toml` 写错）。
+  原来一律说成“同一个 oml matcher 被两个组绑定”，会把配置错误误报成语义问题。
+
 ## [0.19.11-alpha] - 2026-11-24
 
 **数据面引擎升到 wparse 0.37.0-alpha，`wparse check` 闸门从此真正生效。**

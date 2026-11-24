@@ -81,6 +81,14 @@ if [ -f "${ENV_FILE}" ]; then
   env_flag="--env-file ${ENV_FILE}"
 fi
 
+# 这两个端点**只由 compose 注入**（不在 .env / vars 里）：`wparse check` 要判 `http.endpoint`
+# 是不是 http(s)，解析不到就会以配置错误直接失败（0.19.11 升级到 0.37.0-alpha 时第一次暴露）。
+# 值与 `sys/docker-compose.yml` 的 wparse 服务一致；调用方显式设了就以调用方为准。
+endpoint_flags=(
+  -e "WPARSE_VM_ENDPOINT=${WPARSE_VM_ENDPOINT:-http://victoria-metrics:8428}"
+  -e "WPARSE_GATEWAY_ENDPOINT=${WPARSE_GATEWAY_ENDPOINT:-http://gateway:3001}"
+)
+
 # 特性探测：没有 `check` 子命令的老镜像直接跳过（不阻塞升级，也不再需要改脚本）。
 # shellcheck disable=SC2086  # env_flag 为空时要整段消失
 if ! docker run --rm --network none --entrypoint wparse ${env_flag} \
@@ -91,11 +99,26 @@ fi
 
 run_check() { # $1=宿主目录 $2=容器内挂载点 $3=说明
   echo "   - $3：$1"
+  local rc=0
   # shellcheck disable=SC2086  # env_flag 同上
-  if ! docker run --rm --network none --entrypoint wparse ${env_flag} \
-    -v "$1:$2:ro" "${image}" check --work-root "$2"; then
-    echo "错误：数据面配置检查未通过 —— 同一个 oml matcher 被两个 sink 分组绑定" >&2
-    echo "      处置：按上面 [FAIL] 点名的文件删掉旧的那份（种子与工作根都要删），再重跑" >&2
+  docker run --rm --network none --entrypoint wparse ${env_flag} "${endpoint_flags[@]}" \
+    -v "$1:$2:ro" "${image}" check --work-root "$2" || rc=$?
+  if [ "${rc}" -ne 0 ]; then
+    # 退出码要分开说：`1` 是语义问题（重复 matcher 那类，会静默丢富化），
+    # `2` 是配置加载失败（${VAR} 解析不到 / endpoint 不是 http(s) / local.toml 写错）。
+    # 原先一律说成“同一个 oml matcher 被两个组绑定”，把配置错误也误报成语义问题。
+    case "${rc}" in
+      1)
+        echo "错误：数据面配置有语义问题（check 退出码 1）—— 常见：同一个 oml matcher 被两个 sink 分组绑定（引擎不报错、只静默丢 OML 富化）" >&2
+        ;;
+      2)
+        echo "错误：数据面配置加载失败（check 退出码 2）—— 常见：\${VAR} 解析不到 / endpoint 不是 http(s) / wparse.local.toml 写错" >&2
+        ;;
+      *)
+        echo "错误：数据面配置检查未通过（check 退出码 ${rc}）" >&2
+        ;;
+    esac
+    echo "      处置：按上面引擎输出改配置（种子与工作根都要改），再重跑" >&2
     exit 1
   fi
 }

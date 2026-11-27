@@ -1,0 +1,20 @@
+name : agent_uplink_flow_frame
+rule : agent_uplink/agent_uplink_flow_frame
+---
+schema = read(schema);
+agent = read(agent);
+ts = read(ts);
+seq = read(seq);
+event_id = read(wp_event_id);
+now = Now::time() | Time::to_ts_ms;
+dev_ip = read(wp_src_ip);
+dev_vendor = read(dev_vendor);
+dev_name = read(dev_name);
+dev_type = read(dev_type);
+log_type = read(log_type);
+log_desc = read(log_desc);
+// 流记录正文保持**原样字符串**（与事实/快照/报告同一口径）：形状由
+// `wist-contracts::host_flow`（`wist.host_flow/v1`）定义，数据面只搬不建模。
+// 下一期才做五元组/字节数的字段建模与落库（设计 §4 第②层）；
+// 云侧身份富化属于平台（第③层），**不在数据面**。
+body = read(body);

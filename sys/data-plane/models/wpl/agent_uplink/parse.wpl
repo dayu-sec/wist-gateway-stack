@@ -75,4 +75,25 @@ package agent_uplink {
             chars:body\0
         )
     }
+
+    // 主机流记录（agentd ` FLOW: ` 帧）。正文是 `wist.host_flow/v1` 的一条窗口记录。
+    //
+    // 与事实/快照/报告同一条纪律：**不拆字段**。理由有二：
+    //   1. 形状只有一处定义（`wist-contracts::host_flow`），数据面再拆一遍必然漂；
+    //   2. 首版只需要“接住”：五元组/字节数的字段建模与落库是下一期（设计 §4 第②层）。
+    // 没有这条规则时，帧会被 `copy_event_parse` 兜到 `raw_log`（当路日志搬，占日志保留期）——
+    // 那才是真正的“静默丢”。
+    #[tag(dev_type: "主机流记录", log_desc: "Agent 主机流记录帧", log_type: "agent_uplink_flow_frame")]
+    rule agent_uplink_flow_frame {
+        (
+            json(
+                chars@schema,
+                chars@agent,
+                chars@ts,
+                digit@seq,
+            ),
+            symbol(FLOW:),
+            chars:body\0
+        )
+    }
 }

@@ -1,0 +1,33 @@
+# Agent 主机流记录（wist-agentd ` FLOW: ` 帧）独立 sink 分组。
+#
+# 首版（P0）只做「**接住**」：落本地 JSONL，正文 `body` 原样保存 —— 形状由
+# `wist-contracts::host_flow`（`wist.host_flow/v1`）定义，字段建模/入库/云侧身份富化
+# 都是下一期（见 wist-agentd `docs/design/host-ebpf-flow-collection.md` §4/§15）。
+#
+# 为什么必须单独分组：不配这条路由时，帧会被 `copy_event_parse` 兜进 `raw_log`
+# —— 那会把流记录当日志搬（占日志保留期、下游也抽不出五元组）。
+#
+# 与 agent-facts / agent-dsnap / agent-ivsrep 同一落点约定：不另开目录，
+# 落在 file sink 默认的 `./data/out_dat/agent-flows.jsonl`
+#   → 宿主 data-plane-run/data/out_dat/
+#   → 网关容器 /data-plane/data/out_dat/（compose 只读挂载整棵 data/）
+#
+# 暂不挂 http-gateway：网关还没有 `agent-flows` 接入端点（与 `agent-facts` 的
+# `/api/v1/ingest/agent-facts` 并列的那个）。等数据面接入身份校验方案定档后一起加。
+[sink_group]
+name = "agent-flows"
+oml = ["agent_uplink_flow_frame"]
+tags = ["biz:agent-flows"]
+batch_size = 1
+batch_timeout_ms = 300
+
+[[sink_group.sinks]]
+name = "json-file"
+connect = "file_json_sink"
+tags = ["sink:json"]
+
+[sink_group.sinks.params]
+file = "agent-flows.jsonl"
+max_size = "100MB"
+max_rolls = 1
+roll_compress = "gzip"

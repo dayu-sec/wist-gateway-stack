@@ -3,6 +3,34 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.15-alpha] - 2026-11-27
+
+**数据面开始接住 agentd 的 ` FLOW: ` 帧（主机流记录）。**
+
+- `models/wpl/agent_uplink/parse.wpl` 新增 `agent_uplink_flow_frame`：认 ` FLOW: ` 标记，
+  正文按**原样字符串**进 `body`（与 `OBSFACT` / `IVSREP` 同一条纪律，数据面不拆字段）。
+  在此之前的这类帧会被 `copy_event_parse` 兜进 `raw_log`（当路由日志搬，占日志保留期）。
+- 新增同名 OML 与 `business.d/agent_flows.toml` sink 分组 → `data/out_dat/agent-flows.jsonl`。
+  **只落本地文件**：网关还没有 `agent-flows` 接入端点。
+- 模型包版本 1.1.0 → **1.2.0**；新增 `dev/tests/agent-uplink-flow.test.sh`（真 wparse 解析一帧，
+  断言路由 / 信封三字段 / 正文的 `record_schema` 与 `collector_instance_id`）。
+- 组件镜像 tag 不变（`GATEWAY_TAG` / `WEB_TAG` / `WPARSE_TAG` / `VM_TAG`）。
+
+### 升级注意（已在跑的站点要手动换一次 `parse.wpl`）
+
+`models/` 是**种子**：容器入口用 `cp -R --update=none`，**已存在的运行态文件不会被覆盖**。
+新增的 OML 与 sink 文件缺失会被自动补上，但 **`parse.wpl` 是改过的文件** ——
+不手动换，新规则就不会生效（症状：流记录一直落 `raw_log`，`agent-flows.jsonl` 永远不出现）。
+
+```bash
+cd <stack-root>
+rm -f data-plane-run/work/models/wpl/agent_uplink/parse.wpl
+gops run start          # 入口会把删掉的种子补回去，且不影响其它运行态
+```
+
+> 不自动做这件事的原因：`--update=none` 是**有意**的设计（现场对模型的覆盖不能被升级抹掉）；
+> 哪几个文件属于“机制性必须更新”应由模型包版本 + 发布说明来声明，而不是让入口无脑覆盖。
+
 ## [0.19.14-alpha] - 2026-11-25
 
 **前端 0.45.2：菜单与页面归位。**

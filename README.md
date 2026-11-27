@@ -39,12 +39,12 @@
 |---|---|---|---|
 | `gateway` | 控制面后端（HTTPS API，rustls） | `${GATEWAY_PORT}:3000` | `dy-sec.tencentcloudcr.com/cloud/wist-gateway` |
 | `web` | 前端入口（nginx：TLS + 静态 + `/api` 反代） | `${WEB_PORT}:443`（HTTPS） | `dy-sec.tencentcloudcr.com/cloud/wist-gateway-web` |
-| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口）<br>`${WPARSE_SYSLOG_TCP_PORT}:1514/tcp`（syslog TCP 采集）<br>`${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（syslog UDP 采集）<br>`127.0.0.1:${WPARSE_ADMIN_PORT}:19090`（本机管理面） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WPARSE_IMAGE`） |
+| `wparse` | 数据平台 ELT 引擎 | `${WPARSE_PORT}:9000`（agent 数据入口）<br>`${WPARSE_SYSLOG_TCP_PORT}:1514/tcp`（syslog TCP 采集）<br>`${WPARSE_SYSLOG_UDP_PORT}:1514/udp`（syslog UDP 采集）<br>`127.0.0.1:${WPARSE_ADMIN_PORT}:19090`（本机管理面） | 上游 `ghcr.io/wp-labs/warp-parse`（变量 `WARP_SPC` + `WPARSE_TAG`） |
 | `victoria-metrics` | 指标存储 | `${VM_PORT}:8428` | `victoriametrics/victoria-metrics` |
 
 > **镜像两处源**：两个发布流水线都双推 —— `ghcr.io/dayu-sec/*`（境外）与 `dy-sec.tencentcloudcr.com/cloud/*`（腾讯云 TCR，国内快）。compose 里的镜像源与 tag 都是变量：改**产品默认**改 `sys/setting/vars.yml`（默认 TCR），改**本环境用什么**改 `values/value.yml`（推荐，一条命令生效，见「变量与本地化」）。
 >
-> **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`，**没有 TCR 镜像**）—— 拉不到 ghcr.io 的环境把 `WPARSE_IMAGE` 指到内网镜像仓库（先把同版本镜像同步过去）即可，`WPARSE_TAG` 不变。它还与 `sys/data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.35.3-alpha`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `sys/data-plane/` 一起升**。
+> **wparse 不同**：它是**上游镜像**（默认 `ghcr.io/wp-labs/warp-parse`）—— 拉不到 ghcr.io 的环境把 `WARP_SPC` 指向 `dy-sec.tencentcloudcr.com/cloud`（本项目发布时会把同版本同步一份到 TCR；换其它版本仍需先同步）即可，`WPARSE_TAG` 不变。它还与 `sys/data-plane/` **强耦合**：引擎版本一变，`conf/connectors/models/topology` 的 schema 可能跟着变，所以 `WPARSE_TAG` 必须钉版本（当前 `0.38.2-alpha`，与开发态 `dev/bin/wparse` 同 commit），升级时**连同 `sys/data-plane/` 一起升**。
 >
 > **挂载约定**（镜像里 `/data` 属非 root 用户 `wparse`(uid 999)）：`sys/data-plane/` 是**只读种子**，
 > 启动时把 `conf/connectors/models/topology` 与项目根的 `wparse.local.toml` 复制到可写运行根 `${WPARSE_RUN_WORK} → /data`

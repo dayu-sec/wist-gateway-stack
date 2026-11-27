@@ -3,6 +3,25 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.16-alpha] - 2026-11-27
+
+**数据面引擎 `WPARSE_TAG` 0.37.0-alpha → 0.38.2-alpha（四个版本）。本栈无需改配置。**
+
+- `WPARSE_TAG` `0.37.0-alpha` → **`0.38.2-alpha`**，之间几个版本对使用者的变化：
+  - **0.37.1**：OML 新增 `hex_decode` 管道（把 hex 字符串还原成 UTF-8，非合法输入保留原值），
+    适合「JSON 字段里的载荷被转成 hex」这类厂商日志；
+  - **0.38.0**：OML 新增 `mask_text(kind)` —— 在日志行/HTTP 报文这类**混合文本**里只脱敏
+    识别到的片段，`mask(kind)` 的整值语义不变；`wp-connectors` 升到 0.25.0（Kafka Source
+    支持 SASL_SSL）；
+  - **0.38.2**：TCP/TLS sink 新增 `max_connection_age_secs`，超龄后下次写入前重连并重新读取
+    `tls.cert`/`tls.key`/`tls.ca`，客户端证书轮换不必重启进程（TLS 默认 24 小时、纯文本默认关）。
+    **本栈 sink 全是 file / gateway / vm，没有启用的 TCP/TLS sink，这条对现网无行为变化。**
+- 已验证：`./scripts/check-data-plane.sh` 用**新镜像**跑过种子与运行态工作根，退出 0
+  （`wparse check` 的 WPL/OML 解析与 sink 路由校验全过）。
+- 镜像已在 TCR：`dy-sec.tencentcloudcr.com/cloud/warp-parse:0.38.2-alpha`（上游镜像，
+  不在 wist 流水线里），**不需要**再跑 `dev/push-images.sh` 同步。
+- `GATEWAY_TAG` / `WEB_TAG` / `VM_TAG` / `HARVEST_TAG` 不变。
+
 ## [0.19.15-alpha] - 2026-11-27
 
 **数据面开始接住 agentd 的 ` FLOW: ` 帧（主机流记录）。**

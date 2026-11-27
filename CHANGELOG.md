@@ -3,6 +3,19 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.17-alpha] - 2026-11-27
+
+**网关 0.58.2（采集授权修复）+ 前端 0.45.3（HostFlow 可采判据）。本栈无需改配置。**
+
+- `GATEWAY_TAG` `v0.58.1-alpha` → **`v0.58.2-alpha`**：修复「日志文件在、auditd 也在跑，
+  授权采集却一直 `409 ... match_unsatisfied(path_exists:...)`」——一次旧的「路径实测」
+  （预检回传）不再压过 agentd 每 5 分钟上报的新事实；409 触发的自动重探也覆盖了「实测过期」，
+  现场不必再自己去点「预检」。（路径判据三态、预检与授权同源均未变。）
+- `WEB_TAG` `v0.45.2-alpha` → **`v0.45.3-alpha`**：工作授权页的来源可采判据认得 `HostFlow`
+  （`target` 只认空 / `auto`，与 contracts 同口径），不可采时给出可操作原因，不再显示成「未知类型」。
+
+**升级注意**：只换镜像 tag，无栈配置变更；升级后不需要 `localize`，也无需重建其它服务。
+
 ## [0.19.16-alpha] - 2026-11-27
 
 **数据面引擎 `WPARSE_TAG` 0.37.0-alpha → 0.38.2-alpha（四个版本）。本栈无需改配置。**

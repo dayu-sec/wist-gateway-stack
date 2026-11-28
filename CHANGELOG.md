@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.18-alpha] - 2026-11-28
+
+**网关 0.59.0（容器指标面 + 导出器策略 + 批量安装）+ 前端 0.46.0（容器指标面 + 批量安装）。本栈无需改配置。**
+
+- `GATEWAY_TAG` `v0.58.2-alpha` → **`v0.59.0-alpha`**：采集面多了一个独立的「容器指标」面；
+  指标域「空集」不再把整面报成部分失败；导出器的二进制搜索目录 / 节奏可由知识库下发；
+  管理面新增批量安装码（短时多机、台数上限、可一键作废）。
+- `WEB_TAG` `v0.45.3-alpha` → **`v0.46.0-alpha`**：容器指标面的可采判据与不可采原因；
+  安装页新增「批量安装」模式。
+- 无 `VM_TAG` / `WPARSE_TAG` 变更：`./dev/push-images.sh --dry-run` 无待推项。
+
+**升级注意**：只换镜像 tag，无栈配置变更；升级后不需要 `localize`。
+**知识库包要与本栈同批跟进**：带 `ContainerMetrics` 单元的包要求网关 ≥ 0.59.0、agentd ≥ 0.45.0
+（`wist-knowledge` 的 `compat.json` 已把 `requires.wist-gateway` 抬到 `>=0.59.0`）。
+
 ## [0.19.17-alpha] - 2026-11-27
 
 **网关 0.58.2（采集授权修复）+ 前端 0.45.3（HostFlow 可采判据）。本栈无需改配置。**

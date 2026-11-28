@@ -3,6 +3,31 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.21-alpha] - 2026-11-28
+
+**数据面模型 1.2.0 → 1.3.0：` FLOW: ` 的规则/OML 改名，并给记录补上 `cust_id`。**
+
+### 变更（数据面模型，breaking）
+
+- `agent_uplink_flow_frame` 改名为 **`agent_uplink_flow`**（与 `agent_uplink_obs_fact` /
+  `agent_uplink_ivsrep` 一致，不带 `_frame`）：WPL 规则名、`log_type` tag、OML 目录与
+  `name` / `rule`、`agent-flows` 分组的 `oml = [...]` 一起改。
+  **站点 infra 仓若按旧名引用（`oml = ["agent_uplink_flow_frame"]`），升级时要同步改**，
+  否则该分组匹配不到记录。
+- `agent_uplink_flow` 的 OML 补 `cust_id = read(tenant_id) { _ : chars("unknown") }`
+  （与 `agent_uplink_obs_dsnap` / `agent_uplink_ivsrep` 同一条写法）：站点把 sink 接到
+  计算区证据服务时，分流客户的键就在记录里。未绑定租户时是 `unknown`，证据服务会按
+  "未登记客户"拒。
+- 模型包版本 **1.2.0 → 1.3.0**（规则名变更）。
+
+### 不变
+
+- 种子仍然**不给 `agent-flows` 配 field 投递**（门禁 `sinks-no-field-delivery.test.sh`）：
+  种子里只有 `file_json_sink`，站点在自己的 infra 仓里接
+  `connect = "wist-field-evidence"` + 覆盖 `endpoint` 到 `/internal/flows` 即可。
+- 组件镜像 tag 全部不变（`GATEWAY_TAG` / `WEB_TAG` / `WPARSE_TAG` / `VM_TAG` / `HARVEST_TAG`），
+  本版只动数据面模型与 CHANGELOG。
+
 ## [0.19.20-alpha] - 2026-11-28
 
 **网关 0.60.0（批量安装码默认 5 分钟）+ 前端 0.47.0（「处置」措辞、撤回去红）。本栈无需改配置。**
@@ -17,14 +42,6 @@
 
 **升级注意**：`gops sys localize` → `gops run start` 只重建 gateway / web 两个容器；
 现场 `.env` 里的旧 tag 会被 `localize` 按新默认值重写（`.env` 不入库）。
-
-### 变更（数据面模型）
-
-- `agent_uplink_flow_frame` 改名为 **`agent_uplink_flow`**：WPL 规则名 / `log_type` tag / OML
-  目录与 `name` / `rule` / `agent-flows` 分组的 `oml = [...]` 一起改。
-  与其它面一致（`agent_uplink_obs_fact` / `agent_uplink_ivsrep` 都不带 `_frame`）。
-  模型包版本 **1.2.0 → 1.3.0**（规则名变更属于 breaking）。
-  站点若在自己的 infra 仓里按旧名引用（`oml = ["agent_uplink_flow_frame"]`），升级时要跟着改。
 
 ## [0.19.19-alpha] - 2026-11-28
 

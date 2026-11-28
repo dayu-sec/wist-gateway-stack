@@ -83,8 +83,8 @@ package agent_uplink {
     //   2. 首版只需要“接住”：五元组/字节数的字段建模与落库是下一期（设计 §4 第②层）。
     // 没有这条规则时，帧会被 `copy_event_parse` 兜到 `raw_log`（当路日志搬，占日志保留期）——
     // 那才是真正的“静默丢”。
-    #[tag(dev_type: "主机流记录", log_desc: "Agent 主机流记录帧", log_type: "agent_uplink_flow_frame")]
-    rule agent_uplink_flow_frame {
+    #[tag(dev_type: "主机流记录", log_desc: "Agent 主机流记录帧", log_type: "agent_uplink_flow")]
+    rule agent_uplink_flow {
         (
             json(
                 chars@schema,

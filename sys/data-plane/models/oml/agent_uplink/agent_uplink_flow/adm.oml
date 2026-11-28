@@ -1,5 +1,5 @@
-name : agent_uplink_flow_frame
-rule : agent_uplink/agent_uplink_flow_frame
+name : agent_uplink_flow
+rule : agent_uplink/agent_uplink_flow
 ---
 schema = read(schema);
 agent = read(agent);

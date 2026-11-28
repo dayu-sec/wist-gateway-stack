@@ -18,6 +18,14 @@
 **升级注意**：`gops sys localize` → `gops run start` 只重建 gateway / web 两个容器；
 现场 `.env` 里的旧 tag 会被 `localize` 按新默认值重写（`.env` 不入库）。
 
+### 变更（数据面模型）
+
+- `agent_uplink_flow_frame` 改名为 **`agent_uplink_flow`**：WPL 规则名 / `log_type` tag / OML
+  目录与 `name` / `rule` / `agent-flows` 分组的 `oml = [...]` 一起改。
+  与其它面一致（`agent_uplink_obs_fact` / `agent_uplink_ivsrep` 都不带 `_frame`）。
+  模型包版本 **1.2.0 → 1.3.0**（规则名变更属于 breaking）。
+  站点若在自己的 infra 仓里按旧名引用（`oml = ["agent_uplink_flow_frame"]`），升级时要跟着改。
+
 ## [0.19.19-alpha] - 2026-11-28
 
 **初始知识包默认值跟进到 `v0.14.0-alpha`（容器指标面 + `exporters.toml`）。只改出厂预置，不动运行中的配置。**

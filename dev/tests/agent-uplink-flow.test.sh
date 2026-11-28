@@ -2,7 +2,7 @@
 # 回归测试：`FLOW:`（主机流记录）能从 agentd 的发帧穿到 `agent-flows` 分组。
 #
 # 钉三件事：
-#   1. `agent_uplink` 的 WPL 认 ` FLOW: ` 标记、OML 产出 `agent_uplink_flow_frame` 记录；
+#   1. `agent_uplink` 的 WPL 认 ` FLOW: ` 标记、OML 产出 `agent_uplink_flow` 记录；
 #   2. `business.d/agent_flows.toml` 的路由真的命中（**没有被 `raw_log` 兜走**）；
 #   3. 信封字段（agent / seq / ts）与正文 `body` 原样保留（body 是 `wist.host_flow/v1`）。
 #
@@ -132,7 +132,7 @@ chk "一帧进 → 一条记录出" "1" "$(wc -l < "${OUT}" | tr -d ' ')"
 has '"agent":"agent-host-d97e23da6111"' "${line}" "信封 agent 原样保留"
 has '"seq":100231' "${line}" "信封 seq 保留（数据面去重的键）"
 has '"ts":"2026-11-26T04:16:42Z"' "${line}" "信封 ts 保留"
-has '"log_type":"agent_uplink_flow_frame"' "${line}" "log_type 命中流记录分组"
+has '"log_type":"agent_uplink_flow"' "${line}" "log_type 命中流记录分组"
 
 # 正文是契约对象原样（JSON **字符串**，引号被转义）。数据面不拆字段，靠它把这层留给下游。
 has 'record_schema\":\"wist.host_flow/v1' "${line}" "正文里的 record_schema 保留"

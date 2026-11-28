@@ -16,7 +16,7 @@
 # `/api/v1/ingest/agent-facts` 并列的那个）。等数据面接入身份校验方案定档后一起加。
 [sink_group]
 name = "agent-flows"
-oml = ["agent_uplink_flow_frame"]
+oml = ["agent_uplink_flow"]
 tags = ["biz:agent-flows"]
 batch_size = 1
 batch_timeout_ms = 300

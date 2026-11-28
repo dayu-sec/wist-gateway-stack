@@ -210,7 +210,11 @@ system:
   - name: ARTIFACT_HOME
     value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
   - name: KNOWLEDGE_PATH
-    value: v0.10.0-alpha/wist-knowledge-0.10.0-alpha.tar.gz
+    value: v0.14.0-alpha/wist-knowledge-0.14.0-alpha.tar.gz
+  # ⚠️ 默认包是 `-alpha`（成熟度 experimental），而下面的 `KNOWLEDGE_ALLOWED_MATURITY`
+  # 默认只放 `stable,unknown` —— 也就是**预置但默认不可激活**（故意的：生产不该自动启用
+  # 通道版内容）。要在测试/演示站直接激活，按原约定覆盖：
+  #   values/sys_value.yml → KNOWLEDGE_ALLOWED_MATURITY: stable,unknown,alpha
   # 允许录入/激活的知识包**成熟度**（网关 `[knowledge] allowed_maturity`，逗号分隔）。
   # 两种写法等价，localize 渲染时统一归一成规范值：
   #   规范值 `stable` / `preview` / `experimental` / `unknown`；
@@ -222,7 +226,7 @@ system:
     value: stable,unknown
   # 换源示例（**只改上一段**；COS 上必须已放好同相对路径的包）：
   #   ARTIFACT_HOME: https://github.com/dayu-sec/wist-knowledge/releases/download
-  #   KNOWLEDGE_PATH 保持 v0.10.0-alpha/wist-knowledge-0.10.0-alpha.tar.gz 不变
+  #   KNOWLEDGE_PATH 保持 v0.14.0-alpha/wist-knowledge-0.14.0-alpha.tar.gz 不变
 
   # ── gwlinkd（网关**宿主侧**常驻）接入上级控制中心的配置 ──
   #    **分两份**（与网关的 impl/pub 同口径）：

@@ -72,7 +72,7 @@ system:
 - name: ARTIFACT_HOME
   value: https://github-1347593047.cos.ap-hongkong.myqcloud.com/wist-knowledge
 - name: KNOWLEDGE_PATH
-  value: v0.10.0-alpha/wist-knowledge-0.10.0-alpha.tar.gz
+  value: v0.14.0-alpha/wist-knowledge-0.14.0-alpha.tar.gz
 - name: KNOWLEDGE_ALLOWED_MATURITY
   value: stable,unknown
 - name: GWLINKD_CENTER_ENDPOINT

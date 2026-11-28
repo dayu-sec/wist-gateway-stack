@@ -3,6 +3,21 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.20-alpha] - 2026-11-28
+
+**网关 0.60.0（批量安装码默认 5 分钟）+ 前端 0.47.0（「处置」措辞、撤回去红）。本栈无需改配置。**
+
+- `GATEWAY_TAG` `v0.59.0-alpha` → **`v0.60.0-alpha`**：批量安装码的**默认**有效期从 1 分钟放到 5 分钟
+  （上限仍 10 分钟）。只影响**部署默认值**：管理面设过「批量安装策略」的站点不受影响，
+  已经发出去的码仍按它签发时的窗口走。
+- `WEB_TAG` `v0.46.0-alpha` → **`v0.47.0-alpha`**：主机页 tab「响应」→「处置」（连带发起/授权/审批与面包屑）、
+  「一次性调查」→「调查」，采集工作卡的「撤回授权」不再用告警红；安装页的批量 Token 默认有效期文案
+  跟随网关改成 5 分钟。
+- 上游镜像无需动作：`VM_TAG` / `WPARSE_TAG` 未变，`dev/push-images.sh --dry-run` 为 **0 推 / 1 跳过**。
+
+**升级注意**：`gops sys localize` → `gops run start` 只重建 gateway / web 两个容器；
+现场 `.env` 里的旧 tag 会被 `localize` 按新默认值重写（`.env` 不入库）。
+
 ## [0.19.19-alpha] - 2026-11-28
 
 **初始知识包默认值跟进到 `v0.14.0-alpha`（容器指标面 + `exporters.toml`）。只改出厂预置，不动运行中的配置。**

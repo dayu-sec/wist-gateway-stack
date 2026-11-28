@@ -42,9 +42,12 @@ roll_compress = "gzip"
 # `agent-flows.jsonl` 补投。
 [[sink_group.sinks]]
 name = "field-flows"
-connect = "wist-field-flows"
+# 复用证据连接器（同一服务）：只覆盖 path 与批量 —— `wist-field-evidence` 的
+# `allow_override` 已包含 `endpoint` / `batch_size`。
+connect = "wist-field-evidence"
 drop_when_error = true
 tags = ["sink:field"]
 
 [sink_group.sinks.params]
+endpoint = "${FIELD_EVIDENCE_URL:http://host.docker.internal:18800}/internal/flows"
 batch_size = 64

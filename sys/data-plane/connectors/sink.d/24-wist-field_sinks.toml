@@ -39,30 +39,10 @@ compression = "none"
 [connectors.params.headers]
 Content-Type = "application/json"
 
-# 主机流记录：POST /internal/flows，形状 `[{cust_id, body}]`（与证据写同一套三字段纪律，
-# 只是表不同：`flow_window` 天分区，按 11 段业务键 upsert）。
-#
-# 为什么不走 `/internal/evidence`：那条路径是「一份产物一个对象」，流是每主机每 60s
-# 每五元组一条（百万级/天），按对象存会造出百万个小对象。见
-# `wist-design/doc/design/center/agent-flow-storage.md` §3 D4。
-#
-# `batch_size = 64`：一拍最多 4096 条，太小会把 per-request 开销乘上去；
-# 太大则一批失败丢得多（文件 sink 是底账，见 `business.d/agent_flows.toml`）。
-[[connectors]]
-allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
-id = "wist-field-flows"
-type = "http"
-
-[connectors.params]
-endpoint = "${FIELD_EVIDENCE_URL:http://host.docker.internal:18800}/internal/flows"
-method = "POST"
-fmt = "json"
-batch_size = 64
-timeout_secs = 5
-compression = "none"
-
-[connectors.params.headers]
-Content-Type = "application/json"
+# 主机流记录**复用** `wist-field-evidence`（同一服务、同一套明文/租户纪律），
+# 只在 sink 里覆盖 `endpoint` 到 `/internal/flows`、把 `batch_size` 调大
+# （见 `topology/sinks/business.d/agent_flows.toml`）。不另开连接器：
+# 它不是一个独立的投递类型 —— 换的只是 path 与批量。
 
 # 资产拓扑：POST /internal/atlas，两字段 `{cust_id, content}`。
 [[connectors]]

@@ -1,0 +1,24 @@
+# 网关内部接入端点 sink：把 agent-flows 分组（主机流记录）的 OML 记录 POST 到网关。
+#
+# 与 `22-gateway_facts_sink.toml` 同构，只是端点不同：流记录要在**网关**补 `cust_id`
+# （数据面拿不到客户绑定），再由网关转给证据服务。见
+# `wist-design/doc/design/center/agent-flow-storage.md` §2/§4。
+#
+# 仍然是明文 http://：wparse 的 http 连接器没有 TLS 参数，网关侧那条监听只绑环回。
+[[connectors]]
+allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
+id = "gateway_flows_sink"
+type = "http"
+
+[connectors.params]
+endpoint = "http://127.0.0.1:3001/api/v1/ingest/agent-flows"
+method = "POST"
+fmt = "json"
+# 与 facts 的 1 不同：流记录一批可以有几十条，单条一请求会把 per-request 开销乘上去。
+# 64 是"够小、能尽快落库"与"别把网关写爆"之间的起点值，吞吐上来再调。
+batch_size = 64
+timeout_secs = 5
+compression = "none"
+
+[connectors.params.headers]
+Content-Type = "application/json"

@@ -16,6 +16,16 @@ set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 STACK_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
+# 需要与 `WPARSE_TAG` 同代的 wparse：`agent_flows.toml` 用了 `drop_when_error`
+# （0.34 及更早会报 "load sink route confs"）。本地 `dev/bin/wparse` 可能偏旧，
+# 用 `WPARSE=/path/to/wparse` 指到新版。
+#
+# `agent_flows.toml` 除 file sink 外还挂了一个网关 sink（流记录要在网关补 `cust_id`）。
+# sink 里的端点来自 `${WPARSE_GATEWAY_ENDPOINT}`（与 `agent_facts.toml` 同一套词法），
+# 不设就会整份 sink 配置加载失败 —— 所以这里给一个必然连不到的本机地址：
+# 本用例**只断言 file sink 的输出**，网关那一侧由 `drop_when_error` 吸收。
+export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001}"
+
 WPARSE="${WPARSE:-${STACK_ROOT}/dev/bin/wparse}"
 DATA_PLANE="${STACK_ROOT}/sys/data-plane"
 WP_RULES="${WP_RULES:-${DATA_PLANE}}"

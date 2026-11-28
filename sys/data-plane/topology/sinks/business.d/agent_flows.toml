@@ -31,3 +31,18 @@ file = "agent-flows.jsonl"
 max_size = "100MB"
 max_rolls = 1
 roll_compress = "gzip"
+
+# 网关订阅：同一批 OML 记录 POST 到网关内部端点，由网关补 `cust_id` 再转证据服务。
+#
+# `drop_when_error = true` 与 facts 同理但理由不同：流记录**不重发**（窗口事实，agentd
+# 已经发完），rescue 堆起来没有意义；而同分组的 file sink 就是底账，丢的批次可以从
+# `agent-flows.jsonl` 补投。
+[[sink_group.sinks]]
+name = "http-gateway"
+connect = "gateway_flows_sink"
+drop_when_error = true
+tags = ["sink:gateway"]
+
+[sink_group.sinks.params]
+endpoint = "${WPARSE_GATEWAY_ENDPOINT}/api/v1/ingest/agent-flows"
+batch_size = 64

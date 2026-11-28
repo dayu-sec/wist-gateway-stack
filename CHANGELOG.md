@@ -3,6 +3,22 @@
 本文件记录 `wist-gateway-stack` 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.19.19-alpha] - 2026-11-28
+
+**初始知识包默认值跟进到 `v0.14.0-alpha`（容器指标面 + `exporters.toml`）。只改出厂预置，不动运行中的配置。**
+
+- `KNOWLEDGE_PATH` `v0.10.0-alpha/…` → **`v0.14.0-alpha/wist-knowledge-0.14.0-alpha.tar.gz`**：
+  `gops sys localize` 预拉取到 `packages/` 的出厂包跟上当前网关（0.59.0）能认的面集。
+  旧默认值停在 0.10.0，新站打开「知识库」页看到的还是三个月前的目录。
+- **默认仍不可直接激活**（有意）：该包成熟度是 `experimental`，而 `KNOWLEDGE_ALLOWED_MATURITY`
+  默认只放 `stable,unknown`。测试 / 演示站要在 UI 激活，按原约定覆盖：
+  `values/sys_value.yml → KNOWLEDGE_ALLOWED_MATURITY: stable,unknown,alpha`。生产站保持默认。
+- 制品源无需动作：`v0.14.0-alpha` 已由知识库仓 CI 同步到 COS
+  （对象的 `x-cos-meta-artifact-sha256` 与 Release 资产摘要一致）。
+
+**升级注意**：已在运行的站点**不需要**重新 `localize`（预置包只在初始化时用）；
+想手动换热包，把新包放进 `packages/` 后在「知识库」页录入即可。
+
 ## [0.19.18-alpha] - 2026-11-28
 
 **网关 0.59.0（容器指标面 + 导出器策略 + 批量安装）+ 前端 0.46.0（容器指标面 + 批量安装）。本栈无需改配置。**

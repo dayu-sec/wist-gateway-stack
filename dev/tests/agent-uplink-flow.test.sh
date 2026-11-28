@@ -20,11 +20,9 @@ STACK_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
 # （0.34 及更早会报 "load sink route confs"）。本地 `dev/bin/wparse` 可能偏旧，
 # 用 `WPARSE=/path/to/wparse` 指到新版。
 #
-# `agent_flows.toml` 除 file sink 外还挂了一个网关 sink（流记录要在网关补 `cust_id`）。
-# sink 里的端点来自 `${WPARSE_GATEWAY_ENDPOINT}`（与 `agent_facts.toml` 同一套词法），
-# 不设就会整份 sink 配置加载失败 —— 所以这里给一个必然连不到的本机地址：
-# 本用例**只断言 file sink 的输出**，网关那一侧由 `drop_when_error` 吸收。
-export WPARSE_GATEWAY_ENDPOINT="${WPARSE_GATEWAY_ENDPOINT:-http://127.0.0.1:3001}"
+# `agent_flows.toml` 除 file sink 外还挂了一个计算区 sink（`wist-field-flows`）。
+# 本用例**只断言 file sink 的输出**；field 那一侧由连接器的缺省地址 +
+# `drop_when_error` 吸收（不依赖现场变量）。
 
 WPARSE="${WPARSE:-${STACK_ROOT}/dev/bin/wparse}"
 DATA_PLANE="${STACK_ROOT}/sys/data-plane"
@@ -103,6 +101,12 @@ file = "monitor.dat"
 max = 1.0
 EOF
 
+# 租户绑定：`gwlinkd` 平时把身份写进工作根 `.env` 的 `WP_GLOBAL_TAGS`（全局 tag），
+# OML 的 `read(tenant_id)` 读的就是它（与 DSNAP / IVSREP 同一条机制；
+# 见 `agent-uplink-metric-labels.test.sh` 的同一段）。`WIST_TENANT_ID` 一并写，
+# 那是引擎注入记录级 `tenant_id` 用的。
+printf 'WP_GLOBAL_TAGS=tenant_id=1000000000000000001,wist-gw_id=X4/inst-1\nWIST_TENANT_ID=1000000000000000001\n' > "${WORK}/.env"
+
 mkdir -p "${WORK}/data/in_dat"
 cat > "${WORK}/data/in_dat/gen.dat" <<'EOF'
 {"schema":"v1","agent":"agent-host-d97e23da6111","ts":"2026-11-26T04:16:42Z","seq":100231} FLOW: {"record_schema":"wist.host_flow/v1","source":"host_ebpf","coverage":"host_partial","capture":"tc_egress","collector_instance_id":"agent-host-d97e23da6111","host_id":"host-d97e23da6111","host_name":"vm-web-01","kernel":"5.15.0-91-generic","ifname":"eth0","ifindex":2,"if_mac":"52:54:00:aa:bb:cc","local_addrs":["10.118.0.14"],"direction":"out","protocol":"6","srcaddr":"10.118.0.14","dstaddr":"88.214.25.121","srcport":"50123","dstport":"443","start":1789469760,"end":1789469820,"window_seconds":60,"packets":13,"bytes":1460,"wire_bytes_source":"unavailable","skb_count":4,"gso_skb_count":1,"truncated":false,"dropped":0}
@@ -134,6 +138,11 @@ has '"log_type":"agent_uplink_flow_frame"' "${line}" "log_type 命中流记录�
 has 'record_schema\":\"wist.host_flow/v1' "${line}" "正文里的 record_schema 保留"
 has 'collector_instance_id\":\"agent-host-d97e23da6111' "${line}" "正文里的 collector_instance_id 保留（幂等键）"
 has 'direction\":\"out' "${line}" "正文里的 direction 保留"
+
+# 客户归属：OML 用 `cust_id = read(tenant_id)`，租户由网关绑定时写进工作根 `.env`
+# （与 DSNAP / IVSREP 同一条机制）。未绑定时是占位 `unknown`，证据服务会按
+# "未登记客户"拒 —— 所以这个字段必须在。
+has '"cust_id":"1000000000000000001"' "${line}" "记录带 cust_id（客户归属，来自租户绑定）"
 
 if [[ "${fail}" -ne 0 ]]; then
   echo

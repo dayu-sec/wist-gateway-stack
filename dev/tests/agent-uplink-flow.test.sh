@@ -20,10 +20,9 @@ STACK_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
 # （0.34 及更早会报 "load sink route confs"）。本地 `dev/bin/wparse` 可能偏旧，
 # 用 `WPARSE=/path/to/wparse` 指到新版。
 #
-# `agent_flows.toml` 除 file sink 外还挂了一个计算区 sink（复用 `wist-field-evidence`
-# 连接器，只覆盖 `endpoint` 到 `/internal/flows`）。两路都要验：file sink 验解析，
-# stub 验「真的投到了 field、`cust_id` 是绑定值」（只验 file 的话，连接器写错会被
-# `drop_when_error` 吞掉）。
+# 种子里 `agent-flows` 分组**只有 file sink**：向计算区（field）的投递属于站点
+# infra 仓（门禁 `sinks-no-field-delivery.test.sh`），本用例不验那一侧。
+# 但记录里的 `cust_id` 必须在 —— 那是站点接上 field 之后分流客户的唯一依据。
 
 WPARSE="${WPARSE:-${STACK_ROOT}/dev/bin/wparse}"
 DATA_PLANE="${STACK_ROOT}/sys/data-plane"
@@ -34,7 +33,6 @@ if [[ ! -x "${WPARSE}" ]]; then
   echo "skip: wparse not found or not executable: ${WPARSE}" >&2
   exit 0
 fi
-command -v python3 >/dev/null 2>&1 || { echo "skip: python3 not found" >&2; exit 0; }
 [[ -f "${WP_RULES}/models/wpl/agent_uplink/parse.wpl" ]] || {
   echo "missing models: ${WP_RULES}" >&2
   exit 1
@@ -114,45 +112,7 @@ cat > "${WORK}/data/in_dat/gen.dat" <<'EOF'
 {"schema":"v1","agent":"agent-host-d97e23da6111","ts":"2026-11-26T04:16:42Z","seq":100231} FLOW: {"record_schema":"wist.host_flow/v1","source":"host_ebpf","coverage":"host_partial","capture":"tc_egress","collector_instance_id":"agent-host-d97e23da6111","host_id":"host-d97e23da6111","host_name":"vm-web-01","kernel":"5.15.0-91-generic","ifname":"eth0","ifindex":2,"if_mac":"52:54:00:aa:bb:cc","local_addrs":["10.118.0.14"],"direction":"out","protocol":"6","srcaddr":"10.118.0.14","dstaddr":"88.214.25.121","srcport":"50123","dstport":"443","start":1789469760,"end":1789469820,"window_seconds":60,"packets":13,"bytes":1460,"wire_bytes_source":"unavailable","skb_count":4,"gso_skb_count":1,"truncated":false,"dropped":0}
 EOF
 
-# 计算区端点 stub：验「sink 真的投到了 `/internal/flows`」—— 只验 file sink 的话，
-# endpoint 覆盖写错会被 `drop_when_error` 吞掉，看不出来。
-cat > "${TMP}/stub.py" <<'PY'
-import http.server, json, os, sys
-
-outdir = sys.argv[1]
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        length = int(self.headers.get("content-length") or 0)
-        body = self.rfile.read(length).decode("utf-8", "replace")
-        with open(os.path.join(outdir, "requests.jsonl"), "a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"path": self.path, "body": body}) + "\n")
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"accepted":1,"partitions":0}')
-
-    def log_message(self, *_args):
-        pass
-
-server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-with open(os.path.join(outdir, "port"), "w", encoding="utf-8") as handle:
-    handle.write(str(server.server_address[1]))
-server.serve_forever()
-PY
-
-python3 "${TMP}/stub.py" "${TMP}" &
-STUB_PID=$!
-trap 'kill "${STUB_PID}" 2>/dev/null; rm -rf "${TMP}"' EXIT INT TERM
-for _ in $(seq 1 50); do
-  [[ -s "${TMP}/port" ]] && break
-  sleep 0.1
-done
-[[ -s "${TMP}/port" ]] || { echo "[FAIL] stub 没起来" >&2; exit 1; }
-PORT="$(cat "${TMP}/port" || true)"
-
-FIELD_EVIDENCE_URL="http://127.0.0.1:${PORT}" \
-  "${WPARSE}" batch --work-root "${WORK}" >"${TMP}/wparse.log" 2>&1
+"${WPARSE}" batch --work-root "${WORK}" >/dev/null
 
 OUT="${WORK}/data/out_dat/agent-flows.jsonl"
 [[ -f "${OUT}" ]] || {
@@ -183,57 +143,6 @@ has 'direction\":\"out' "${line}" "正文里的 direction 保留"
 # （与 DSNAP / IVSREP 同一条机制）。未绑定时是占位 `unknown`，证据服务会按
 # "未登记客户"拒 —— 所以这个字段必须在。
 has '"cust_id":"1000000000000000001"' "${line}" "记录带 cust_id（客户归属，来自租户绑定）"
-
-# 计算区投递：路径、形状、
-# `cust_id` 都对了才算真的能存进 field。
-REQUESTS="${TMP}/requests.jsonl"
-[[ -f "${REQUESTS}" ]] || {
-  echo "  [FAIL] 计算区端点一个请求都没收到（sink 没投？endpoint 覆盖失效？）"
-  tail -20 "${TMP}/wparse.log"
-  fail=1
-}
-if [[ -f "${REQUESTS}" ]]; then
-  python3 - "${REQUESTS}" <<'PY'
-import json
-import sys
-
-rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-failures = []
-
-
-def check(ok, message):
-    print(("  [OK]   " if ok else "  [FAIL] ") + message)
-    if not ok:
-        failures.append(message)
-
-
-paths = [row["path"] for row in rows]
-check(paths and all(p == "/internal/flows" for p in paths), f"全部投到 /internal/flows（实际 {paths}）")
-
-try:
-    parsed = json.loads(rows[0]["body"]) if rows else None
-except json.JSONDecodeError:
-    parsed = None
-check(isinstance(parsed, list) and len(parsed) == 1, "报文是 JSON 数组（fmt=json）")
-if isinstance(parsed, list) and parsed:
-    item = parsed[0]
-    check(item.get("cust_id") == "1000000000000000001", "cust_id = 租户绑定值")
-    body = item.get("body")
-    check(isinstance(body, str), "body 是字符串（数据面不拆字段）")
-    check(
-        isinstance(body, str) and '"record_schema":"wist.host_flow/v1"' in body,
-        "body 里是 wist.host_flow/v1 正文",
-    )
-
-if failures:
-    print()
-    print("收到的请求：")
-    for row in rows:
-        print(row["path"], row["body"][:300])
-    sys.exit(1)
-PY
-  [[ $? -ne 0 ]] && fail=1
-fi
 
 if [[ "${fail}" -ne 0 ]]; then
   echo

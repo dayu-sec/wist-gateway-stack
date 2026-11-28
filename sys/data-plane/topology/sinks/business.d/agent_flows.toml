@@ -31,23 +31,3 @@ file = "agent-flows.jsonl"
 max_size = "100MB"
 max_rolls = 1
 roll_compress = "gzip"
-
-# 计算区证据服务：流记录直投 `/internal/flows`（`flow_window` 天分区表）。
-#
-# 客户归属不在这里决定：OML 把 `cust_id = read(tenant_id)` 带上，`tenant_id` 是网关
-# 按租户绑定时写进工作根 `.env` 的（与 DSNAP / IVSREP 同一条机制）。
-#
-# `drop_when_error = true`：流记录**不重发**（窗口事实，agentd 已经发完），
-# rescue 堆起来没有意义；同分组的 file sink 就是底账，丢的批次可以从
-# `agent-flows.jsonl` 补投。
-[[sink_group.sinks]]
-name = "field-flows"
-# 复用证据连接器（同一服务）：只覆盖 path 与批量 —— `wist-field-evidence` 的
-# `allow_override` 已包含 `endpoint` / `batch_size`。
-connect = "wist-field-evidence"
-drop_when_error = true
-tags = ["sink:field"]
-
-[sink_group.sinks.params]
-endpoint = "${FIELD_EVIDENCE_URL:http://host.docker.internal:18800}/internal/flows"
-batch_size = 64

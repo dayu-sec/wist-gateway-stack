@@ -39,11 +39,6 @@ compression = "none"
 [connectors.params.headers]
 Content-Type = "application/json"
 
-# 主机流记录**复用** `wist-field-evidence`（同一服务、同一套明文/租户纪律），
-# 只在 sink 里覆盖 `endpoint` 到 `/internal/flows`、把 `batch_size` 调大
-# （见 `topology/sinks/business.d/agent_flows.toml`）。不另开连接器：
-# 它不是一个独立的投递类型 —— 换的只是 path 与批量。
-
 # 资产拓扑：POST /internal/atlas，两字段 `{cust_id, content}`。
 [[connectors]]
 allow_override = ["endpoint", "fmt", "batch_size", "timeout_secs", "headers"]
